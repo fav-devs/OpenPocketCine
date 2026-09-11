@@ -6,13 +6,20 @@
 //! the clock, and the typing.
 
 mod command;
+mod depacketizer;
 mod packed;
+mod sequence;
+mod session;
+pub mod softap;
 mod transport;
 
 use std::fmt;
 
 pub use command::Command;
+pub use depacketizer::Depacketizer;
 pub use packed::DumlFrame;
+pub use sequence::{Outgoing, Phase, Sequencer, ACK_INTERVAL, HANDSHAKE_DEADLINE, HANDSHAKE_RETRY};
+pub use session::{CameraSession, SessionError, SessionEvent};
 pub use transport::{
     encode_frame, handshake, is_handshake, routing_header, scan_frames, subscribe, tap_focus,
     transport_header, transport_seq, AckPump, AckWindows, PktType,

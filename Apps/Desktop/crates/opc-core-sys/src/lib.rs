@@ -438,6 +438,26 @@ extern "C" {
         out: *mut u8,
         capacity: usize,
     ) -> i64;
+
+    pub fn opc_depacketizer_create() -> *mut c_void;
+    pub fn opc_depacketizer_destroy(handle: *mut c_void);
+    pub fn opc_depacketizer_feed(
+        handle: *mut c_void,
+        payload: *const u8,
+        count: usize,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+    pub fn opc_depacketizer_take(handle: *mut c_void, out: *mut u8, capacity: usize) -> i64;
+    pub fn opc_depacketizer_reset(handle: *mut c_void);
+    pub fn opc_depacketizer_dropped(handle: *mut c_void) -> i32;
+
+    pub fn opc_softap_remote_port() -> u16;
+    pub fn opc_softap_host(out: *mut u8, capacity: usize) -> i64;
+    pub fn opc_softap_may_bind_local_port(port: u16) -> i32;
+    pub fn opc_softap_is_associated(ipv4: *const c_char) -> i32;
+    pub fn opc_softap_is_path_ready(addresses: *const c_char) -> i32;
+    pub fn opc_softap_is_camera_ssid(ssid: *const c_char) -> i32;
 }
 
 /// Reads a NUL-terminated string out of one of the fixed character fields.

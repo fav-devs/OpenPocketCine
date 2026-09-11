@@ -70,6 +70,38 @@ Every UDP write — acknowledgements, camera SETs, gimbal stick, parameter GETs 
 serialise on one queue. On iOS, interleaving a main-thread send with the 40 Hz pump
 starved the window acknowledgement. See [`live-session.md`](live-session.md).
 
+## The session
+
+`CameraSession` in `opc-camera` owns the socket and the clock. Everything it sends is
+decided elsewhere:
+
+- **`Sequencer`** says *what is due*. It is free of sockets and of the core, so the two
+  rules easiest to get wrong are testable against a fake clock: the pump fires at 40 Hz
+  and never bursts a backlog after a stall, and live view is enabled **exactly once** per
+  session. Repeats belong to the watchdog, which is not built yet.
+- **`AckPump`** says what an acknowledgement carries.
+- **The core** says what every byte is.
+
+Sequence bookkeeping is the one thing the session decides for itself, transcribed from
+the iOS driver: the DUML frame sequence advances by one per command, the transport
+sequence by eight, and the command counter by one. A command datagram is
+`transportHeader(0x05) + routingHeader + Duml.encode(frame)`.
+
+One detail worth writing down because it is easy to get backwards: the reassembler takes
+the **whole datagram**, not the payload. It reads the packet type at byte 6 and the
+fragment index at bytes 16 to 18, and the encoded body only starts at byte 20. Handing it
+`datagram[8..]` produces no pictures at all, silently.
+
+### The fake camera
+
+`crates/opc-camera/tests/session.rs` runs the datalink against a camera that is not
+there: a UDP peer on loopback that answers the handshake, streams video packets, replies
+to commands, and records everything it was sent. It is what makes the black-picture
+failure something a test can catch — the session's cadence, its enable-once, and its
+command delivery are all asserted from the camera's side of the wire.
+
+It also asserts the datalink never binds the camera's own port.
+
 ## Bluetooth, per platform
 
 The shell's job, and the least portable piece in the port.
@@ -117,21 +149,29 @@ What the operator asked for, and where each piece stands.
 | Frame rate and resolution | `setVideoFormat` | **Done** | Not wired |
 | ISO, shutter, EV, white balance | `setIsoIndex`, `setShutter`, `setEv`, `setWhiteBalance` | **Done** | Not wired |
 | Bluetooth pairing | `getWifiSsid`, `getWifiPassword` | **Done** | Not started |
-| The UDP session itself | `DumlTransport`, `AckWindows` | **Done** | Not started |
+| The UDP session itself | `DumlTransport`, `AckWindows`, `HevcDepacketizer` | **Done** | **Done** |
 
-The commands exist; the session that carries them does not yet.
+The session runs and carries commands. What is missing before an operator sees anything
+is Bluetooth pairing and the Wi-Fi join in front of it, and the UI behind it.
 
 ## What is not covered yet
 
-- **The SET mailbox.** `CameraSetMailbox` in the core owns retransmit and settle timing —
-  a missed acknowledgement must not revert what the operator sees. Until it is exposed,
-  desktop SETs are fire-and-forget and a dropped one is a control that silently did not
-  take.
+- **Bluetooth and the Wi-Fi join.** The session assumes it is already on the camera's
+  network. Until these land, the operator joins the Wi-Fi by hand and the app cannot
+  read the password itself.
+- **The watchdog.** `FeedWatchdog` in the core owns stall detection and the recover
+  ladder. Without it a session that freezes stays frozen: the sequencer enables live view
+  once and, by design, never again.
+- **The SET mailbox.** `CameraSetMailbox` owns retransmit and settle timing — a missed
+  acknowledgement must not revert what the operator sees. Until it is exposed, desktop
+  SETs are fire-and-forget and a dropped one is a control that silently did not take.
 - **Status decode.** `CameraStatus` turns telemetry into battery, format, ISO and REC
   state. The HUD needs it.
-- **The DJI frame marker.** The camera's own stream carries a private per-frame NAL that
-  `Hevc.stripDjiMarker` removes. The relay's re-encode is already clean, so the watcher
-  never needed it; a direct session does.
+- **Reconnect.** `SessionRecovery` bounds the retry after a drop.
+
+The DJI per-frame marker is already handled: `Hevc.stripDjiMarker` runs inside the
+reassembler, so a direct session gets clean access units without the shell doing
+anything.
 
 ## Verification
 
