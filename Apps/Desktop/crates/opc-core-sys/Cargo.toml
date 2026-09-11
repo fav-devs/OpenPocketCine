@@ -1,0 +1,11 @@
+[package]
+name = "opc-core-sys"
+description = "Raw FFI declarations for the OpenPocketCine Swift desktop facade."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+links = "OpenPocketCineDesktop"
+
+[lints]
+workspace = true

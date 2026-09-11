@@ -245,6 +245,29 @@ android-play-dispatch track="alpha" status="completed":
 relay-test:
     ./scripts/test-watcher-relay.sh
 
+# ── Desktop watcher (Windows first, macOS and Linux alongside) ──────────────
+# Build the portable Swift core as a shared library for the Rust host.
+desktop-core:
+    ./scripts/desktop-build-swift-core.sh
+
+# Build the desktop watcher against the staged core.
+desktop-build: desktop-core
+    cd Apps/Desktop && OPC_CORE_LIB_DIR="$(../../scripts/desktop-build-swift-core.sh)" cargo build --workspace
+
+# Rust tests for the desktop watcher, including the round trip through the Swift core.
+desktop-test: desktop-core
+    cd Apps/Desktop && OPC_CORE_LIB_DIR="$(../../scripts/desktop-build-swift-core.sh)" cargo test --workspace
+
+# Format, lint, and test the desktop shell.
+desktop-check: desktop-core
+    cd Apps/Desktop && cargo fmt --all -- --check
+    cd Apps/Desktop && OPC_CORE_LIB_DIR="$(../../scripts/desktop-build-swift-core.sh)" cargo clippy --workspace --all-targets -- -D warnings
+    cd Apps/Desktop && OPC_CORE_LIB_DIR="$(../../scripts/desktop-build-swift-core.sh)" cargo test --workspace
+
+# Format desktop Rust sources.
+desktop-format:
+    cd Apps/Desktop && cargo fmt --all
+
 # Fast programmed-motion regression loop.
 gimbal-test:
     swift test --filter 'Gimbal(Repeatability|SafeRoute)Tests'

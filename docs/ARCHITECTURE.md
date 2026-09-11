@@ -9,6 +9,8 @@ OpenPocketCine is a shared Swift business/protocol core with native platform she
 | **Watch companion** | `ios/OpenPocketCineWatch/` | watchOS SwiftUI remote. WatchConnectivity only — never SoftAP. Embedded in the iPhone app. |
 | **Android app** | `Apps/Android/app/` | Compose **shell**. Live picture and HUD I/O: [`ANDROID.md`](../ANDROID.md). Operator-visible behavior: [parity](PARITY.md). Teardown: [live-session](live-session.md). |
 | **Android facade** | `Sources/OpenPocketCineAndroidFacade/` | Swift session and JNI boundary |
+| **Desktop shell** | `Apps/Desktop/` | Rust host for Windows, macOS, and Linux. Watcher only today: Bonjour, TCP, and picture ingest. [`DESKTOP.md`](DESKTOP.md). |
+| **Desktop facade** | `Sources/OpenPocketCineDesktopFacade/` | `@_cdecl` C ABI over the relay contract; records in `Sources/COpcDesktop/` |
 | **Tests** | `Tests/OpenPocketViewCoreTests/` | Swift Testing suite for the portable core |
 
 HUD glyphs that both shells share are vendored Lucide SVGs (`OpcIcon` on iOS and Android).
@@ -62,6 +64,10 @@ SDK). Both apps must call the same state machines:
 
 Platform shells own sockets, BLE, SoftAP join, permissions, lifecycle, rendering,
 storage, and UI. Do not import SwiftUI, UIKit, Android, or Compose into the core.
+
+The desktop shell reaches the same policy through a C ABI rather than JNI. It is a
+relay watcher, so it implements only the `WatcherRelay*` rows above; the camera-facing
+rows stay unimplemented there until milestone 3 ([`DESKTOP.md`](DESKTOP.md)).
 
 See [`live-session.md`](live-session.md), [`feed-watchdog.md`](feed-watchdog.md),
 [`connection-reliability.md`](connection-reliability.md),

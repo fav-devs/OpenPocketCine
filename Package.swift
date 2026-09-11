@@ -17,6 +17,11 @@ let package = Package(
         // compile, so iOS/macOS behavior is unchanged.
         .library(
             name: "OpenPocketCineAndroid", type: .dynamic, targets: ["OpenPocketCineAndroidFacade"]),
+        // C-ABI facade consumed by the desktop shell (`Apps/Desktop/`, `just desktop-core`).
+        // Pure Foundation and `@_cdecl`, so it builds on every platform the toolchain
+        // supports; the Rust host links this instead of reimplementing the relay.
+        .library(
+            name: "OpenPocketCineDesktop", type: .dynamic, targets: ["OpenPocketCineDesktopFacade"]),
     ],
     targets: [
         .target(name: "OpenPocketViewCore"),
@@ -34,6 +39,17 @@ let package = Package(
         .testTarget(
             name: "OpenPocketCineAndroidFacadeTests",
             dependencies: ["OpenPocketCineAndroidFacade", "OpenPocketViewCore"]
+        ),
+        // Fixed-layout C records shared with the Rust host. Types only — the `@_cdecl`
+        // prototypes live on the Rust side so Swift never redeclares its own exports.
+        .target(name: "COpcDesktop"),
+        .target(
+            name: "OpenPocketCineDesktopFacade",
+            dependencies: ["OpenPocketViewCore", "COpcDesktop"]
+        ),
+        .testTarget(
+            name: "OpenPocketCineDesktopFacadeTests",
+            dependencies: ["OpenPocketCineDesktopFacade", "OpenPocketViewCore", "COpcDesktop"]
         ),
     ]
 )
