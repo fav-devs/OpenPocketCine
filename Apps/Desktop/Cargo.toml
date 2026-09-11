@@ -2,7 +2,9 @@
 resolver = "2"
 members = [
     "crates/opc-core-sys",
+    "crates/opc-decode",
     "crates/opc-relay",
+    "crates/opc-render",
     "crates/opc-watcher",
 ]
 

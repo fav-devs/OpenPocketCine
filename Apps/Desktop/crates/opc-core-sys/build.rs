@@ -14,11 +14,11 @@ fn candidates() -> Vec<PathBuf> {
     if let Ok(dir) = std::env::var("OPC_CORE_LIB_DIR") {
         out.push(PathBuf::from(dir));
     }
-    // Apps/Desktop/crates/opc-core-sys -> repository root.
+    // Apps/Desktop/crates/opc-core-sys -> crates -> Apps/Desktop -> Apps -> root.
     if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
         let root = Path::new(&manifest)
             .ancestors()
-            .nth(3)
+            .nth(4)
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
         out.push(root.join(".build/release"));

@@ -7,12 +7,15 @@
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
+use opc_decode::{annexb, Codec, Decoder};
 use opc_relay::discovery::Browser;
 use opc_relay::ffi::{self, ControlToken, FrameMeta, Hello, ProtocolInfo, State};
 use opc_relay::session::{JoinTarget, Status, WatcherObserver, WatcherOptions, WatcherSession};
+use opc_render::{built_in_names, write_png, FeedRenderer, GradeOptions, Lut};
 
 const USAGE: &str = "\
 OpenPocketCine desktop watcher
@@ -20,15 +23,23 @@ OpenPocketCine desktop watcher
 USAGE:
     opc-watcher list [--seconds N]
     opc-watcher join <host> [--passcode P] [--as NAME] [--dump PATH] [--seconds N]
+                     [--still PATH] [--look NAME | --lut FILE]
+    opc-watcher decode <file.h265> [--out DIR] [--frames N] [--display WxH]
+                       [--lut FILE | --look NAME] [--mirror] [--upscale]
     opc-watcher version
 
-Join the camera's Wi-Fi first. Hosts are only advertised on that network.";
+Join the camera's Wi-Fi first. Hosts are only advertised on that network.
+`--still` decodes the live feed and writes the first picture that arrives as a PNG,
+which is how the whole path gets confirmed before there is a window to draw in.
+`decode` replays a `--dump` file through the same decoder and feed pipeline — the way
+to check a capture without a camera in the room.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("list") => list(&args[1..]),
         Some("join") => join(&args[1..]),
+        Some("decode") => decode(&args[1..]),
         Some("version") => version(),
         Some("--help") | Some("-h") | None => {
             println!("{USAGE}");
@@ -100,6 +111,129 @@ fn version() -> Result<(), String> {
     let core = ffi::core_version().map_err(|error| error.to_string())?;
     println!("{core}");
     println!("relay protocol v{} on {}", info.version, info.service_type);
+    match FeedRenderer::new() {
+        Ok(renderer) => println!("feed pipeline on {}", renderer.device_name()),
+        Err(error) => println!("feed pipeline unavailable: {error}"),
+    }
+    println!("built-in looks: {}", built_in_names().join(", "));
+    Ok(())
+}
+
+/// Parses `WxH`.
+fn raster(value: &str) -> Result<(u32, u32), String> {
+    let (width, height) = value
+        .split_once(['x', 'X'])
+        .ok_or_else(|| format!("`--display` wants WxH, got `{value}`"))?;
+    let parsed = |text: &str| {
+        text.trim()
+            .parse::<u32>()
+            .map_err(|_| format!("`--display` wants WxH, got `{value}`"))
+    };
+    Ok((parsed(width)?, parsed(height)?))
+}
+
+fn chosen_lut(parsed: &Args) -> Result<Option<Lut>, String> {
+    if let Some(path) = parsed.flag("lut") {
+        let text = std::fs::read_to_string(path)
+            .map_err(|error| format!("could not read `{path}`: {error}"))?;
+        return Lut::parse(&text)
+            .map(Some)
+            .map_err(|error| error.to_string());
+    }
+    if let Some(name) = parsed.flag("look") {
+        return Lut::built_in(name, 33)
+            .map(Some)
+            .map_err(|error| format!("{error} Known looks: {}", built_in_names().join(", ")));
+    }
+    Ok(None)
+}
+
+fn decode(args: &[String]) -> Result<(), String> {
+    let parsed = Args::parse(args)?;
+    let source = parsed
+        .positional
+        .first()
+        .ok_or_else(|| format!("`decode` needs a file\n\n{USAGE}"))?;
+    let stream =
+        std::fs::read(source).map_err(|error| format!("could not read `{source}`: {error}"))?;
+    let units = annexb::access_units(&stream);
+    if units.is_empty() {
+        return Err(format!("`{source}` holds no access units"));
+    }
+    println!("{} access units in {source}", units.len());
+
+    let limit = match parsed.flag("frames") {
+        Some(value) => value
+            .parse::<usize>()
+            .map_err(|_| format!("`--frames` wants a whole number, got `{value}`"))?,
+        None => usize::MAX,
+    };
+    let out = parsed.flag("out").map(PathBuf::from);
+    if let Some(directory) = out.as_ref() {
+        std::fs::create_dir_all(directory)
+            .map_err(|error| format!("could not make `{}`: {error}", directory.display()))?;
+    }
+
+    let mut decoder = Decoder::new(Codec::Hevc).map_err(|error| error.to_string())?;
+    let mut pipeline = match out.as_ref() {
+        Some(_) => Some(
+            FeedRenderer::new()
+                .map_err(|error| format!("{error}. Writing stills needs a Vulkan driver."))?,
+        ),
+        None => None,
+    };
+    if let Some(renderer) = pipeline.as_mut() {
+        println!("drawing on {}", renderer.device_name());
+        renderer
+            .set_lut(chosen_lut(&parsed)?.as_ref())
+            .map_err(|error| error.to_string())?;
+    }
+
+    let options = GradeOptions {
+        mirror: parsed.flag("mirror").is_some_and(|value| value != "false"),
+        upscale: parsed.flag("upscale").is_some_and(|value| value != "false"),
+        ..GradeOptions::default()
+    };
+    let display = match parsed.flag("display") {
+        Some(value) => Some(raster(value)?),
+        None => None,
+    };
+
+    let started = Instant::now();
+    let mut decoded = 0usize;
+    let mut keyframes = 0usize;
+    for unit in units {
+        if decoded >= limit {
+            break;
+        }
+        decoder.send(unit).map_err(|error| error.to_string())?;
+        while let Some(picture) = decoder.receive().map_err(|error| error.to_string())? {
+            if picture.is_keyframe {
+                keyframes += 1;
+            }
+            decoded += 1;
+            if let (Some(renderer), Some(directory)) = (pipeline.as_mut(), out.as_ref()) {
+                let raster = display.unwrap_or((picture.width, picture.height));
+                let image = renderer
+                    .render(&picture, raster, options)
+                    .map_err(|error| error.to_string())?;
+                let path = directory.join(format!("frame-{decoded:05}.png"));
+                write_png(&path, &image)?;
+            }
+            if decoded >= limit {
+                break;
+            }
+        }
+    }
+
+    let elapsed = started.elapsed().as_secs_f64().max(0.001);
+    println!(
+        "{decoded} pictures ({keyframes} keyframes) in {elapsed:.2}s — {:.1} fps",
+        decoded as f64 / elapsed
+    );
+    if let Some(directory) = out.as_ref() {
+        println!("stills in {}", directory.display());
+    }
     Ok(())
 }
 
@@ -172,6 +306,11 @@ fn join(args: &[String]) -> Result<(), String> {
         None => None,
     };
 
+    let still = match parsed.flag("still") {
+        Some(path) => Some(LiveStill::new(PathBuf::from(path), chosen_lut(&parsed)?)?),
+        None => None,
+    };
+
     let options = WatcherOptions {
         device_name: parsed.flag("as").unwrap_or("Desktop watcher").to_string(),
         watcher_id: format!("desktop-{}", std::process::id()),
@@ -185,7 +324,7 @@ fn join(args: &[String]) -> Result<(), String> {
         port: host.port,
     };
     let mut session = WatcherSession::new(info, target, options);
-    let mut reporter = Reporter::new(dump, window);
+    let mut reporter = Reporter::new(dump, window, still);
     session
         .run(&mut reporter)
         .map_err(|error| format!("the feed ended: {error}"))?;
@@ -200,9 +339,69 @@ fn join(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Decodes the live feed until one picture has been written out.
+///
+/// One still, not a stream of them: the point is to confirm the path end to end, and a
+/// watcher that wrote a PNG per frame would spend its time on disk rather than on the
+/// feed.
+struct LiveStill {
+    path: PathBuf,
+    decoder: Decoder,
+    renderer: FeedRenderer,
+    done: bool,
+}
+
+impl LiveStill {
+    fn new(path: PathBuf, lut: Option<Lut>) -> Result<Self, String> {
+        let decoder = Decoder::new(Codec::Hevc).map_err(|error| error.to_string())?;
+        let mut renderer = FeedRenderer::new()
+            .map_err(|error| format!("{error}. Writing a still needs a Vulkan driver."))?;
+        renderer
+            .set_lut(lut.as_ref())
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
+            path,
+            decoder,
+            renderer,
+            done: false,
+        })
+    }
+
+    /// Returns a message once a picture has been written.
+    fn offer(&mut self, access_unit: &[u8]) -> Option<String> {
+        if self.done {
+            return None;
+        }
+        if self.decoder.send(access_unit).is_err() {
+            return None;
+        }
+        while let Ok(Some(picture)) = self.decoder.receive() {
+            let raster = (picture.width, picture.height);
+            let Ok(image) = self
+                .renderer
+                .render(&picture, raster, GradeOptions::default())
+            else {
+                continue;
+            };
+            self.done = true;
+            return Some(match write_png(&self.path, &image) {
+                Ok(()) => format!(
+                    "Wrote {}x{} still to {}",
+                    image.width,
+                    image.height,
+                    self.path.display()
+                ),
+                Err(error) => format!("Could not write the still: {error}"),
+            });
+        }
+        None
+    }
+}
+
 /// Prints what arrives and, when asked, writes the elementary stream to disk.
 struct Reporter {
     dump: Option<BufWriter<File>>,
+    still: Option<LiveStill>,
     stop_after: Duration,
     started: Instant,
     frames: u64,
@@ -222,10 +421,11 @@ impl std::fmt::Debug for Reporter {
 }
 
 impl Reporter {
-    fn new(dump: Option<BufWriter<File>>, stop_after: Duration) -> Self {
+    fn new(dump: Option<BufWriter<File>>, stop_after: Duration, still: Option<LiveStill>) -> Self {
         let now = Instant::now();
         Self {
             dump,
+            still,
             stop_after,
             started: now,
             frames: 0,
@@ -314,6 +514,13 @@ impl WatcherObserver for Reporter {
             // Access units already carry Annex-B start codes, and a keyframe carries its
             // parameter sets inline, so this is a playable elementary stream.
             let _ = dump.write_all(access_unit);
+        }
+        if let Some(message) = self
+            .still
+            .as_mut()
+            .and_then(|still| still.offer(access_unit))
+        {
+            println!("\n{message}");
         }
         let elapsed = self.window_started.elapsed();
         if elapsed >= Duration::from_secs(1) {

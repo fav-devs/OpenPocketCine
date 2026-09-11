@@ -290,6 +290,20 @@ extern "C" {
         encoded_at: f64,
         received_at: f64,
     ) -> i32;
+
+    pub fn opc_lut_parse(
+        text: *const u8,
+        count: usize,
+        error: *mut u8,
+        error_capacity: usize,
+    ) -> *mut c_void;
+    pub fn opc_lut_builtin(name: *const c_char, size: i32) -> *mut c_void;
+    pub fn opc_lut_destroy(handle: *mut c_void);
+    pub fn opc_lut_size(handle: *mut c_void) -> i32;
+    pub fn opc_lut_rgba(handle: *mut c_void, out: *mut f32, capacity: usize) -> i64;
+    pub fn opc_lut_resampled(handle: *mut c_void, target: i32) -> *mut c_void;
+    pub fn opc_lut_map(handle: *mut c_void, red: f32, green: f32, blue: f32, out: *mut f32) -> i32;
+    pub fn opc_lut_builtin_names(out: *mut u8, capacity: usize) -> i64;
 }
 
 /// Reads a NUL-terminated string out of one of the fixed character fields.
