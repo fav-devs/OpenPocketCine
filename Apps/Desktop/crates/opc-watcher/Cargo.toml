@@ -10,6 +10,8 @@ repository.workspace = true
 opc-decode = { path = "../opc-decode" }
 opc-relay = { path = "../opc-relay" }
 opc-render = { path = "../opc-render" }
+raw-window-handle = "0.6"
+winit = "0.30"
 
 [lints]
 workspace = true

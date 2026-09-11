@@ -116,3 +116,29 @@ fn an_empty_access_unit_is_ignored_rather_than_an_error() {
 fn an_avc_decoder_is_also_available_for_nano() {
     assert!(Decoder::new(Codec::H264).is_ok());
 }
+
+#[test]
+fn an_owned_copy_packs_rows_tight_and_reads_back_the_same() {
+    use opc_decode::OwnedPicture;
+
+    let mut decoder = Decoder::new(Codec::Hevc).expect("an HEVC decoder");
+    let units = annexb::access_units(STREAM);
+    decoder.send(units[0]).expect("the decoder should accept an access unit");
+    let picture = decoder
+        .receive()
+        .expect("decoding should not fail")
+        .expect("the first access unit is a keyframe");
+
+    let expected_row: Vec<u8> = picture.luma[..picture.width as usize].to_vec();
+    let owned = OwnedPicture::copy_from(&picture);
+    assert_eq!((owned.width, owned.height), (320, 240));
+    assert!(owned.is_keyframe);
+
+    let borrowed = owned.picture();
+    // Padding is gone, so the stride is exactly the width.
+    assert_eq!(borrowed.luma_stride, 320);
+    assert_eq!(borrowed.chroma_stride, 160);
+    assert_eq!(borrowed.luma.len(), 320 * 240);
+    assert_eq!(borrowed.chroma_blue.len(), 160 * 120);
+    assert_eq!(&borrowed.luma[..320], expected_row.as_slice());
+}

@@ -1,21 +1,26 @@
-//! The three-pass feed pipeline.
+//! The feed pipeline.
 //!
 //! 1. `ycbcr.frag` converts the decoder's planes to RGB **at the source raster**.
-//! 2. `feed.frag` grades that RGB through the colour cube, still at the source raster.
-//! 3. `blit.frag` stretches the graded picture to the display raster.
+//! 2. `peaking_blur.frag` and `peaking_mask.frag` build the edge mask, when peaking is on.
+//! 3. `feed.frag` grades through the colour cube and paints zebra and peaking.
+//! 4. `blit.frag` stretches the result to the display raster, or to a swapchain image.
 //!
 //! The order is the phones' order and is not an accident: cubing after the upsample
-//! blotched D-Log2 on Android. Passes 2 and 3 are the Android shell's own shaders.
+//! blotched D-Log2 on Android. Every pass but the first is the Android shell's own shader.
 
 use std::io::Cursor;
 
 use ash::{vk, Device};
 use opc_decode::Picture;
+use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 
 use crate::device::Gpu;
 use crate::error::{Context, RenderError};
 use crate::lut::Lut;
+use crate::present::{Presented, Presenter, Surface, SurfaceSource};
 use crate::resources::{transition, DeviceImage, HostBuffer};
+
+pub use crate::options::{GradeOptions, Peaking, PeakingSense, Zebra};
 
 const COLOR_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
 const PLANE_FORMAT: vk::Format = vk::Format::R8_UNORM;
@@ -23,6 +28,13 @@ const LUT_FORMAT: vk::Format = vk::Format::R32G32B32A32_SFLOAT;
 /// `feed.frag`'s push-constant block: 32 floats.
 const FEED_CONSTANTS: usize = 32;
 const MAX_RASTER: u32 = 8192;
+
+const PASS_YCBCR: usize = 0;
+const PASS_FEED: usize = 1;
+const PASS_BLIT: usize = 2;
+const PASS_PEAK_BLUR: usize = 3;
+const PASS_PEAK_MASK: usize = 4;
+const PASS_COUNT: usize = 5;
 
 /// A rendered picture, 8-bit RGBA, tightly packed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,19 +60,6 @@ impl Rgba {
     }
 }
 
-/// What the operator has turned on for this frame.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct GradeOptions {
-    /// Horizontal flip, the MIRROR assist.
-    pub mirror: bool,
-    /// Bicubic reconstruction when the display raster is larger than the source.
-    pub upscale: bool,
-    /// Show the cube on half the picture only.
-    pub split: bool,
-    /// Split down the middle rather than across it.
-    pub split_vertical: bool,
-}
-
 struct Targets {
     source_width: u32,
     source_height: u32,
@@ -71,7 +70,10 @@ struct Targets {
     rgb: DeviceImage,
     graded: DeviceImage,
     output: DeviceImage,
-    framebuffers: [vk::Framebuffer; 3],
+    peaking_blur: DeviceImage,
+    peaking_mask: DeviceImage,
+    /// Indexed by the `PASS_*` constants; `PASS_BLIT`'s is the offscreen target.
+    framebuffers: [vk::Framebuffer; PASS_COUNT],
     readback: HostBuffer,
 }
 
@@ -87,9 +89,15 @@ impl Targets {
             for staging in &self.plane_staging {
                 staging.destroy(device);
             }
-            self.rgb.destroy(device);
-            self.graded.destroy(device);
-            self.output.destroy(device);
+            for image in [
+                &self.rgb,
+                &self.graded,
+                &self.output,
+                &self.peaking_blur,
+                &self.peaking_mask,
+            ] {
+                image.destroy(device);
+            }
             self.readback.destroy(device);
         }
     }
@@ -97,23 +105,55 @@ impl Targets {
 
 struct Pipelines {
     render_pass: vk::RenderPass,
-    sampler: vk::Sampler,
-    set_layouts: [vk::DescriptorSetLayout; 3],
-    layouts: [vk::PipelineLayout; 3],
-    pipelines: [vk::Pipeline; 3],
+    linear: vk::Sampler,
+    /// Packed 16-bit blur values and the edge mask must not be interpolated.
+    nearest: vk::Sampler,
+    set_layouts: [vk::DescriptorSetLayout; PASS_COUNT],
+    layouts: [vk::PipelineLayout; PASS_COUNT],
+    pipelines: [vk::Pipeline; PASS_COUNT],
     pool: vk::DescriptorPool,
-    sets: [vk::DescriptorSet; 3],
+    sets: [vk::DescriptorSet; PASS_COUNT],
+    /// Kept alive so a swapchain can build its own blit pipeline for its own format.
+    vertex_module: vk::ShaderModule,
+    blit_module: vk::ShaderModule,
 }
 
-/// Draws decoded pictures. Headless: the result is an image, not a window.
+impl Pipelines {
+    unsafe fn destroy(&self, device: &Device) {
+        unsafe {
+            for pipeline in self.pipelines {
+                device.destroy_pipeline(pipeline, None);
+            }
+            for layout in self.layouts {
+                device.destroy_pipeline_layout(layout, None);
+            }
+            for layout in self.set_layouts {
+                device.destroy_descriptor_set_layout(layout, None);
+            }
+            device.destroy_descriptor_pool(self.pool, None);
+            device.destroy_sampler(self.linear, None);
+            device.destroy_sampler(self.nearest, None);
+            device.destroy_render_pass(self.render_pass, None);
+            device.destroy_shader_module(self.vertex_module, None);
+            device.destroy_shader_module(self.blit_module, None);
+        }
+    }
+}
+
+/// Draws decoded pictures, offscreen or into a window.
 pub struct FeedRenderer {
     gpu: Gpu,
     pipelines: Pipelines,
+    presenter: Option<Presenter>,
     targets: Option<Targets>,
     lut: Option<DeviceImage>,
     lut_size: u32,
     dummy_2d: DeviceImage,
     dummy_3d: DeviceImage,
+    /// Descriptor writes need an idle device, so they happen only when something the
+    /// sets point at actually changed — not once a frame.
+    descriptors_dirty: bool,
+    peaking_bound: bool,
 }
 
 impl std::fmt::Debug for FeedRenderer {
@@ -121,17 +161,61 @@ impl std::fmt::Debug for FeedRenderer {
         f.debug_struct("FeedRenderer")
             .field("device", &self.gpu.device_name)
             .field("lut_size", &self.lut_size)
+            .field("presenting", &self.presenter.is_some())
             .finish_non_exhaustive()
     }
 }
 
 impl FeedRenderer {
+    /// Renders into an image. No surface, no swapchain.
     pub fn new() -> Result<Self, RenderError> {
-        let gpu = Gpu::headless()?;
+        Self::build(Gpu::offscreen()?, None, 0, 0)
+    }
+
+    /// A real swapchain with no display behind it, for checking the present path.
+    pub fn headless_window(width: u32, height: u32) -> Result<Self, RenderError> {
+        let instance = [
+            ash::khr::surface::NAME.as_ptr(),
+            ash::ext::headless_surface::NAME.as_ptr(),
+        ];
+        let device = [ash::khr::swapchain::NAME.as_ptr()];
+        let gpu = Gpu::new(&instance, &device)?;
+        Self::build(gpu, Some(SurfaceSource::Headless), width, height)
+    }
+
+    /// Draws into a window.
+    ///
+    /// # Safety
+    /// Both handles must stay valid for as long as this renderer lives.
+    pub unsafe fn for_window(
+        display: RawDisplayHandle,
+        window: RawWindowHandle,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, RenderError> {
+        let required = ash_window::enumerate_required_extensions(display)
+            .context("vkEnumerateInstanceExtensionProperties")?
+            .to_vec();
+        let device = [ash::khr::swapchain::NAME.as_ptr()];
+        let gpu = Gpu::new(&required, &device)?;
+        Self::build(
+            gpu,
+            Some(SurfaceSource::Window { display, window }),
+            width,
+            height,
+        )
+    }
+
+    fn build(
+        gpu: Gpu,
+        source: Option<SurfaceSource>,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, RenderError> {
         let pipelines = build_pipelines(&gpu)?;
         // `feed.frag` samples all five bindings unconditionally, so the ones an operator
         // has turned off still need something bound. A 1x1 texture with the matching
-        // `*On` flag at zero is the cheapest way to keep the shader untouched.
+        // `*On` flag at zero keeps the shared shader untouched.
         let dummy_2d = DeviceImage::new_2d(
             &gpu,
             1,
@@ -148,31 +232,45 @@ impl FeedRenderer {
         gpu.one_shot(|command| {
             // Safety: recording, and both images belong to this device.
             unsafe {
-                transition(
-                    &gpu.device,
-                    command,
-                    dummy_2d.image,
-                    vk::ImageLayout::UNDEFINED,
-                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                );
-                transition(
-                    &gpu.device,
-                    command,
-                    dummy_3d.image,
-                    vk::ImageLayout::UNDEFINED,
-                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                );
+                for image in [dummy_2d.image, dummy_3d.image] {
+                    transition(
+                        &gpu.device,
+                        command,
+                        image,
+                        vk::ImageLayout::UNDEFINED,
+                        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    );
+                }
             }
         })?;
+
+        let presenter = match source {
+            Some(source) => {
+                let surface = Surface::new(&gpu, &source)?;
+                Some(Presenter::new(
+                    &gpu,
+                    surface,
+                    pipelines.layouts[PASS_BLIT],
+                    pipelines.vertex_module,
+                    pipelines.blit_module,
+                    width,
+                    height,
+                )?)
+            }
+            None => None,
+        };
 
         Ok(Self {
             gpu,
             pipelines,
+            presenter,
             targets: None,
             lut: None,
             lut_size: 0,
             dummy_2d,
             dummy_3d,
+            descriptors_dirty: true,
+            peaking_bound: false,
         })
     }
 
@@ -181,17 +279,32 @@ impl FeedRenderer {
         &self.gpu.device_name
     }
 
+    /// The swapchain's current size, when there is one.
+    pub fn surface_size(&self) -> Option<(u32, u32)> {
+        self.presenter
+            .as_ref()
+            .map(|presenter| (presenter.extent.width, presenter.extent.height))
+    }
+
+    /// Tells the swapchain the window changed size. Rebuilt on the next present.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        if let Some(presenter) = self.presenter.as_mut() {
+            presenter.resize(width, height);
+        }
+    }
+
     /// Uploads the cube the grade uses, or clears it. Passing `None` leaves the picture
     /// ungraded — the shader treats a lattice smaller than 2 as identity.
     pub fn set_lut(&mut self, lut: Option<&Lut>) -> Result<(), RenderError> {
         if let Some(existing) = self.lut.take() {
-            // Safety: the queue is idle between renders.
+            // Safety: waiting for idle before destroying what a set may still point at.
             unsafe {
                 let _ = self.gpu.device.device_wait_idle();
                 existing.destroy(&self.gpu.device);
             }
         }
         self.lut_size = 0;
+        self.descriptors_dirty = true;
 
         let Some(lut) = lut else { return Ok(()) };
         let size = lut.size();
@@ -208,7 +321,7 @@ impl FeedRenderer {
             LUT_FORMAT,
             vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
         )?;
-        let bytes: &[u8] = bytemuck_floats(&components);
+        let bytes = as_bytes(&components);
         let staging = HostBuffer::new(
             &self.gpu,
             bytes.len() as vk::DeviceSize,
@@ -227,24 +340,7 @@ impl FeedRenderer {
                     vk::ImageLayout::UNDEFINED,
                     vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 );
-                let region = vk::BufferImageCopy::default()
-                    .image_subresource(
-                        vk::ImageSubresourceLayers::default()
-                            .aspect_mask(vk::ImageAspectFlags::COLOR)
-                            .layer_count(1),
-                    )
-                    .image_extent(vk::Extent3D {
-                        width: size,
-                        height: size,
-                        depth: size,
-                    });
-                device.cmd_copy_buffer_to_image(
-                    command,
-                    staging.buffer,
-                    image.image,
-                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    &[region],
-                );
+                copy_buffer_to_image(device, command, staging.buffer, &image, size, size, size);
                 transition(
                     device,
                     command,
@@ -263,7 +359,7 @@ impl FeedRenderer {
         Ok(())
     }
 
-    /// Converts, grades, and stretches one picture.
+    /// Converts, grades, and stretches one picture into an image.
     pub fn render(
         &mut self,
         picture: &Picture<'_>,
@@ -271,321 +367,30 @@ impl FeedRenderer {
         options: GradeOptions,
     ) -> Result<Rgba, RenderError> {
         let (display_width, display_height) = display;
-        if picture.width == 0
-            || picture.height == 0
-            || picture.width > MAX_RASTER
-            || picture.height > MAX_RASTER
-        {
-            return Err(RenderError::UnsupportedRaster {
-                width: picture.width,
-                height: picture.height,
-            });
-        }
-        if display_width == 0
-            || display_height == 0
-            || display_width > MAX_RASTER
-            || display_height > MAX_RASTER
-        {
-            return Err(RenderError::UnsupportedRaster {
-                width: display_width,
-                height: display_height,
-            });
-        }
+        self.prepare(picture, display_width, display_height, options)?;
 
-        self.ensure_targets(picture, display_width, display_height)?;
-        self.upload_planes(picture)?;
-        self.write_descriptors();
-        self.record(picture, display_width, display_height, options)?;
-
-        let targets = self.targets.as_ref().expect("targets were just ensured");
-        let length = (display_width * display_height * 4) as usize;
-        let pixels = targets.readback.read_bytes(&self.gpu.device, length)?;
-        Ok(Rgba {
-            width: display_width,
-            height: display_height,
-            pixels,
-        })
-    }
-
-    fn ensure_targets(
-        &mut self,
-        picture: &Picture<'_>,
-        display_width: u32,
-        display_height: u32,
-    ) -> Result<(), RenderError> {
-        let matches = self.targets.as_ref().is_some_and(|targets| {
-            targets.source_width == picture.width
-                && targets.source_height == picture.height
-                && targets.display_width == display_width
-                && targets.display_height == display_height
-        });
-        if matches {
-            return Ok(());
-        }
-        if let Some(old) = self.targets.take() {
-            // Safety: the queue is idle between renders.
-            unsafe {
-                let _ = self.gpu.device.device_wait_idle();
-                old.destroy(&self.gpu.device);
-            }
-        }
-        self.targets = Some(build_targets(
-            &self.gpu,
-            &self.pipelines,
-            picture,
-            display_width,
-            display_height,
-        )?);
-        Ok(())
-    }
-
-    fn upload_planes(&self, picture: &Picture<'_>) -> Result<(), RenderError> {
-        let targets = self.targets.as_ref().expect("targets were ensured");
-        let (chroma_width, chroma_height) = picture.chroma_size();
-        let planes: [(&[u8], usize, u32, u32); 3] = [
-            (
-                picture.luma,
-                picture.luma_stride,
-                picture.width,
-                picture.height,
-            ),
-            (
-                picture.chroma_blue,
-                picture.chroma_stride,
-                chroma_width,
-                chroma_height,
-            ),
-            (
-                picture.chroma_red,
-                picture.chroma_stride,
-                chroma_width,
-                chroma_height,
-            ),
-        ];
-
-        for (index, (source, stride, width, height)) in planes.iter().enumerate() {
-            // The decoder's rows are padded to its own stride; the upload is tight.
-            let mut packed = Vec::with_capacity((*width as usize) * (*height as usize));
-            for row in 0..*height as usize {
-                let start = row * stride;
-                packed.extend_from_slice(&source[start..start + *width as usize]);
-            }
-            targets.plane_staging[index].write_bytes(&self.gpu.device, &packed)?;
-        }
-
-        let device = &self.gpu.device;
-        self.gpu.one_shot(|command| {
-            for (index, (_, _, width, height)) in planes.iter().enumerate() {
-                let image = &targets.planes[index];
-                // Safety: recording; every handle belongs to this device.
-                unsafe {
-                    transition(
-                        device,
-                        command,
-                        image.image,
-                        vk::ImageLayout::UNDEFINED,
-                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    );
-                    let region = vk::BufferImageCopy::default()
-                        .image_subresource(
-                            vk::ImageSubresourceLayers::default()
-                                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                .layer_count(1),
-                        )
-                        .image_extent(vk::Extent3D {
-                            width: *width,
-                            height: *height,
-                            depth: 1,
-                        });
-                    device.cmd_copy_buffer_to_image(
-                        command,
-                        targets.plane_staging[index].buffer,
-                        image.image,
-                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                        &[region],
-                    );
-                    transition(
-                        device,
-                        command,
-                        image.image,
-                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                    );
-                }
-            }
-        })
-    }
-
-    fn write_descriptors(&self) {
-        let targets = self.targets.as_ref().expect("targets were ensured");
-        let sampler = self.pipelines.sampler;
-        let lut_view = self.lut.as_ref().unwrap_or(&self.dummy_3d).view;
-
-        let info = |view: vk::ImageView| {
-            vk::DescriptorImageInfo::default()
-                .sampler(sampler)
-                .image_view(view)
-                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-        };
-        let ycbcr: Vec<_> = targets
-            .planes
-            .iter()
-            .map(|plane| [info(plane.view)])
-            .collect();
-        let feed = [
-            [info(targets.rgb.view)],
-            [info(lut_view)],
-            [info(self.dummy_3d.view)],
-            [info(self.dummy_3d.view)],
-            [info(self.dummy_2d.view)],
-        ];
-        let blit = [info(targets.graded.view)];
-
-        let mut writes = Vec::with_capacity(9);
-        for (binding, image) in ycbcr.iter().enumerate() {
-            writes.push(
-                vk::WriteDescriptorSet::default()
-                    .dst_set(self.pipelines.sets[0])
-                    .dst_binding(binding as u32)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(image),
-            );
-        }
-        for (binding, image) in feed.iter().enumerate() {
-            writes.push(
-                vk::WriteDescriptorSet::default()
-                    .dst_set(self.pipelines.sets[1])
-                    .dst_binding(binding as u32)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(image),
-            );
-        }
-        writes.push(
-            vk::WriteDescriptorSet::default()
-                .dst_set(self.pipelines.sets[2])
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(&blit),
-        );
-
-        // Safety: the queue is idle between renders, so no set is in use.
-        unsafe {
-            let _ = self.gpu.device.device_wait_idle();
-            self.gpu.device.update_descriptor_sets(&writes, &[]);
-        }
-    }
-
-    fn record(
-        &self,
-        picture: &Picture<'_>,
-        display_width: u32,
-        display_height: u32,
-        options: GradeOptions,
-    ) -> Result<(), RenderError> {
-        let targets = self.targets.as_ref().expect("targets were ensured");
+        let targets = self.targets.as_ref().expect("targets were just prepared");
         let device = &self.gpu.device;
         let pipelines = &self.pipelines;
-
-        let ycbcr_constants: [f32; 4] = [
-            picture.width as f32,
-            picture.height as f32,
-            // FFmpeg reports 8-bit 4:2:0 from this encoder as limited range.
-            0.0,
-            0.0,
-        ];
-        let mut feed_constants = [0.0_f32; FEED_CONSTANTS];
-        feed_constants[0] = picture.width as f32;
-        feed_constants[1] = picture.height as f32;
-        feed_constants[2] = display_width as f32;
-        feed_constants[3] = display_height as f32;
-        feed_constants[4] = self.lut_size as f32;
-        feed_constants[8] = f32::from(u8::from(options.split));
-        feed_constants[9] = f32::from(u8::from(options.split_vertical));
-        feed_constants[15] = f32::from(u8::from(options.upscale));
-        feed_constants[16] = f32::from(u8::from(options.mirror));
-        let blit_constants: [f32; 2] = [1.0, 0.0];
-
+        let lut_size = self.lut_size;
         self.gpu.one_shot(|command| {
-            let passes: [(usize, vk::Framebuffer, u32, u32, &[f32]); 3] = [
-                (
-                    0,
-                    targets.framebuffers[0],
-                    picture.width,
-                    picture.height,
-                    &ycbcr_constants,
-                ),
-                (
-                    1,
-                    targets.framebuffers[1],
-                    picture.width,
-                    picture.height,
-                    &feed_constants,
-                ),
-                (
-                    2,
-                    targets.framebuffers[2],
-                    display_width,
-                    display_height,
-                    &blit_constants,
-                ),
-            ];
-
-            for (index, framebuffer, width, height, constants) in passes {
-                let clear = [vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0],
-                    },
-                }];
-                let area = vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: vk::Extent2D { width, height },
-                };
-                let begin = vk::RenderPassBeginInfo::default()
-                    .render_pass(pipelines.render_pass)
-                    .framebuffer(framebuffer)
-                    .render_area(area)
-                    .clear_values(&clear);
-                let viewport = vk::Viewport {
-                    x: 0.0,
-                    y: 0.0,
-                    width: width as f32,
-                    height: height as f32,
-                    min_depth: 0.0,
-                    max_depth: 1.0,
-                };
-                // Safety: recording; every handle belongs to this device and the push
-                // constants match each pipeline layout's declared range.
-                unsafe {
-                    device.cmd_begin_render_pass(command, &begin, vk::SubpassContents::INLINE);
-                    device.cmd_bind_pipeline(
-                        command,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        pipelines.pipelines[index],
-                    );
-                    device.cmd_set_viewport(command, 0, &[viewport]);
-                    device.cmd_set_scissor(command, 0, &[area]);
-                    device.cmd_bind_descriptor_sets(
-                        command,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        pipelines.layouts[index],
-                        0,
-                        &[pipelines.sets[index]],
-                        &[],
-                    );
-                    device.cmd_push_constants(
-                        command,
-                        pipelines.layouts[index],
-                        vk::ShaderStageFlags::FRAGMENT,
-                        0,
-                        bytemuck_floats(constants),
-                    );
-                    device.cmd_draw(command, 3, 1, 0, 0);
-                    device.cmd_end_render_pass(command);
-                }
-            }
-
-            // Safety: the render passes above left `output` readable by shaders; move it
-            // to a transfer source and copy it back to host memory.
+            record_frame(
+                device,
+                pipelines,
+                targets,
+                command,
+                picture,
+                options,
+                lut_size,
+                targets.framebuffers[PASS_BLIT],
+                vk::Extent2D {
+                    width: display_width,
+                    height: display_height,
+                },
+                pipelines.pipelines[PASS_BLIT],
+            );
+            // Safety: the passes above left `output` readable by shaders; move it to a
+            // transfer source and copy it back to host memory.
             unsafe {
                 transition(
                     device,
@@ -613,7 +418,261 @@ impl FeedRenderer {
                     &[region],
                 );
             }
+        })?;
+
+        let length = (display_width * display_height * 4) as usize;
+        let pixels = targets.readback.read_bytes(&self.gpu.device, length)?;
+        Ok(Rgba {
+            width: display_width,
+            height: display_height,
+            pixels,
         })
+    }
+
+    /// Draws one picture to the window.
+    ///
+    /// `Presented::Rebuilt` means the swapchain changed and nothing was shown — call
+    /// again with the same picture.
+    pub fn present(
+        &mut self,
+        picture: &Picture<'_>,
+        options: GradeOptions,
+    ) -> Result<Presented, RenderError> {
+        let Some((width, height)) = self.surface_size() else {
+            return Err(RenderError::NotPresenting);
+        };
+        if width == 0 || height == 0 {
+            return Ok(Presented::Rebuilt);
+        }
+        self.prepare(picture, width, height, options)?;
+
+        let presenter = self
+            .presenter
+            .as_mut()
+            .expect("a presenter was just checked");
+        let Some((index, command)) = presenter.begin(&self.gpu)? else {
+            return Ok(Presented::Rebuilt);
+        };
+        let framebuffer = presenter.framebuffer(index);
+        let extent = presenter.extent;
+        let pipeline = presenter.pipeline;
+
+        let targets = self.targets.as_ref().expect("targets were just prepared");
+        record_frame(
+            &self.gpu.device,
+            &self.pipelines,
+            targets,
+            command,
+            picture,
+            options,
+            self.lut_size,
+            framebuffer,
+            extent,
+            pipeline,
+        );
+
+        let presenter = self.presenter.as_mut().expect("still presenting");
+        presenter.end(&self.gpu, index)
+    }
+
+    /// Sizes resources, uploads the planes' staging copies, and refreshes descriptors.
+    fn prepare(
+        &mut self,
+        picture: &Picture<'_>,
+        display_width: u32,
+        display_height: u32,
+        options: GradeOptions,
+    ) -> Result<(), RenderError> {
+        if picture.width == 0
+            || picture.height == 0
+            || picture.width > MAX_RASTER
+            || picture.height > MAX_RASTER
+        {
+            return Err(RenderError::UnsupportedRaster {
+                width: picture.width,
+                height: picture.height,
+            });
+        }
+        if display_width == 0
+            || display_height == 0
+            || display_width > MAX_RASTER
+            || display_height > MAX_RASTER
+        {
+            return Err(RenderError::UnsupportedRaster {
+                width: display_width,
+                height: display_height,
+            });
+        }
+
+        self.ensure_targets(picture, display_width, display_height)?;
+        if options.peaking_on() != self.peaking_bound {
+            self.peaking_bound = options.peaking_on();
+            self.descriptors_dirty = true;
+        }
+        if self.descriptors_dirty {
+            self.write_descriptors();
+            self.descriptors_dirty = false;
+        }
+        self.stage_planes(picture)
+    }
+
+    fn ensure_targets(
+        &mut self,
+        picture: &Picture<'_>,
+        display_width: u32,
+        display_height: u32,
+    ) -> Result<(), RenderError> {
+        let matches = self.targets.as_ref().is_some_and(|targets| {
+            targets.source_width == picture.width
+                && targets.source_height == picture.height
+                && targets.display_width == display_width
+                && targets.display_height == display_height
+        });
+        if matches {
+            return Ok(());
+        }
+        if let Some(old) = self.targets.take() {
+            // Safety: waiting for idle before destroying what a set may still point at.
+            unsafe {
+                let _ = self.gpu.device.device_wait_idle();
+                old.destroy(&self.gpu.device);
+            }
+        }
+        self.targets = Some(build_targets(
+            &self.gpu,
+            &self.pipelines,
+            picture,
+            display_width,
+            display_height,
+        )?);
+        self.descriptors_dirty = true;
+        Ok(())
+    }
+
+    /// Packs the decoder's padded rows into the staging buffers. The GPU copy itself is
+    /// recorded with the frame so a present does not need a second submission.
+    fn stage_planes(&self, picture: &Picture<'_>) -> Result<(), RenderError> {
+        let targets = self.targets.as_ref().expect("targets were ensured");
+        let (chroma_width, chroma_height) = picture.chroma_size();
+        let planes: [(&[u8], usize, u32, u32); 3] = [
+            (
+                picture.luma,
+                picture.luma_stride,
+                picture.width,
+                picture.height,
+            ),
+            (
+                picture.chroma_blue,
+                picture.chroma_stride,
+                chroma_width,
+                chroma_height,
+            ),
+            (
+                picture.chroma_red,
+                picture.chroma_stride,
+                chroma_width,
+                chroma_height,
+            ),
+        ];
+        for (index, (source, stride, width, height)) in planes.iter().enumerate() {
+            let mut packed = Vec::with_capacity((*width as usize) * (*height as usize));
+            for row in 0..*height as usize {
+                let start = row * stride;
+                packed.extend_from_slice(&source[start..start + *width as usize]);
+            }
+            targets.plane_staging[index].write_bytes(&self.gpu.device, &packed)?;
+        }
+        Ok(())
+    }
+
+    fn write_descriptors(&self) {
+        let targets = self.targets.as_ref().expect("targets were ensured");
+        let linear = self.pipelines.linear;
+        let nearest = self.pipelines.nearest;
+        let lut_view = self.lut.as_ref().unwrap_or(&self.dummy_3d).view;
+        let mask_view = if self.peaking_bound {
+            targets.peaking_mask.view
+        } else {
+            self.dummy_2d.view
+        };
+
+        let bind = |view: vk::ImageView, sampler: vk::Sampler| {
+            [vk::DescriptorImageInfo::default()
+                .sampler(sampler)
+                .image_view(view)
+                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
+        };
+
+        let ycbcr: Vec<_> = targets
+            .planes
+            .iter()
+            .map(|plane| bind(plane.view, linear))
+            .collect();
+        let feed = [
+            bind(targets.rgb.view, linear),
+            bind(lut_view, linear),
+            bind(self.dummy_3d.view, linear),
+            bind(self.dummy_3d.view, linear),
+            bind(mask_view, nearest),
+        ];
+        let blit = bind(targets.graded.view, linear);
+        let peak_blur = bind(targets.rgb.view, linear);
+        let peak_mask = [
+            bind(targets.rgb.view, linear),
+            bind(targets.peaking_blur.view, nearest),
+        ];
+
+        // Built inline rather than through a helper: each `image_info` borrows the
+        // array above it, and a closure would shorten that borrow to its own body.
+        let mut writes = Vec::with_capacity(12);
+        for (binding, image) in ycbcr.iter().enumerate() {
+            writes.push(
+                vk::WriteDescriptorSet::default()
+                    .dst_set(self.pipelines.sets[PASS_YCBCR])
+                    .dst_binding(binding as u32)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(image),
+            );
+        }
+        for (binding, image) in feed.iter().enumerate() {
+            writes.push(
+                vk::WriteDescriptorSet::default()
+                    .dst_set(self.pipelines.sets[PASS_FEED])
+                    .dst_binding(binding as u32)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(image),
+            );
+        }
+        for (binding, image) in peak_mask.iter().enumerate() {
+            writes.push(
+                vk::WriteDescriptorSet::default()
+                    .dst_set(self.pipelines.sets[PASS_PEAK_MASK])
+                    .dst_binding(binding as u32)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(image),
+            );
+        }
+        writes.push(
+            vk::WriteDescriptorSet::default()
+                .dst_set(self.pipelines.sets[PASS_BLIT])
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(&blit),
+        );
+        writes.push(
+            vk::WriteDescriptorSet::default()
+                .dst_set(self.pipelines.sets[PASS_PEAK_BLUR])
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(&peak_blur),
+        );
+
+        // Safety: descriptors may not be rewritten while a frame that uses them is in
+        // flight, so this waits first. It runs only when a bound resource changed.
+        unsafe {
+            let _ = self.gpu.device.device_wait_idle();
+            self.gpu.device.update_descriptor_sets(&writes, &[]);
+        }
     }
 }
 
@@ -623,6 +682,9 @@ impl Drop for FeedRenderer {
         // which `Gpu::drop` handles after this runs.
         unsafe {
             let _ = self.gpu.device.device_wait_idle();
+            if let Some(mut presenter) = self.presenter.take() {
+                presenter.destroy(&self.gpu);
+            }
             if let Some(targets) = self.targets.take() {
                 targets.destroy(&self.gpu.device);
             }
@@ -636,27 +698,255 @@ impl Drop for FeedRenderer {
     }
 }
 
-impl Pipelines {
-    unsafe fn destroy(&self, device: &Device) {
+/// Records plane uploads and every pass into `command`, ending in `target`.
+#[allow(clippy::too_many_arguments)]
+fn record_frame(
+    device: &Device,
+    pipelines: &Pipelines,
+    targets: &Targets,
+    command: vk::CommandBuffer,
+    picture: &Picture<'_>,
+    options: GradeOptions,
+    lut_size: u32,
+    target: vk::Framebuffer,
+    target_extent: vk::Extent2D,
+    target_pipeline: vk::Pipeline,
+) {
+    let (chroma_width, chroma_height) = picture.chroma_size();
+    let plane_sizes = [
+        (picture.width, picture.height),
+        (chroma_width, chroma_height),
+        (chroma_width, chroma_height),
+    ];
+    for (index, (width, height)) in plane_sizes.iter().enumerate() {
+        let image = &targets.planes[index];
+        // Safety: recording; every handle belongs to this device.
         unsafe {
-            for pipeline in self.pipelines {
-                device.destroy_pipeline(pipeline, None);
-            }
-            for layout in self.layouts {
-                device.destroy_pipeline_layout(layout, None);
-            }
-            for layout in self.set_layouts {
-                device.destroy_descriptor_set_layout(layout, None);
-            }
-            device.destroy_descriptor_pool(self.pool, None);
-            device.destroy_sampler(self.sampler, None);
-            device.destroy_render_pass(self.render_pass, None);
+            transition(
+                device,
+                command,
+                image.image,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            );
+            copy_buffer_to_image(
+                device,
+                command,
+                targets.plane_staging[index].buffer,
+                image,
+                *width,
+                *height,
+                1,
+            );
+            transition(
+                device,
+                command,
+                image.image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            );
         }
+    }
+
+    let source = vk::Extent2D {
+        width: picture.width,
+        height: picture.height,
+    };
+    let source_constants: [f32; 2] = [picture.width as f32, picture.height as f32];
+
+    draw(
+        device,
+        pipelines,
+        command,
+        PASS_YCBCR,
+        targets.framebuffers[PASS_YCBCR],
+        source,
+        pipelines.pipelines[PASS_YCBCR],
+        // FFmpeg reports 8-bit 4:2:0 from this encoder as limited range.
+        &[source_constants[0], source_constants[1], 0.0, 0.0],
+    );
+
+    if let Some(peaking) = options.peaking {
+        draw(
+            device,
+            pipelines,
+            command,
+            PASS_PEAK_BLUR,
+            targets.framebuffers[PASS_PEAK_BLUR],
+            source,
+            pipelines.pipelines[PASS_PEAK_BLUR],
+            &source_constants,
+        );
+        draw(
+            device,
+            pipelines,
+            command,
+            PASS_PEAK_MASK,
+            targets.framebuffers[PASS_PEAK_MASK],
+            source,
+            pipelines.pipelines[PASS_PEAK_MASK],
+            &[
+                source_constants[0],
+                source_constants[1],
+                peaking.sense.ratio_threshold(),
+                peaking.sense.noise_gate(),
+            ],
+        );
+    }
+
+    draw(
+        device,
+        pipelines,
+        command,
+        PASS_FEED,
+        targets.framebuffers[PASS_FEED],
+        source,
+        pipelines.pipelines[PASS_FEED],
+        &feed_constants(picture, target_extent, options, lut_size),
+    );
+
+    draw(
+        device,
+        pipelines,
+        command,
+        PASS_BLIT,
+        target,
+        target_extent,
+        target_pipeline,
+        &[1.0, 0.0],
+    );
+}
+
+fn feed_constants(
+    picture: &Picture<'_>,
+    display: vk::Extent2D,
+    options: GradeOptions,
+    lut_size: u32,
+) -> [f32; FEED_CONSTANTS] {
+    let mut out = [0.0_f32; FEED_CONSTANTS];
+    out[0] = picture.width as f32;
+    out[1] = picture.height as f32;
+    out[2] = display.width as f32;
+    out[3] = display.height as f32;
+    out[4] = lut_size as f32;
+    out[8] = f32::from(u8::from(options.split));
+    out[9] = f32::from(u8::from(options.split_vertical));
+    out[15] = f32::from(u8::from(options.upscale));
+    out[16] = f32::from(u8::from(options.mirror));
+    if let Some(zebra) = options.zebra.filter(|zebra| !zebra.is_off()) {
+        if let Some(threshold) = zebra.highlight {
+            out[10] = 1.0;
+            out[11] = threshold;
+        }
+        if let Some((centre, half_width)) = zebra.midtone {
+            out[12] = 1.0;
+            out[13] = centre;
+            out[14] = half_width;
+        }
+        out[20..24].copy_from_slice(&zebra.highlight_color);
+        out[24..28].copy_from_slice(&zebra.midtone_color);
+    }
+    if let Some(peaking) = options.peaking {
+        out[17] = 1.0;
+        out[28..32].copy_from_slice(&peaking.color);
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw(
+    device: &Device,
+    pipelines: &Pipelines,
+    command: vk::CommandBuffer,
+    pass: usize,
+    framebuffer: vk::Framebuffer,
+    extent: vk::Extent2D,
+    pipeline: vk::Pipeline,
+    constants: &[f32],
+) {
+    let clear = [vk::ClearValue {
+        color: vk::ClearColorValue {
+            float32: [0.0, 0.0, 0.0, 1.0],
+        },
+    }];
+    let area = vk::Rect2D {
+        offset: vk::Offset2D { x: 0, y: 0 },
+        extent,
+    };
+    let begin = vk::RenderPassBeginInfo::default()
+        .render_pass(pipelines.render_pass)
+        .framebuffer(framebuffer)
+        .render_area(area)
+        .clear_values(&clear);
+    let viewport = vk::Viewport {
+        x: 0.0,
+        y: 0.0,
+        width: extent.width as f32,
+        height: extent.height as f32,
+        min_depth: 0.0,
+        max_depth: 1.0,
+    };
+    // Safety: recording; every handle belongs to this device and the constants match the
+    // range declared on this pass's pipeline layout.
+    unsafe {
+        device.cmd_begin_render_pass(command, &begin, vk::SubpassContents::INLINE);
+        device.cmd_bind_pipeline(command, vk::PipelineBindPoint::GRAPHICS, pipeline);
+        device.cmd_set_viewport(command, 0, &[viewport]);
+        device.cmd_set_scissor(command, 0, &[area]);
+        device.cmd_bind_descriptor_sets(
+            command,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipelines.layouts[pass],
+            0,
+            &[pipelines.sets[pass]],
+            &[],
+        );
+        device.cmd_push_constants(
+            command,
+            pipelines.layouts[pass],
+            vk::ShaderStageFlags::FRAGMENT,
+            0,
+            as_bytes(constants),
+        );
+        device.cmd_draw(command, 3, 1, 0, 0);
+        device.cmd_end_render_pass(command);
+    }
+}
+
+/// Safety: `command` must be recording and every handle must belong to `device`.
+unsafe fn copy_buffer_to_image(
+    device: &Device,
+    command: vk::CommandBuffer,
+    buffer: vk::Buffer,
+    image: &DeviceImage,
+    width: u32,
+    height: u32,
+    depth: u32,
+) {
+    let region = vk::BufferImageCopy::default()
+        .image_subresource(
+            vk::ImageSubresourceLayers::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .layer_count(1),
+        )
+        .image_extent(vk::Extent3D {
+            width,
+            height,
+            depth,
+        });
+    unsafe {
+        device.cmd_copy_buffer_to_image(
+            command,
+            buffer,
+            image.image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            &[region],
+        );
     }
 }
 
 /// Reinterprets a float slice as the bytes a push constant or upload wants.
-fn bytemuck_floats(values: &[f32]) -> &[u8] {
+fn as_bytes(values: &[f32]) -> &[u8] {
     // Safety: `f32` has no padding or invalid bit patterns, and the result borrows the
     // same memory for the same lifetime with a smaller alignment requirement.
     unsafe {
@@ -670,6 +960,30 @@ fn shader_module(device: &Device, spirv: &[u8]) -> Result<vk::ShaderModule, Rend
     let info = vk::ShaderModuleCreateInfo::default().code(&code);
     // Safety: `code` outlives the call and the device is open.
     unsafe { device.create_shader_module(&info, None) }.context("vkCreateShaderModule")
+}
+
+/// Builds a blit pipeline against an arbitrary render pass, so a swapchain can have one
+/// in its own colour format.
+pub(crate) fn blit_pipeline(
+    device: &Device,
+    render_pass: vk::RenderPass,
+    layout: vk::PipelineLayout,
+    vertex: vk::ShaderModule,
+    fragment: vk::ShaderModule,
+) -> Result<vk::Pipeline, RenderError> {
+    let mut created = create_pipelines(device, render_pass, &[layout], vertex, &[fragment])?;
+    Ok(created.remove(0))
+}
+
+fn sampler(device: &Device, filter: vk::Filter) -> Result<vk::Sampler, RenderError> {
+    let info = vk::SamplerCreateInfo::default()
+        .mag_filter(filter)
+        .min_filter(filter)
+        .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+        .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+        .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE);
+    // Safety: the device is open.
+    unsafe { device.create_sampler(&info, None) }.context("vkCreateSampler")
 }
 
 fn build_pipelines(gpu: &Gpu) -> Result<Pipelines, RenderError> {
@@ -697,19 +1011,12 @@ fn build_pipelines(gpu: &Gpu) -> Result<Pipelines, RenderError> {
     let render_pass =
         unsafe { device.create_render_pass(&pass_info, None) }.context("vkCreateRenderPass")?;
 
-    let sampler_info = vk::SamplerCreateInfo::default()
-        .mag_filter(vk::Filter::LINEAR)
-        .min_filter(vk::Filter::LINEAR)
-        .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-        .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-        .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE);
-    // Safety: the device is open.
-    let sampler =
-        unsafe { device.create_sampler(&sampler_info, None) }.context("vkCreateSampler")?;
+    let linear = sampler(device, vk::Filter::LINEAR)?;
+    let nearest = sampler(device, vk::Filter::NEAREST)?;
 
-    // Bindings per pass: three planes, the five `feed.frag` inputs, one for the stretch.
-    let counts = [3_u32, 5, 1];
-    let mut set_layouts = [vk::DescriptorSetLayout::null(); 3];
+    // Bindings per pass, indexed by `PASS_*`.
+    let counts = [3_u32, 5, 1, 1, 2];
+    let mut set_layouts = [vk::DescriptorSetLayout::null(); PASS_COUNT];
     for (index, count) in counts.iter().enumerate() {
         let bindings: Vec<_> = (0..*count)
             .map(|binding| {
@@ -726,13 +1033,13 @@ fn build_pipelines(gpu: &Gpu) -> Result<Pipelines, RenderError> {
             .context("vkCreateDescriptorSetLayout")?;
     }
 
-    let constant_sizes = [16_u32, (FEED_CONSTANTS * 4) as u32, 8];
-    let mut layouts = [vk::PipelineLayout::null(); 3];
-    for index in 0..3 {
+    let constant_sizes = [16_u32, (FEED_CONSTANTS * 4) as u32, 8, 8, 16];
+    let mut layouts = [vk::PipelineLayout::null(); PASS_COUNT];
+    for (index, size) in constant_sizes.iter().enumerate() {
         let range = [vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::FRAGMENT)
             .offset(0)
-            .size(constant_sizes[index])];
+            .size(*size)];
         let single = [set_layouts[index]];
         let info = vk::PipelineLayoutCreateInfo::default()
             .set_layouts(&single)
@@ -742,9 +1049,13 @@ fn build_pipelines(gpu: &Gpu) -> Result<Pipelines, RenderError> {
             .context("vkCreatePipelineLayout")?;
     }
 
-    let vertex = shader_module(
+    let vertex_module = shader_module(
         device,
         include_bytes!(concat!(env!("OUT_DIR"), "/fullscreen.vert.spv")),
+    )?;
+    let blit_module = shader_module(
+        device,
+        include_bytes!(concat!(env!("OUT_DIR"), "/blit.frag.spv")),
     )?;
     let fragments = [
         shader_module(
@@ -755,56 +1066,68 @@ fn build_pipelines(gpu: &Gpu) -> Result<Pipelines, RenderError> {
             device,
             include_bytes!(concat!(env!("OUT_DIR"), "/feed.frag.spv")),
         )?,
+        blit_module,
         shader_module(
             device,
-            include_bytes!(concat!(env!("OUT_DIR"), "/blit.frag.spv")),
+            include_bytes!(concat!(env!("OUT_DIR"), "/peaking_blur.frag.spv")),
+        )?,
+        shader_module(
+            device,
+            include_bytes!(concat!(env!("OUT_DIR"), "/peaking_mask.frag.spv")),
         )?,
     ];
 
-    let pipelines = create_graphics_pipelines(device, render_pass, &layouts, vertex, &fragments);
-    // Safety: modules may be destroyed once the pipelines referencing them exist.
+    let built = create_pipelines(device, render_pass, &layouts, vertex_module, &fragments);
+    // Safety: modules other than the two kept for the swapchain may go once the
+    // pipelines referencing them exist.
     unsafe {
-        device.destroy_shader_module(vertex, None);
-        for module in fragments {
-            device.destroy_shader_module(module, None);
+        for (index, module) in fragments.iter().enumerate() {
+            if index != PASS_BLIT {
+                device.destroy_shader_module(*module, None);
+            }
         }
     }
-    let pipelines = pipelines?;
+    let built = built?;
+    let pipelines: [vk::Pipeline; PASS_COUNT] = built.try_into().expect("one pipeline per pass");
 
     let sizes = [vk::DescriptorPoolSize::default()
         .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
         .descriptor_count(counts.iter().sum())];
     let pool_info = vk::DescriptorPoolCreateInfo::default()
         .pool_sizes(&sizes)
-        .max_sets(3);
+        .max_sets(PASS_COUNT as u32);
     // Safety: `sizes` outlives the call.
     let pool = unsafe { device.create_descriptor_pool(&pool_info, None) }
         .context("vkCreateDescriptorPool")?;
     let allocate = vk::DescriptorSetAllocateInfo::default()
         .descriptor_pool(pool)
         .set_layouts(&set_layouts);
-    // Safety: the pool has room for exactly these three sets.
+    // Safety: the pool has room for exactly these sets.
     let allocated = unsafe { device.allocate_descriptor_sets(&allocate) }
         .context("vkAllocateDescriptorSets")?;
+    let sets: [vk::DescriptorSet; PASS_COUNT] = allocated.try_into().expect("one set per pass");
 
     Ok(Pipelines {
         render_pass,
-        sampler,
+        linear,
+        nearest,
         set_layouts,
         layouts,
         pipelines,
         pool,
-        sets: [allocated[0], allocated[1], allocated[2]],
+        sets,
+        vertex_module,
+        blit_module,
     })
 }
 
-fn create_graphics_pipelines(
+fn create_pipelines(
     device: &Device,
     render_pass: vk::RenderPass,
-    layouts: &[vk::PipelineLayout; 3],
+    layouts: &[vk::PipelineLayout],
     vertex: vk::ShaderModule,
-    fragments: &[vk::ShaderModule; 3],
-) -> Result<[vk::Pipeline; 3], RenderError> {
+    fragments: &[vk::ShaderModule],
+) -> Result<Vec<vk::Pipeline>, RenderError> {
     let vertex_input = vk::PipelineVertexInputStateCreateInfo::default();
     let assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
@@ -853,17 +1176,15 @@ fn create_graphics_pipelines(
                 .multisample_state(&multisample)
                 .color_blend_state(&blend)
                 .dynamic_state(&dynamic)
-                .layout(layouts[index])
+                .layout(layouts[index.min(layouts.len() - 1)])
                 .render_pass(render_pass)
                 .subpass(0)
         })
         .collect();
 
     // Safety: every borrowed state struct outlives this call.
-    let created =
-        unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &infos, None) }
-            .map_err(|(_, result)| RenderError::Vulkan("vkCreateGraphicsPipelines", result))?;
-    Ok([created[0], created[1], created[2]])
+    unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &infos, None) }
+        .map_err(|(_, result)| RenderError::Vulkan("vkCreateGraphicsPipelines", result))
 }
 
 fn build_targets(
@@ -897,20 +1218,19 @@ fn build_targets(
     }
 
     let attachment_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED;
-    let rgb = DeviceImage::new_2d(
-        gpu,
-        picture.width,
-        picture.height,
-        COLOR_FORMAT,
-        attachment_usage,
-    )?;
-    let graded = DeviceImage::new_2d(
-        gpu,
-        picture.width,
-        picture.height,
-        COLOR_FORMAT,
-        attachment_usage,
-    )?;
+    let at_source = |gpu: &Gpu| {
+        DeviceImage::new_2d(
+            gpu,
+            picture.width,
+            picture.height,
+            COLOR_FORMAT,
+            attachment_usage,
+        )
+    };
+    let rgb = at_source(gpu)?;
+    let graded = at_source(gpu)?;
+    let peaking_blur = at_source(gpu)?;
+    let peaking_mask = at_source(gpu)?;
     let output = DeviceImage::new_2d(
         gpu,
         display_width,
@@ -919,8 +1239,15 @@ fn build_targets(
         attachment_usage | vk::ImageUsageFlags::TRANSFER_SRC,
     )?;
 
-    let mut framebuffers = [vk::Framebuffer::null(); 3];
-    for (index, image) in [&rgb, &graded, &output].into_iter().enumerate() {
+    let mut framebuffers = [vk::Framebuffer::null(); PASS_COUNT];
+    let attachments = [
+        (PASS_YCBCR, &rgb),
+        (PASS_FEED, &graded),
+        (PASS_BLIT, &output),
+        (PASS_PEAK_BLUR, &peaking_blur),
+        (PASS_PEAK_MASK, &peaking_mask),
+    ];
+    for (pass, image) in attachments {
         let views = [image.view];
         let info = vk::FramebufferCreateInfo::default()
             .render_pass(pipelines.render_pass)
@@ -929,7 +1256,7 @@ fn build_targets(
             .height(image.height)
             .layers(1);
         // Safety: `views` outlives the call and the view belongs to this device.
-        framebuffers[index] =
+        framebuffers[pass] =
             unsafe { gpu.device.create_framebuffer(&info, None) }.context("vkCreateFramebuffer")?;
     }
 
@@ -953,6 +1280,8 @@ fn build_targets(
         rgb,
         graded,
         output,
+        peaking_blur,
+        peaking_mask,
         framebuffers,
         readback,
     })

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// `(output name, source path relative to the repository root)`.
-const SHARED: [(&str, &str); 3] = [
+const SHARED: [(&str, &str); 5] = [
     (
         "fullscreen.vert",
         "Apps/Android/app/src/main/cpp/shaders/fullscreen.vert",
@@ -20,6 +20,14 @@ const SHARED: [(&str, &str); 3] = [
     (
         "blit.frag",
         "Apps/Android/app/src/main/cpp/shaders/blit.frag",
+    ),
+    (
+        "peaking_blur.frag",
+        "Apps/Android/app/src/main/cpp/shaders/peaking_blur.frag",
+    ),
+    (
+        "peaking_mask.frag",
+        "Apps/Android/app/src/main/cpp/shaders/peaking_mask.frag",
     ),
 ];
 

@@ -47,11 +47,12 @@ That is the same split the iOS and Android shells follow — see
 
 ## The feed pipeline
 
-Three passes, in the phones' order:
+Up to five passes, in the phones' order:
 
 1. `ycbcr.frag` converts the decoder's planes to RGB **at the source raster**.
-2. `feed.frag` grades that RGB through the colour cube, still at the source raster.
-3. `blit.frag` stretches the graded picture to the display raster.
+2. `peaking_blur.frag` and `peaking_mask.frag` build the edge mask, when peaking is on.
+3. `feed.frag` grades through the colour cube and paints zebra and peaking.
+4. `blit.frag` stretches the result to the display raster, or to a swapchain image.
 
 Cube at the feed raster, *then* stretch. Cubing after the upsample blotched D-Log2 on
 Android ([`../ANDROID.md`](../ANDROID.md)) and would here too.
@@ -65,8 +66,29 @@ decode hands over three separate planes, so that conversion is written out in
 
 `feed.frag` samples five bindings unconditionally. The ones an operator has turned off
 get a 1×1 texture and a zeroed `*On` flag, which keeps the shared shader untouched.
-Scopes, peaking, false colour, and zebra are wired in the shader but not yet driven from
-the desktop shell.
+Zebra and peaking are driven; false colour and the scopes are not yet — see the
+milestones below.
+
+Peaking sensitivity is transcribed from `PeakingSense` in the Android shell's
+`assists/LiveAssistTool.kt`. That is an assist policy and belongs in
+`OpenPocketViewCore` next to the rest; until it moves there, a third shell carrying its
+own copy is a drift risk worth naming.
+
+## Drawing to a window
+
+`FeedRenderer::for_window` takes a window's raw handles and builds a swapchain; the
+`watch` subcommand supplies them from winit. Present mode prefers mailbox — a field
+monitor wants the freshest frame rather than a queue of stale ones — and falls back
+through immediate to FIFO.
+
+The swapchain path is tested without a display. `VK_EXT_headless_surface` gives a real
+`VkSurfaceKHR` and a real swapchain, so acquire, submit, present, and recreate-on-resize
+run the same code a window drives. `FeedRenderer::headless_window` is that constructor.
+
+Two details worth keeping: the render-finished semaphore is per swapchain **image**, not
+per frame in flight, because present waits on the signal for the image it is showing;
+and descriptor sets are rewritten only when something they point at changes, since a
+rewrite needs an idle device and doing it per frame would undo the frames in flight.
 
 ## What the core owns
 
@@ -103,9 +125,13 @@ Then, with the PC on the camera's Wi-Fi and Sharing on in the host's Operator Se
 ```sh
 cd Apps/Desktop
 cargo run -p opc-watcher -- list
+cargo run -p opc-watcher -- watch "Studio iPhone" --look Contrast
 cargo run -p opc-watcher -- join "Studio iPhone" --seconds 30 --dump feed.h265 --still first.png
 cargo run -p opc-watcher -- decode feed.h265 --out stills --look Contrast --frames 10
 ```
+
+`watch` opens the window. Keys: **L** cube, **Z** zebra, **P** peaking, **M** mirror,
+**S** still, **Esc** quit.
 
 `--dump` writes the received access units straight to disk. The host emits Annex-B with
 parameter sets inline on every keyframe, so that file plays in `ffplay` or VLC with no
@@ -137,12 +163,17 @@ otherwise. Anything that calls the core fails at link rather than running a stub
 | --- | --- | --- |
 | 1 | Discovery, join, telemetry, picture ingest, HEVC dump | In tree, **not physically verified** |
 | 2a | Decode and grade: libavcodec, the Vulkan feed pipeline, the cube, PNG stills | In tree, **not physically verified** |
-| 2b | A window: swapchain present, resize, and the assists the shader already carries | Not started |
+| 2b | A window: swapchain present, resize, zebra and peaking | In tree, **not physically verified** |
+| 2c | False colour and the scopes; operator chrome | Not started |
 | 3 | Direct camera session: BLE credential read, SoftAP join, UDP datalink, the ACK pump | Not started |
 
-Milestone 2b is the swapchain and the operator chrome. The pipeline renders into an image
-today; presenting it means a surface, a swapchain, in-flight frames, and resize handling
-on top of what is here. `blit.frag` already takes the `uvMode` rotation the phones use.
+Milestone 2c is false colour and the scopes. `feed.frag` already samples the limits paint
+and weight cubes; what is missing is generating them, which `LiveColorScience.falseColorBands`
+in the core already knows how to do — the Android facade builds a packed-2D variant for its
+GLES fallback in `FeedEffectsWire`, and the desktop needs a 3D one through the same seam.
+It is deliberately left until that facade work can be run against a Swift toolchain.
+`blit.frag` already takes the `uvMode` rotation the phones use, which portrait chrome
+will want.
 
 Milestone 3 is where [`live-session.md`](live-session.md) becomes required reading. The
 40 Hz window-ACK discipline is the thing most likely to produce a session that connects,
@@ -161,10 +192,17 @@ the Annex-B splitter, the relay's receive buffer and discovery filtering, the AB
 layout from both sides, and the feed pipeline rendering real decoded pictures — black and
 white landing where limited range says they should, chroma moving hue the way BT.709
 says, mirroring reflecting the picture, raster changes rebuilding cleanly, and a frame
-surviving decode, grade, and PNG encode. The pipeline tests run on whatever Vulkan device
-is present, including a software one; they skip rather than fail where there is none.
+surviving decode, grade, and PNG encode. Zebra stripes rather than floods and leaves a
+dark picture alone; peaking strokes a hard edge, finds it in the right column, leaves a
+flat picture alone, and survives being toggled between frames. The swapchain acquires,
+presents, rebuilds on resize, survives a minimised window, and keeps presenting past the
+frames-in-flight count. These run on whatever Vulkan device is present, including a
+software one, and skip rather than fail where there is none.
 
-What is not checked: nothing has been run against a live host or a camera, and the Swift
-facade has no Swift toolchain in the authoring environment, so its own tests and the
-Rust tests that call it are written but unrun. The grade-matches-the-core comparison in
-`crates/opc-render/tests/lut_grade.rs` is the one to run first on a machine with Swift.
+What is not checked: nothing has been run against a live host or a camera. No real
+window has been opened — the swapchain is exercised through a headless surface, so
+winit, the platform surface extensions, and the event loop in `crates/opc-watcher/src/watch.rs`
+are unrun. And the Swift facade has no Swift toolchain in the authoring environment, so
+its own tests and the Rust tests that call it are written but unrun. The
+grade-matches-the-core comparison in `crates/opc-render/tests/lut_grade.rs` is the one to
+run first on a machine with Swift.

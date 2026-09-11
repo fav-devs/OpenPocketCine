@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 ash = "0.38"
+ash-window = "0.13"
+raw-window-handle = "0.6"
 opc-core-sys = { path = "../opc-core-sys" }
 opc-decode = { path = "../opc-decode" }
 png = "0.17"

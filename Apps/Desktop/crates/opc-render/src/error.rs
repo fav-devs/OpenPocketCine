@@ -13,6 +13,12 @@ pub enum RenderError {
     NoSuitableMemory,
     /// The picture had a raster this pipeline cannot take.
     UnsupportedRaster { width: u32, height: u32 },
+    /// The graphics queue cannot present to this surface.
+    NoPresentQueue,
+    /// The surface offered no format this pipeline can write.
+    NoSurfaceFormat,
+    /// A present was asked of a renderer built without a surface.
+    NotPresenting,
     /// A Vulkan call failed.
     Vulkan(&'static str, vk::Result),
     /// The core refused a `.cube`, with its own message.
@@ -28,6 +34,11 @@ impl fmt::Display for RenderError {
             Self::UnsupportedRaster { width, height } => {
                 write!(f, "cannot draw a {width}x{height} picture")
             }
+            Self::NoPresentQueue => {
+                write!(f, "this device's graphics queue cannot draw to that window")
+            }
+            Self::NoSurfaceFormat => write!(f, "that window offers no usable colour format"),
+            Self::NotPresenting => write!(f, "this renderer was built without a window"),
             Self::Vulkan(operation, result) => write!(f, "{operation} failed: {result:?}"),
             Self::Lut(message) => write!(f, "{message}"),
         }

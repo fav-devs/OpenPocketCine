@@ -3,6 +3,8 @@
 //! Headless on purpose: no surface, no swapchain. A window is the shell's job and sits
 //! on top of this; rendering into an image is what can be checked without one.
 
+use std::ffi::c_char;
+
 use ash::{vk, Device, Entry, Instance};
 
 use crate::error::{Context, RenderError};
@@ -11,11 +13,13 @@ use crate::error::{Context, RenderError};
 pub(crate) struct Gpu {
     pub device: Device,
     pub queue: vk::Queue,
+    pub queue_family: u32,
+    pub physical: vk::PhysicalDevice,
     pub command_pool: vk::CommandPool,
     pub memory_properties: vk::PhysicalDeviceMemoryProperties,
     pub device_name: String,
-    instance: Instance,
-    _entry: Entry,
+    pub instance: Instance,
+    pub entry: Entry,
 }
 
 impl std::fmt::Debug for Gpu {
@@ -27,7 +31,18 @@ impl std::fmt::Debug for Gpu {
 }
 
 impl Gpu {
-    pub fn headless() -> Result<Self, RenderError> {
+    /// Offscreen only: no surface extensions, no swapchain.
+    pub fn offscreen() -> Result<Self, RenderError> {
+        Self::new(&[], &[])
+    }
+
+    /// `instance_extensions` and `device_extensions` are NUL-terminated Vulkan names.
+    /// Presenting needs `VK_KHR_surface` plus a platform surface extension on the
+    /// instance, and `VK_KHR_swapchain` on the device.
+    pub fn new(
+        instance_extensions: &[*const c_char],
+        device_extensions: &[*const c_char],
+    ) -> Result<Self, RenderError> {
         // Safety: loads the system Vulkan loader. Nothing else has been initialised yet.
         let entry =
             unsafe { Entry::load() }.map_err(|error| RenderError::NoVulkan(error.to_string()))?;
@@ -35,7 +50,9 @@ impl Gpu {
         let application = vk::ApplicationInfo::default()
             .application_name(c"OpenPocketCine")
             .api_version(vk::make_api_version(0, 1, 1, 0));
-        let instance_info = vk::InstanceCreateInfo::default().application_info(&application);
+        let instance_info = vk::InstanceCreateInfo::default()
+            .application_info(&application)
+            .enabled_extension_names(instance_extensions);
         // Safety: `instance_info` borrows `application`, which outlives this call.
         let instance = unsafe { entry.create_instance(&instance_info, None) }
             .map_err(|result| RenderError::NoVulkan(format!("{result:?}")))?;
@@ -50,7 +67,9 @@ impl Gpu {
         let queue_info = [vk::DeviceQueueCreateInfo::default()
             .queue_family_index(queue_family)
             .queue_priorities(&priorities)];
-        let device_info = vk::DeviceCreateInfo::default().queue_create_infos(&queue_info);
+        let device_info = vk::DeviceCreateInfo::default()
+            .queue_create_infos(&queue_info)
+            .enabled_extension_names(device_extensions);
 
         // Safety: the borrowed create-info outlives the call; failure destroys the instance.
         let device = match unsafe { instance.create_device(physical, &device_info, None) } {
@@ -83,11 +102,13 @@ impl Gpu {
         Ok(Self {
             device,
             queue,
+            queue_family,
+            physical,
             command_pool,
             memory_properties,
             device_name,
             instance,
-            _entry: entry,
+            entry,
         })
     }
 

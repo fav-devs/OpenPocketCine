@@ -13,11 +13,14 @@
 mod device;
 mod error;
 mod lut;
+mod options;
+mod present;
 mod renderer;
 mod resources;
 mod still;
 
 pub use error::RenderError;
 pub use lut::{built_in_names, Lut};
-pub use renderer::{FeedRenderer, GradeOptions, Rgba};
+pub use present::Presented;
+pub use renderer::{FeedRenderer, GradeOptions, Peaking, PeakingSense, Rgba, Zebra};
 pub use still::{encode, write_png};

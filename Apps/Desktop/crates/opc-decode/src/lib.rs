@@ -120,6 +120,72 @@ impl Picture<'_> {
     }
 }
 
+/// A decoded picture copied out of the decoder.
+///
+/// The decoder reuses its frame memory, so anything that outlives the next `receive`
+/// needs its own copy. Rows are packed tight here, unlike the decoder's padded strides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedPicture {
+    pub width: u32,
+    pub height: u32,
+    pub is_keyframe: bool,
+    luma: Vec<u8>,
+    chroma_blue: Vec<u8>,
+    chroma_red: Vec<u8>,
+}
+
+impl OwnedPicture {
+    /// Packs a borrowed picture, dropping the decoder's row padding.
+    pub fn copy_from(picture: &Picture<'_>) -> Self {
+        let (chroma_width, chroma_height) = picture.chroma_size();
+        let pack = |plane: &[u8], stride: usize, width: u32, height: u32| {
+            let mut out = Vec::with_capacity((width as usize) * (height as usize));
+            for row in 0..height as usize {
+                let start = row * stride;
+                out.extend_from_slice(&plane[start..start + width as usize]);
+            }
+            out
+        };
+        Self {
+            width: picture.width,
+            height: picture.height,
+            is_keyframe: picture.is_keyframe,
+            luma: pack(
+                picture.luma,
+                picture.luma_stride,
+                picture.width,
+                picture.height,
+            ),
+            chroma_blue: pack(
+                picture.chroma_blue,
+                picture.chroma_stride,
+                chroma_width,
+                chroma_height,
+            ),
+            chroma_red: pack(
+                picture.chroma_red,
+                picture.chroma_stride,
+                chroma_width,
+                chroma_height,
+            ),
+        }
+    }
+
+    /// Borrows it back as a `Picture` the renderer can take.
+    pub fn picture(&self) -> Picture<'_> {
+        Picture {
+            width: self.width,
+            height: self.height,
+            is_keyframe: self.is_keyframe,
+            luma: &self.luma,
+            chroma_blue: &self.chroma_blue,
+            chroma_red: &self.chroma_red,
+            luma_stride: self.width as usize,
+            chroma_stride: self.width.div_ceil(2) as usize,
+        }
+    }
+}
+
 /// A live decoder. Feed access units, drain pictures.
 #[derive(Debug)]
 pub struct Decoder {

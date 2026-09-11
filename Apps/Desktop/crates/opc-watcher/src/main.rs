@@ -5,6 +5,8 @@
 //! Annex-B with parameter sets inline on every keyframe, so that file plays in ffplay or
 //! VLC as-is — which is how you confirm the transport is healthy without a renderer.
 
+mod watch;
+
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
@@ -24,11 +26,14 @@ USAGE:
     opc-watcher list [--seconds N]
     opc-watcher join <host> [--passcode P] [--as NAME] [--dump PATH] [--seconds N]
                      [--still PATH] [--look NAME | --lut FILE]
+    opc-watcher watch <host> [--passcode P] [--as NAME] [--look NAME | --lut FILE]
     opc-watcher decode <file.h265> [--out DIR] [--frames N] [--display WxH]
                        [--lut FILE | --look NAME] [--mirror] [--upscale]
     opc-watcher version
 
 Join the camera's Wi-Fi first. Hosts are only advertised on that network.
+`watch` opens a window on a shared feed. Keys: L cube, Z zebra, P peaking, M mirror,
+S still, Esc quit.
 `--still` decodes the live feed and writes the first picture that arrives as a PNG,
 which is how the whole path gets confirmed before there is a window to draw in.
 `decode` replays a `--dump` file through the same decoder and feed pipeline — the way
@@ -40,6 +45,7 @@ fn main() -> ExitCode {
         Some("list") => list(&args[1..]),
         Some("join") => join(&args[1..]),
         Some("decode") => decode(&args[1..]),
+        Some("watch") => watch_feed(&args[1..]),
         Some("version") => version(),
         Some("--help") | Some("-h") | None => {
             println!("{USAGE}");
@@ -270,6 +276,50 @@ fn list(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Browses until a host with this name answers.
+fn find_host(info: &ProtocolInfo, wanted: &str) -> Result<JoinTarget, String> {
+    let mut browser = Browser::start(info).map_err(|error| error.to_string())?;
+    println!("Looking for `{wanted}`…");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if let Some(host) = browser
+            .poll(Duration::from_millis(500))
+            .into_iter()
+            .find(|host| host.name.eq_ignore_ascii_case(wanted))
+        {
+            return Ok(JoinTarget {
+                name: host.name,
+                addresses: host.addresses,
+                port: host.port,
+            });
+        }
+    }
+    Err(format!(
+        "no shared feed named `{wanted}` on this Wi-Fi. Run `opc-watcher list` first."
+    ))
+}
+
+fn watcher_options(parsed: &Args) -> WatcherOptions {
+    WatcherOptions {
+        device_name: parsed.flag("as").unwrap_or("Desktop watcher").to_string(),
+        watcher_id: format!("desktop-{}", std::process::id()),
+        passcode: parsed.flag("passcode").unwrap_or_default().to_string(),
+        ..WatcherOptions::default()
+    }
+}
+
+fn watch_feed(args: &[String]) -> Result<(), String> {
+    let parsed = Args::parse(args)?;
+    let wanted = parsed
+        .positional
+        .first()
+        .ok_or_else(|| format!("`watch` needs a host name\n\n{USAGE}"))?;
+    let info = protocol()?;
+    let target = find_host(&info, wanted)?;
+    let lut = chosen_lut(&parsed)?;
+    watch::run(info, target, watcher_options(&parsed), lut)
+}
+
 fn join(args: &[String]) -> Result<(), String> {
     let parsed = Args::parse(args)?;
     let wanted = parsed
@@ -278,24 +328,7 @@ fn join(args: &[String]) -> Result<(), String> {
         .ok_or_else(|| format!("`join` needs a host name\n\n{USAGE}"))?;
     let window = parsed.seconds(0)?;
     let info = protocol()?;
-
-    let mut browser = Browser::start(&info).map_err(|error| error.to_string())?;
-    println!("Looking for `{wanted}`…");
-    let mut found = None;
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
-        if let Some(host) = browser
-            .poll(Duration::from_millis(500))
-            .into_iter()
-            .find(|host| host.name.eq_ignore_ascii_case(wanted))
-        {
-            found = Some(host);
-            break;
-        }
-    }
-    let host = found.ok_or_else(|| {
-        format!("no shared feed named `{wanted}` on this Wi-Fi. Run `opc-watcher list` first.")
-    })?;
+    let target = find_host(&info, wanted)?;
 
     let dump = match parsed.flag("dump") {
         Some(path) => Some(
@@ -311,18 +344,7 @@ fn join(args: &[String]) -> Result<(), String> {
         None => None,
     };
 
-    let options = WatcherOptions {
-        device_name: parsed.flag("as").unwrap_or("Desktop watcher").to_string(),
-        watcher_id: format!("desktop-{}", std::process::id()),
-        passcode: parsed.flag("passcode").unwrap_or_default().to_string(),
-        ..WatcherOptions::default()
-    };
-
-    let target = JoinTarget {
-        name: host.name.clone(),
-        addresses: host.addresses.clone(),
-        port: host.port,
-    };
+    let options = watcher_options(&parsed);
     let mut session = WatcherSession::new(info, target, options);
     let mut reporter = Reporter::new(dump, window, still);
     session
