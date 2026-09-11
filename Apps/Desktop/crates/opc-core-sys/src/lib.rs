@@ -200,6 +200,69 @@ impl Default for OpcRelayProtocolInfo {
     }
 }
 
+// Command kinds for `opc_camera_command`, mirroring the header.
+pub const OPC_CAM_SESSION_WAKE: i32 = 0;
+pub const OPC_CAM_SESSION_KEEPALIVE: i32 = 1;
+pub const OPC_CAM_GIMBAL_INIT: i32 = 2;
+pub const OPC_CAM_APP_PRESENCE: i32 = 3;
+pub const OPC_CAM_LIVE_VIEW_ENABLE: i32 = 4;
+pub const OPC_CAM_NANO_LIVE_GATE: i32 = 5;
+pub const OPC_CAM_RECORD_START: i32 = 10;
+pub const OPC_CAM_RECORD_STOP: i32 = 11;
+pub const OPC_CAM_SHOOT_PHOTO: i32 = 12;
+pub const OPC_CAM_SET_SHOOTING_MODE: i32 = 13;
+pub const OPC_CAM_ZOOM_FACTOR: i32 = 20;
+pub const OPC_CAM_ZOOM_LENS: i32 = 21;
+pub const OPC_CAM_ZOOM_SLEW: i32 = 22;
+pub const OPC_CAM_ZOOM_STOP: i32 = 23;
+pub const OPC_CAM_GIMBAL_RECENTER: i32 = 30;
+pub const OPC_CAM_GIMBAL_FLIP: i32 = 31;
+pub const OPC_CAM_GIMBAL_FOLLOW: i32 = 32;
+pub const OPC_CAM_GIMBAL_FPV: i32 = 33;
+pub const OPC_CAM_GIMBAL_STICK: i32 = 34;
+pub const OPC_CAM_GIMBAL_SPEED: i32 = 35;
+pub const OPC_CAM_GIMBAL_TIMED_STOP: i32 = 36;
+pub const OPC_CAM_GIMBAL_PARAMS_GET: i32 = 37;
+pub const OPC_CAM_GIMBAL_TILT_LOCK: i32 = 38;
+pub const OPC_CAM_TRACK_SET: i32 = 40;
+pub const OPC_CAM_TRACK_CLEAR: i32 = 41;
+pub const OPC_CAM_TRACK_POLL: i32 = 42;
+pub const OPC_CAM_FOCUS_TRACK_SET: i32 = 43;
+pub const OPC_CAM_FOCUS_TRACK_GET: i32 = 44;
+pub const OPC_CAM_SET_ISO_INDEX: i32 = 50;
+pub const OPC_CAM_SET_ISO_LIMIT: i32 = 51;
+pub const OPC_CAM_SET_SHUTTER: i32 = 52;
+pub const OPC_CAM_SET_EV: i32 = 53;
+pub const OPC_CAM_SET_WB_AUTO: i32 = 54;
+pub const OPC_CAM_SET_WB_CUSTOM: i32 = 55;
+pub const OPC_CAM_SET_COLOR_MODE: i32 = 56;
+pub const OPC_CAM_SET_FOCUS_MODE: i32 = 57;
+pub const OPC_CAM_SET_VIDEO_FORMAT: i32 = 58;
+pub const OPC_CAM_SET_FOV: i32 = 59;
+pub const OPC_CAM_PARAM_GET: i32 = 60;
+pub const OPC_CAM_GET_WIFI_SSID: i32 = 61;
+pub const OPC_CAM_GET_WIFI_PASSWORD: i32 = 62;
+pub const OPC_CAM_ENTER_PLAYBACK: i32 = 63;
+pub const OPC_CAM_EXIT_PLAYBACK: i32 = 64;
+
+pub const OPC_PKT_HANDSHAKE: u8 = 0x00;
+pub const OPC_PKT_TELEMETRY: u8 = 0x01;
+pub const OPC_PKT_VIDEO: u8 = 0x02;
+pub const OPC_PKT_ACKED_DATA: u8 = 0x03;
+pub const OPC_PKT_WINDOW_ACK: u8 = 0x04;
+pub const OPC_PKT_COMMAND: u8 = 0x05;
+
+/// The three window cursors a pktType-0x04 acknowledgement carries.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OpcAckWindows {
+    pub video: u32,
+    pub acked_data: u32,
+    pub extra: u32,
+    pub has_acked_data: i32,
+    pub has_extra: i32,
+}
+
 /// Opaque per-join policy owning the retry ladder and the delivery-delay guard.
 #[repr(C)]
 #[derive(Debug)]
@@ -304,6 +367,77 @@ extern "C" {
     pub fn opc_lut_resampled(handle: *mut c_void, target: i32) -> *mut c_void;
     pub fn opc_lut_map(handle: *mut c_void, red: f32, green: f32, blue: f32, out: *mut f32) -> i32;
     pub fn opc_lut_builtin_names(out: *mut u8, capacity: usize) -> i64;
+
+    pub fn opc_camera_command(
+        kind: i32,
+        seq: u16,
+        ints: *const i32,
+        int_count: usize,
+        reals: *const f64,
+        real_count: usize,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+    pub fn opc_camera_tap_focus(x: f32, y: f32, seq: u16, out: *mut u8, capacity: usize) -> i64;
+    pub fn opc_camera_subscribe(
+        key: *const c_char,
+        sub_id: u32,
+        seq: u16,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+
+    pub fn opc_duml_transport_header(
+        pkt_type: u8,
+        payload_length: usize,
+        session_id: u16,
+        seq: u16,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+    pub fn opc_duml_routing_header(
+        seq: u16,
+        command_counter: u8,
+        drone: i32,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+    pub fn opc_duml_handshake(
+        session_id: u16,
+        seq: u16,
+        base_seq: u16,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+    pub fn opc_duml_is_handshake(datagram: *const u8, count: usize) -> i32;
+    pub fn opc_duml_transport_seq(datagram: *const u8, count: usize, out: *mut u16) -> i32;
+    pub fn opc_duml_scan_frames(raw: *const u8, count: usize, out: *mut u8, capacity: usize)
+        -> i64;
+    #[allow(clippy::too_many_arguments)]
+    pub fn opc_duml_encode(
+        sender: u8,
+        receiver: u8,
+        seq: u16,
+        flags: u8,
+        cmd_set: u8,
+        cmd_id: u8,
+        payload: *const u8,
+        payload_count: usize,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+
+    pub fn opc_ack_create() -> *mut c_void;
+    pub fn opc_ack_destroy(handle: *mut c_void);
+    pub fn opc_ack_advance(handle: *mut c_void, datagram: *const u8, count: usize) -> i32;
+    pub fn opc_ack_saw_video(handle: *mut c_void) -> i32;
+    pub fn opc_ack_read(handle: *mut c_void, out: *mut OpcAckWindows) -> i32;
+    pub fn opc_ack_payload(
+        handle: *mut c_void,
+        base_seq: u16,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
 }
 
 /// Reads a NUL-terminated string out of one of the fixed character fields.
@@ -355,6 +489,12 @@ mod layout {
         assert_eq!(size_of::<OpcRelayHello>(), 132);
         assert_eq!(size_of::<OpcRelayFocusPoint>(), 8);
         assert_eq!(size_of::<OpcRelayProtocolInfo>(), 112);
+    }
+
+    #[test]
+    fn ack_windows_match_the_header_file() {
+        assert_eq!(size_of::<OpcAckWindows>(), 20);
+        assert_eq!(offset_of!(OpcAckWindows, has_acked_data), 12);
     }
 
     #[test]

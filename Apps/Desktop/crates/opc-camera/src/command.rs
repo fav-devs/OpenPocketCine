@@ -1,0 +1,255 @@
+//! The commands a v1 desktop operator can send.
+//!
+//! Each case maps to exactly one builder in the core's `Commands`. The arguments are
+//! carried positionally across the C boundary, which is why this file and
+//! `DesktopCameraABI.swift` have to agree case by case — the round-trip tests in
+//! `tests/` are what hold them together.
+
+use opc_core_sys as sys;
+
+use crate::CameraError;
+
+/// A camera write or read. Values are the core's own raw encodings.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Command {
+    // Session.
+    SessionWake,
+    SessionKeepalive,
+    GimbalInit,
+    AppPresence,
+    /// `0x09/0xa8`. Enable-once: the watchdog owns every repeat.
+    LiveViewEnable,
+    NanoLiveGate {
+        start: bool,
+    },
+
+    // Capture.
+    RecordStart,
+    RecordStop,
+    ShootPhoto,
+    SetShootingMode(u8),
+
+    // Zoom.
+    ZoomFactor(f64),
+    ZoomLens(u16),
+    /// Continuous slew; pair with `ZoomStop`.
+    ZoomSlew(u16),
+    ZoomStop,
+
+    // Gimbal.
+    GimbalRecenter,
+    GimbalFlip,
+    GimbalFollow,
+    GimbalFpv,
+    /// Notify, not a round trip. Rides the ACK queue at 25 Hz while held.
+    GimbalStick {
+        axis0: u16,
+        axis1: u16,
+    },
+    GimbalSpeed(u8),
+    GimbalTimedStop,
+    GimbalParamsGet,
+    GimbalTiltLock(u8),
+
+    // Tracking.
+    TrackSet {
+        id: u16,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    },
+    TrackClear,
+    TrackPoll,
+    FocusTrackSet(u8),
+    FocusTrackGet,
+
+    // Exposure and look.
+    SetIsoIndex(u8),
+    SetIsoLimit(u8),
+    /// The N in 1/N, 4 through 16000.
+    SetShutter(i32),
+    /// Third-stops from zero: -9 is -3.0 EV, +9 is +3.0.
+    SetEv(i32),
+    SetWhiteBalanceAuto {
+        tint: i32,
+    },
+    SetWhiteBalanceCustom {
+        kelvin: i32,
+        tint: i32,
+    },
+    /// `model_id` lets the core pick the body's own encoding for this mode.
+    SetColorMode {
+        mode: u8,
+        model_id: i32,
+    },
+    SetFocusMode(u8),
+    SetVideoFormat {
+        resolution: u8,
+        frame_rate: u8,
+    },
+    SetFov(u8),
+
+    // Reads.
+    ParamGet(u16),
+    GetWifiSsid,
+    GetWifiPassword,
+    EnterPlayback,
+    ExitPlayback,
+}
+
+impl Command {
+    /// The kind tag and positional arguments the facade expects.
+    fn parts(self) -> (i32, Vec<i32>, Vec<f64>) {
+        let ints = |values: &[i32]| values.to_vec();
+        match self {
+            Self::SessionWake => (sys::OPC_CAM_SESSION_WAKE, vec![], vec![]),
+            Self::SessionKeepalive => (sys::OPC_CAM_SESSION_KEEPALIVE, vec![], vec![]),
+            Self::GimbalInit => (sys::OPC_CAM_GIMBAL_INIT, vec![], vec![]),
+            Self::AppPresence => (sys::OPC_CAM_APP_PRESENCE, vec![], vec![]),
+            Self::LiveViewEnable => (sys::OPC_CAM_LIVE_VIEW_ENABLE, vec![], vec![]),
+            Self::NanoLiveGate { start } => (
+                sys::OPC_CAM_NANO_LIVE_GATE,
+                ints(&[i32::from(start)]),
+                vec![],
+            ),
+
+            Self::RecordStart => (sys::OPC_CAM_RECORD_START, vec![], vec![]),
+            Self::RecordStop => (sys::OPC_CAM_RECORD_STOP, vec![], vec![]),
+            Self::ShootPhoto => (sys::OPC_CAM_SHOOT_PHOTO, vec![], vec![]),
+            Self::SetShootingMode(mode) => (
+                sys::OPC_CAM_SET_SHOOTING_MODE,
+                ints(&[i32::from(mode)]),
+                vec![],
+            ),
+
+            Self::ZoomFactor(factor) => (sys::OPC_CAM_ZOOM_FACTOR, vec![], vec![factor]),
+            Self::ZoomLens(position) => {
+                (sys::OPC_CAM_ZOOM_LENS, ints(&[i32::from(position)]), vec![])
+            }
+            Self::ZoomSlew(value) => (sys::OPC_CAM_ZOOM_SLEW, ints(&[i32::from(value)]), vec![]),
+            Self::ZoomStop => (sys::OPC_CAM_ZOOM_STOP, vec![], vec![]),
+
+            Self::GimbalRecenter => (sys::OPC_CAM_GIMBAL_RECENTER, vec![], vec![]),
+            Self::GimbalFlip => (sys::OPC_CAM_GIMBAL_FLIP, vec![], vec![]),
+            Self::GimbalFollow => (sys::OPC_CAM_GIMBAL_FOLLOW, vec![], vec![]),
+            Self::GimbalFpv => (sys::OPC_CAM_GIMBAL_FPV, vec![], vec![]),
+            Self::GimbalStick { axis0, axis1 } => (
+                sys::OPC_CAM_GIMBAL_STICK,
+                ints(&[i32::from(axis0), i32::from(axis1)]),
+                vec![],
+            ),
+            Self::GimbalSpeed(speed) => {
+                (sys::OPC_CAM_GIMBAL_SPEED, ints(&[i32::from(speed)]), vec![])
+            }
+            Self::GimbalTimedStop => (sys::OPC_CAM_GIMBAL_TIMED_STOP, vec![], vec![]),
+            Self::GimbalParamsGet => (sys::OPC_CAM_GIMBAL_PARAMS_GET, vec![], vec![]),
+            Self::GimbalTiltLock(lock) => (
+                sys::OPC_CAM_GIMBAL_TILT_LOCK,
+                ints(&[i32::from(lock)]),
+                vec![],
+            ),
+
+            Self::TrackSet {
+                id,
+                x,
+                y,
+                width,
+                height,
+            } => (
+                sys::OPC_CAM_TRACK_SET,
+                ints(&[i32::from(id)]),
+                vec![
+                    f64::from(x),
+                    f64::from(y),
+                    f64::from(width),
+                    f64::from(height),
+                ],
+            ),
+            Self::TrackClear => (sys::OPC_CAM_TRACK_CLEAR, vec![], vec![]),
+            Self::TrackPoll => (sys::OPC_CAM_TRACK_POLL, vec![], vec![]),
+            Self::FocusTrackSet(mode) => (
+                sys::OPC_CAM_FOCUS_TRACK_SET,
+                ints(&[i32::from(mode)]),
+                vec![],
+            ),
+            Self::FocusTrackGet => (sys::OPC_CAM_FOCUS_TRACK_GET, vec![], vec![]),
+
+            Self::SetIsoIndex(index) => (
+                sys::OPC_CAM_SET_ISO_INDEX,
+                ints(&[i32::from(index)]),
+                vec![],
+            ),
+            Self::SetIsoLimit(limit) => (
+                sys::OPC_CAM_SET_ISO_LIMIT,
+                ints(&[i32::from(limit)]),
+                vec![],
+            ),
+            Self::SetShutter(denominator) => {
+                (sys::OPC_CAM_SET_SHUTTER, ints(&[denominator]), vec![])
+            }
+            Self::SetEv(thirds) => (sys::OPC_CAM_SET_EV, ints(&[thirds]), vec![]),
+            Self::SetWhiteBalanceAuto { tint } => (sys::OPC_CAM_SET_WB_AUTO, ints(&[tint]), vec![]),
+            Self::SetWhiteBalanceCustom { kelvin, tint } => {
+                (sys::OPC_CAM_SET_WB_CUSTOM, ints(&[kelvin, tint]), vec![])
+            }
+            Self::SetColorMode { mode, model_id } => (
+                sys::OPC_CAM_SET_COLOR_MODE,
+                ints(&[i32::from(mode), model_id]),
+                vec![],
+            ),
+            Self::SetFocusMode(mode) => (
+                sys::OPC_CAM_SET_FOCUS_MODE,
+                ints(&[i32::from(mode)]),
+                vec![],
+            ),
+            Self::SetVideoFormat {
+                resolution,
+                frame_rate,
+            } => (
+                sys::OPC_CAM_SET_VIDEO_FORMAT,
+                ints(&[i32::from(resolution), i32::from(frame_rate)]),
+                vec![],
+            ),
+            Self::SetFov(fov) => (sys::OPC_CAM_SET_FOV, ints(&[i32::from(fov)]), vec![]),
+
+            Self::ParamGet(pid) => (sys::OPC_CAM_PARAM_GET, ints(&[i32::from(pid)]), vec![]),
+            Self::GetWifiSsid => (sys::OPC_CAM_GET_WIFI_SSID, vec![], vec![]),
+            Self::GetWifiPassword => (sys::OPC_CAM_GET_WIFI_PASSWORD, vec![], vec![]),
+            Self::EnterPlayback => (sys::OPC_CAM_ENTER_PLAYBACK, vec![], vec![]),
+            Self::ExitPlayback => (sys::OPC_CAM_EXIT_PLAYBACK, vec![], vec![]),
+        }
+    }
+
+    /// Builds this command as an encoded DUML frame, CRC included.
+    pub fn encode(self, seq: u16) -> Result<Vec<u8>, CameraError> {
+        let (kind, ints, reals) = self.parts();
+        let call = |out: *mut u8, capacity: usize| {
+            // Safety: both argument slices outlive the call, and the core writes at most
+            // `capacity` bytes into `out`.
+            unsafe {
+                sys::opc_camera_command(
+                    kind,
+                    seq,
+                    ints.as_ptr(),
+                    ints.len(),
+                    reals.as_ptr(),
+                    reals.len(),
+                    out,
+                    capacity,
+                )
+            }
+        };
+        let needed = call(std::ptr::null_mut(), 0);
+        if needed < 0 {
+            return Err(CameraError::Rejected(self));
+        }
+        let mut out = vec![0u8; needed as usize];
+        let written = call(out.as_mut_ptr(), out.len());
+        if written < 0 {
+            return Err(CameraError::Rejected(self));
+        }
+        out.truncate(written as usize);
+        Ok(out)
+    }
+}

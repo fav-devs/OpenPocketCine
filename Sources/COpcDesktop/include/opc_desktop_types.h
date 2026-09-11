@@ -143,4 +143,93 @@ typedef struct {
     char txt_watchable[8];
 } OpcRelayProtocolInfo;
 
+// ---- Camera link ----------------------------------------------------------
+//
+// Command kinds for `opc_camera_command`. Each maps to one builder in the core's
+// `Commands`; the shell never assembles payload bytes itself. Integer and real
+// arguments are passed positionally — see the Rust `Command` enum for the shapes.
+
+#define OPC_CAM_SESSION_WAKE 0
+#define OPC_CAM_SESSION_KEEPALIVE 1
+#define OPC_CAM_GIMBAL_INIT 2
+#define OPC_CAM_APP_PRESENCE 3
+#define OPC_CAM_LIVE_VIEW_ENABLE 4
+#define OPC_CAM_NANO_LIVE_GATE 5
+
+#define OPC_CAM_RECORD_START 10
+#define OPC_CAM_RECORD_STOP 11
+#define OPC_CAM_SHOOT_PHOTO 12
+#define OPC_CAM_SET_SHOOTING_MODE 13
+
+#define OPC_CAM_ZOOM_FACTOR 20
+#define OPC_CAM_ZOOM_LENS 21
+#define OPC_CAM_ZOOM_SLEW 22
+#define OPC_CAM_ZOOM_STOP 23
+
+#define OPC_CAM_GIMBAL_RECENTER 30
+#define OPC_CAM_GIMBAL_FLIP 31
+#define OPC_CAM_GIMBAL_FOLLOW 32
+#define OPC_CAM_GIMBAL_FPV 33
+#define OPC_CAM_GIMBAL_STICK 34
+#define OPC_CAM_GIMBAL_SPEED 35
+#define OPC_CAM_GIMBAL_TIMED_STOP 36
+#define OPC_CAM_GIMBAL_PARAMS_GET 37
+#define OPC_CAM_GIMBAL_TILT_LOCK 38
+
+#define OPC_CAM_TRACK_SET 40
+#define OPC_CAM_TRACK_CLEAR 41
+#define OPC_CAM_TRACK_POLL 42
+#define OPC_CAM_FOCUS_TRACK_SET 43
+#define OPC_CAM_FOCUS_TRACK_GET 44
+
+#define OPC_CAM_SET_ISO_INDEX 50
+#define OPC_CAM_SET_ISO_LIMIT 51
+#define OPC_CAM_SET_SHUTTER 52
+#define OPC_CAM_SET_EV 53
+#define OPC_CAM_SET_WB_AUTO 54
+#define OPC_CAM_SET_WB_CUSTOM 55
+#define OPC_CAM_SET_COLOR_MODE 56
+#define OPC_CAM_SET_FOCUS_MODE 57
+#define OPC_CAM_SET_VIDEO_FORMAT 58
+#define OPC_CAM_SET_FOV 59
+
+#define OPC_CAM_PARAM_GET 60
+#define OPC_CAM_GET_WIFI_SSID 61
+#define OPC_CAM_GET_WIFI_PASSWORD 62
+#define OPC_CAM_ENTER_PLAYBACK 63
+#define OPC_CAM_EXIT_PLAYBACK 64
+
+// `DumlTransport.PktType`.
+#define OPC_PKT_HANDSHAKE 0x00
+#define OPC_PKT_TELEMETRY 0x01
+#define OPC_PKT_VIDEO 0x02
+#define OPC_PKT_ACKED_DATA 0x03
+#define OPC_PKT_WINDOW_ACK 0x04
+#define OPC_PKT_COMMAND 0x05
+
+/// The three window cursors a pktType-0x04 ACK carries. Group 0 is video, group 1 is
+/// acked data (command replies), group 2 is seeded from telemetry. Telemetry must never
+/// rewind group 0 after the first video packet, nor group 1 after the first reply —
+/// either mistake stops the picture while the HUD stays live.
+typedef struct {
+    uint32_t video;
+    uint32_t acked_data;
+    uint32_t extra;
+    int32_t has_acked_data;
+    int32_t has_extra;
+} OpcAckWindows;
+
+/// One DUML frame, unpacked. Payload bytes are carried separately.
+typedef struct {
+    uint8_t sender;
+    uint8_t receiver;
+    uint8_t flags;
+    uint8_t cmd_set;
+    uint8_t cmd_id;
+    uint8_t reserved[1];
+    uint16_t seq;
+    uint32_t payload_offset;
+    uint32_t payload_len;
+} OpcDumlFrame;
+
 #endif

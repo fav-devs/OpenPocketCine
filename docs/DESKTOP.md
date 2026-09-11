@@ -11,6 +11,9 @@ and still ships something an operator can use. Direct camera control comes after
 Operator-visible behavior lives in [`PARITY.md`](PARITY.md). The relay contract lives in
 [`watcher-relay.md`](watcher-relay.md). This file is the desktop build and I/O notes.
 
+Talking to a camera directly — the laptop as the viewfinder, with gimbal, zoom, record
+and tracking — is [`desktop-camera-link.md`](desktop-camera-link.md).
+
 ## How the desktop build is structured
 
 1. **Portable Swift core** — `Sources/OpenPocketViewCore/` is already Foundation-only, so
@@ -35,6 +38,7 @@ OpenPocketViewCore (Swift)  →  OpenPocketCineDesktopFacade (@_cdecl)  →  opc
 | --- | --- |
 | `opc-core-sys` | Raw FFI declarations and the `#[repr(C)]` mirrors of the shared header |
 | `opc-relay` | Receive buffer, Bonjour discovery, TCP transport, the join state machine |
+| `opc-camera` | Camera commands, DUML transport, and the window-ACK pump |
 | `opc-decode` | HEVC and AVC decoding over libavcodec, and Annex-B replay of a dump |
 | `opc-render` | The Vulkan feed pipeline, the cube upload, and PNG stills |
 | `opc-watcher` | The command-line shell |
@@ -165,7 +169,7 @@ otherwise. Anything that calls the core fails at link rather than running a stub
 | 2a | Decode and grade: libavcodec, the Vulkan feed pipeline, the cube, PNG stills | In tree, **not physically verified** |
 | 2b | A window: swapchain present, resize, zebra and peaking | In tree, **not physically verified** |
 | 2c | False colour and the scopes; operator chrome | Not started |
-| 3 | Direct camera session: BLE credential read, SoftAP join, UDP datalink, the ACK pump | Not started |
+| 3 | Direct camera session: BLE credential read, SoftAP join, UDP datalink, the ACK pump | Commands and transport exposed; the session itself not started — [`desktop-camera-link.md`](desktop-camera-link.md) |
 
 Milestone 2c is false colour and the scopes. `feed.frag` already samples the limits paint
 and weight cubes; what is missing is generating them, which `LiveColorScience.falseColorBands`
