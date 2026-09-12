@@ -49,6 +49,8 @@ primarily **Osmo Pocket 4 / 4 Pro**, with Nano live view on AVC.
 - **parity** — chrome, assist, connection UX, one-platform feature: [`docs/PARITY.md`](docs/PARITY.md)
 - **JNI** — Gradle, Swift-for-Android, `.so`, facade, OpenZCine pattern: [`ANDROID.md`](ANDROID.md)
 - **desktop** — PC port, Windows, Rust host, `@_cdecl`, watcher shell: [`docs/DESKTOP.md`](docs/DESKTOP.md)
+- **desktop-status** — what the PC port does today, what is unrun, what is next: [`docs/desktop-port-status.md`](docs/desktop-port-status.md)
+- **viewfinder** — laptop as viewfinder, the keys, the chrome, touch, tracking: [`docs/desktop-viewfinder.md`](docs/desktop-viewfinder.md)
 - **desktop-link** — laptop as viewfinder, BLE pairing on PC, the desktop ACK pump: [`docs/desktop-camera-link.md`](docs/desktop-camera-link.md)
 - **live-session** — freeze, black feed, reconnect, UDP bind, ACK, decoder: [`docs/live-session.md`](docs/live-session.md)
 - **watchdog** — stall, GOP-reset grace, recover `0x09/0xa8`: [`docs/feed-watchdog.md`](docs/feed-watchdog.md)
