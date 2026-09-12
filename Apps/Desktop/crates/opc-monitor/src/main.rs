@@ -41,6 +41,7 @@ Viewfinder keys
   0            back to wide               Esc    close
 
   Drag         track what you drew around X      stop tracking
+               (mouse or one finger)
   [ / ]        step resolution / frame rate
 
   Z zebra      P peaking      L colour cube      M mirror      H hide the chrome

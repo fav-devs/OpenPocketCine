@@ -5,7 +5,7 @@
 //! at the wrong half of the frame, a stick that keeps panning after the key is let go.
 
 use opc_camera::{Command, Status};
-use opc_monitor::shell::{Intent, Shell};
+use opc_monitor::shell::{Intent, Shell, TouchPhase};
 use opc_ui::{Key, Phase};
 
 fn sent(intents: &[Intent]) -> Vec<Command> {
@@ -395,4 +395,167 @@ fn a_window_with_no_size_yet_draws_no_chrome_instead_of_panicking() {
     shell.pointer_down(10.0, 10.0);
     assert!(shell.pointer_up(20.0, 20.0, 0.0).is_empty());
     assert!(shell.tick(1.0).is_empty());
+}
+
+#[test]
+fn a_cancelled_drag_is_abandoned_rather_than_sent() {
+    let mut shell = framed();
+    shell.pointer_down(320.0, 180.0);
+    shell.pointer_moved(640.0, 360.0);
+    shell.pointer_cancel();
+    assert!(
+        shell.pointer_up(640.0, 360.0, 0.0).is_empty(),
+        "a palm on the screen must not point the camera at what it covered"
+    );
+}
+
+#[test]
+fn a_cancelled_drag_takes_its_box_off_the_screen() {
+    let mut shell = framed();
+    let clear = shell.chrome(0.0).expect("chrome").pixels.clone();
+    shell.pointer_down(320.0, 180.0);
+    shell.pointer_moved(640.0, 360.0);
+    assert_ne!(
+        shell.chrome(0.0).expect("chrome").pixels,
+        clear,
+        "the box should be drawn while it is being dragged"
+    );
+    shell.pointer_cancel();
+    assert_eq!(
+        shell.chrome(0.0).expect("chrome").pixels,
+        clear,
+        "and gone once the drag is taken away"
+    );
+}
+
+#[test]
+fn cancelling_when_nothing_is_being_dragged_does_nothing() {
+    let mut shell = framed();
+    shell.pointer_cancel();
+    assert!(shell.pointer_up(100.0, 100.0, 0.0).is_empty());
+}
+
+/// A finger tracing the same box the mouse test drags: the middle quarter of the shot.
+fn quarter_box(shell: &mut Shell, id: u64, now: f64) -> Vec<Intent> {
+    shell.touch(id, TouchPhase::Started, 320.0, 180.0, now);
+    shell.touch(id, TouchPhase::Moved, 640.0, 360.0, now);
+    shell.touch(id, TouchPhase::Ended, 640.0, 360.0, now)
+}
+
+#[test]
+fn a_finger_draws_the_same_box_a_mouse_does() {
+    let mut shell = framed();
+    match sent(&quarter_box(&mut shell, 7, 0.0)).first() {
+        Some(Command::TrackSet {
+            x,
+            y,
+            width,
+            height,
+            ..
+        }) => {
+            assert!((x - 0.25).abs() < 0.01, "x was {x}");
+            assert!((y - 0.25).abs() < 0.01, "y was {y}");
+            assert!((width - 0.25).abs() < 0.01, "width was {width}");
+            assert!((height - 0.25).abs() < 0.01, "height was {height}");
+        }
+        other => panic!("a finger drag should track, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_second_finger_cannot_take_over_a_box_being_drawn() {
+    let mut shell = framed();
+    shell.touch(1, TouchPhase::Started, 320.0, 180.0, 0.0);
+    shell.touch(1, TouchPhase::Moved, 640.0, 360.0, 0.0);
+
+    // A palm, or a second hand steadying the laptop.
+    shell.touch(2, TouchPhase::Started, 100.0, 100.0, 0.0);
+    shell.touch(2, TouchPhase::Moved, 110.0, 110.0, 0.0);
+    assert!(
+        shell
+            .touch(2, TouchPhase::Ended, 110.0, 110.0, 0.0)
+            .is_empty(),
+        "the second finger must not send anything of its own"
+    );
+
+    // The first finger's box is still the one that lands, unchanged.
+    match sent(&shell.touch(1, TouchPhase::Ended, 640.0, 360.0, 0.0)).first() {
+        Some(Command::TrackSet { x, width, .. }) => {
+            assert!((x - 0.25).abs() < 0.01, "x was {x}");
+            assert!((width - 0.25).abs() < 0.01, "width was {width}");
+        }
+        other => panic!("the first finger should still track, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_finger_that_lands_off_the_picture_does_not_lock_out_the_next_one() {
+    let mut shell = Shell::new();
+    shell.set_window(1280, 1280);
+    shell.set_source(1920, 1080);
+    // The window is square and the picture is 16:9, so the top is a letterbox bar.
+    shell.touch(1, TouchPhase::Started, 640.0, 10.0, 0.0);
+
+    // A finger that does land on the shot must still be able to draw.
+    let fit = shell.fit();
+    let inside = |u: f64, v: f64| (fit.x + u * fit.width, fit.y + v * fit.height);
+    let (x0, y0) = inside(0.2, 0.2);
+    let (x1, y1) = inside(0.6, 0.6);
+    shell.touch(2, TouchPhase::Started, x0, y0, 0.0);
+    shell.touch(2, TouchPhase::Moved, x1, y1, 0.0);
+    assert!(
+        !sent(&shell.touch(2, TouchPhase::Ended, x1, y1, 0.0)).is_empty(),
+        "a finger on the bar must not claim the drag it never started"
+    );
+}
+
+#[test]
+fn a_cancelled_finger_abandons_its_box() {
+    let mut shell = framed();
+    shell.touch(3, TouchPhase::Started, 320.0, 180.0, 0.0);
+    shell.touch(3, TouchPhase::Moved, 640.0, 360.0, 0.0);
+    assert!(shell
+        .touch(3, TouchPhase::Cancelled, 640.0, 360.0, 0.0)
+        .is_empty());
+    assert!(
+        shell
+            .touch(3, TouchPhase::Ended, 640.0, 360.0, 0.0)
+            .is_empty(),
+        "an Ended after a Cancelled must not resurrect the box"
+    );
+}
+
+#[test]
+fn a_finger_released_frees_the_screen_for_the_next_one() {
+    let mut shell = framed();
+    assert!(!sent(&quarter_box(&mut shell, 1, 0.0)).is_empty());
+    assert!(
+        !sent(&quarter_box(&mut shell, 2, 1.0)).is_empty(),
+        "a new finger must be able to draw once the last one lifted"
+    );
+}
+
+#[test]
+fn a_tap_sends_nothing_by_finger_as_by_mouse() {
+    let mut shell = framed();
+    shell.touch(1, TouchPhase::Started, 640.0, 360.0, 0.0);
+    assert!(
+        shell
+            .touch(1, TouchPhase::Ended, 641.0, 361.0, 0.0)
+            .is_empty(),
+        "a tap is not a box, and must not clear what the camera is following"
+    );
+}
+
+#[test]
+fn stray_phases_for_a_finger_nobody_is_tracking_do_nothing() {
+    let mut shell = framed();
+    // Events can arrive for a finger that started before the window had a size.
+    shell.touch(9, TouchPhase::Moved, 100.0, 100.0, 0.0);
+    assert!(shell
+        .touch(9, TouchPhase::Ended, 200.0, 200.0, 0.0)
+        .is_empty());
+    assert!(shell
+        .touch(9, TouchPhase::Cancelled, 200.0, 200.0, 0.0)
+        .is_empty());
 }

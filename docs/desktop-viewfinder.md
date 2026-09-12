@@ -49,6 +49,28 @@ takes one position, not a stream of presses, so the held directions are added up
 as one. The stick is re-sent every 200 ms while held, which is a keepalive rather than
 the thing that makes it move, and it rests the moment the key comes up.
 
+## Touch
+
+A finger drags a tracking box, exactly as the mouse does. That is the whole of it —
+there are no on-screen controls, and the chrome is read-only. Everything else is keys.
+
+Touch is handled explicitly rather than left to the system: once winit registers a window
+for touch, Windows stops synthesising mouse clicks from taps, so without this a finger on
+the picture would do nothing at all.
+
+One finger owns the box. A second finger, or a palm steadying the laptop, is ignored
+until the first lifts — but a finger that lands on a letterbox bar never claims the drag
+it did not start, so it cannot lock out the next one that does land on the shot. A
+cancelled touch — the system claiming the gesture, a palm rejected — abandons the box
+rather than committing it: pointing the camera at whatever a finger happened to be over
+is worse than not tracking at all.
+
+The rule lives in `Shell::touch`, not in the window, so all of that is pinned by tests on
+a machine with no touchscreen. What is **not** tested is whether the events arrive at all;
+that needs a real touchscreen.
+
+## Formats
+
 `[` and `]` walk the body's **own** list of format pairs rather than a ladder this shell
 invented. Resolution and frame rate are not independent — a body that shoots 4K may only
 offer 24, 25 and 30 there while 1080p goes to 120 — so stepping resolution keeps the
@@ -106,3 +128,4 @@ to try on a real machine, in order:
 2. `Space`, then `R` — does the body roll and stop.
 3. The arrows — does the gimbal move and, more importantly, does it **stop**.
 4. A drag — does the camera follow the thing that was drawn around, not near it.
+5. The same drag with a finger, on a touchscreen — does the event arrive at all.

@@ -7,4 +7,4 @@
 
 pub mod shell;
 
-pub use shell::{Intent, Shell, Toggles};
+pub use shell::{Intent, Shell, Toggles, TouchPhase};

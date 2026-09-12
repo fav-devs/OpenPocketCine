@@ -38,6 +38,17 @@ pub enum Intent {
     Quit,
 }
 
+/// What a finger did — winit's touch phases, without winit, so the rule about which
+/// finger owns a drag can be checked without a touchscreen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TouchPhase {
+    Started,
+    Moved,
+    Ended,
+    /// The system took the gesture, or a palm landed.
+    Cancelled,
+}
+
 /// Assists the operator has switched on.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Toggles {
@@ -88,6 +99,9 @@ pub struct Shell {
     drag: Option<Drag>,
     /// A box already sent, and when it stops being drawn.
     committed: Option<((f64, f64, f64, f64), f64)>,
+    /// The finger drawing the box, if one is. A second finger must not take over a box
+    /// somebody is halfway through drawing.
+    finger: Option<u64>,
     window: (u32, u32),
     source: Option<(u32, u32)>,
     /// Tracking boxes are numbered so the camera can tell one request from the next.
@@ -120,6 +134,7 @@ impl Shell {
             toggles: Toggles::default(),
             drag: None,
             committed: None,
+            finger: None,
             window: (0, 0),
             source: None,
             next_track_id: 1,
@@ -369,6 +384,47 @@ impl Shell {
         self.next_track_id = self.next_track_id.wrapping_add(1).max(1);
         self.committed = Some((drag.rectangle(), now + BOX_CONFIRM));
         vec![Intent::Send(command)]
+    }
+
+    /// A finger touched, moved, or left the screen.
+    ///
+    /// A touchscreen does not synthesise mouse clicks once the window is registered for
+    /// touch, so this is the only way a finger reaches the picture.
+    pub fn touch(&mut self, id: u64, phase: TouchPhase, x: f64, y: f64, now: f64) -> Vec<Intent> {
+        let mine = self.finger == Some(id);
+        match phase {
+            TouchPhase::Started if self.finger.is_none() => {
+                self.pointer_down(x, y);
+                // Claimed only if a box actually started. A finger that landed on a
+                // letterbox bar must not lock out the next one that lands on the shot.
+                if self.drag.is_some() {
+                    self.finger = Some(id);
+                }
+            }
+            TouchPhase::Moved if mine => self.pointer_moved(x, y),
+            TouchPhase::Ended if mine => {
+                self.finger = None;
+                return self.pointer_up(x, y, now);
+            }
+            TouchPhase::Cancelled if mine => {
+                self.finger = None;
+                self.pointer_cancel();
+            }
+            _ => {}
+        }
+        Vec::new()
+    }
+
+    /// The drag was taken away rather than finished — a palm landing on a touchscreen,
+    /// or the system claiming the gesture for itself.
+    ///
+    /// The box is abandoned, never committed: pointing the camera at whatever a finger
+    /// happened to be over is worse than not tracking at all.
+    pub fn pointer_cancel(&mut self) {
+        if self.drag.take().is_some() {
+            self.hud.drag = None;
+            self.chrome_stale = true;
+        }
     }
 
     /// The clock moved on: fires the countdown and keeps the stick alive.

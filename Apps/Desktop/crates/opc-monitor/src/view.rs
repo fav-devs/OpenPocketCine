@@ -13,13 +13,13 @@ use opc_render::{write_png, FeedRenderer, Lut, Presented};
 use opc_ui::{Key as UiKey, Phase};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, MouseButton, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
 use crate::link::{FromCamera, Link};
-use opc_monitor::shell::{Intent, Shell};
+use opc_monitor::shell::{Intent, Shell, TouchPhase as Finger};
 
 /// A backlog longer than this means the window stalled. Predicted pictures cannot be
 /// thinned — they need the ones before them — so the only safe skip is to a keyframe.
@@ -332,6 +332,17 @@ impl ApplicationHandler for View {
                         self.carry_out(intents, event_loop);
                     }
                 }
+            }
+            WindowEvent::Touch(touch) => {
+                let finger = match touch.phase {
+                    TouchPhase::Started => Finger::Started,
+                    TouchPhase::Moved => Finger::Moved,
+                    TouchPhase::Ended => Finger::Ended,
+                    TouchPhase::Cancelled => Finger::Cancelled,
+                };
+                let (x, y) = (touch.location.x, touch.location.y);
+                let intents = self.shell.touch(touch.id, finger, x, y, now);
+                self.carry_out(intents, event_loop);
             }
             WindowEvent::RedrawRequested => self.draw(),
             _ => {}
