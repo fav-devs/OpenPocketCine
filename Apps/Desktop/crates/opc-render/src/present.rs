@@ -167,7 +167,7 @@ impl Presenter {
     pub fn new(
         gpu: &Gpu,
         surface: Surface,
-        blit_layout: vk::PipelineLayout,
+        final_layout: vk::PipelineLayout,
         vertex: vk::ShaderModule,
         fragment: vk::ShaderModule,
         width: u32,
@@ -176,10 +176,10 @@ impl Presenter {
         let loader = swapchain::Device::new(&gpu.instance, &gpu.device);
         let chosen = surface.format(gpu.physical)?;
         let render_pass = build_present_pass(&gpu.device, chosen.format)?;
-        let pipeline = crate::renderer::blit_pipeline(
+        let pipeline = crate::renderer::present_pipeline(
             &gpu.device,
             render_pass,
-            blit_layout,
+            final_layout,
             vertex,
             fragment,
         )?;

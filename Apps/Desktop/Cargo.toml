@@ -6,6 +6,7 @@ members = [
     "crates/opc-decode",
     "crates/opc-relay",
     "crates/opc-render",
+    "crates/opc-ui",
     "crates/opc-watcher",
 ]
 

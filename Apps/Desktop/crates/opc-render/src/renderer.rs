@@ -3,7 +3,9 @@
 //! 1. `ycbcr.frag` converts the decoder's planes to RGB **at the source raster**.
 //! 2. `peaking_blur.frag` and `peaking_mask.frag` build the edge mask, when peaking is on.
 //! 3. `feed.frag` grades through the colour cube and paints zebra and peaking.
-//! 4. `blit.frag` stretches the result to the display raster, or to a swapchain image.
+//! 4. `blit.frag` stretches the result to the display raster.
+//! 5. `overlay.frag` composites the shell's chrome over it, into the image or the
+//!    swapchain. The chrome never goes through the cube, so a HUD reads true.
 //!
 //! The order is the phones' order and is not an accident: cubing after the upsample
 //! blotched D-Log2 on Android. Every pass but the first is the Android shell's own shader.
@@ -34,7 +36,10 @@ const PASS_FEED: usize = 1;
 const PASS_BLIT: usize = 2;
 const PASS_PEAK_BLUR: usize = 3;
 const PASS_PEAK_MASK: usize = 4;
-const PASS_COUNT: usize = 5;
+/// Composites the shell's chrome over the stretched picture. Separate from the grade so
+/// the HUD never goes through the colour cube.
+const PASS_OVERLAY: usize = 5;
+const PASS_COUNT: usize = 6;
 
 /// A rendered picture, 8-bit RGBA, tightly packed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +77,11 @@ struct Targets {
     output: DeviceImage,
     peaking_blur: DeviceImage,
     peaking_mask: DeviceImage,
+    /// The graded picture at the display raster, before chrome.
+    stretched: DeviceImage,
+    /// The chrome, uploaded from the shell when it changes.
+    overlay: DeviceImage,
+    overlay_staging: HostBuffer,
     /// Indexed by the `PASS_*` constants; `PASS_BLIT`'s is the offscreen target.
     framebuffers: [vk::Framebuffer; PASS_COUNT],
     readback: HostBuffer,
@@ -95,9 +105,12 @@ impl Targets {
                 &self.output,
                 &self.peaking_blur,
                 &self.peaking_mask,
+                &self.stretched,
+                &self.overlay,
             ] {
                 image.destroy(device);
             }
+            self.overlay_staging.destroy(device);
             self.readback.destroy(device);
         }
     }
@@ -113,9 +126,9 @@ struct Pipelines {
     pipelines: [vk::Pipeline; PASS_COUNT],
     pool: vk::DescriptorPool,
     sets: [vk::DescriptorSet; PASS_COUNT],
-    /// Kept alive so a swapchain can build its own blit pipeline for its own format.
+    /// Kept alive so a swapchain can build its own final pipeline for its own format.
     vertex_module: vk::ShaderModule,
-    blit_module: vk::ShaderModule,
+    overlay_module: vk::ShaderModule,
 }
 
 impl Pipelines {
@@ -135,7 +148,7 @@ impl Pipelines {
             device.destroy_sampler(self.nearest, None);
             device.destroy_render_pass(self.render_pass, None);
             device.destroy_shader_module(self.vertex_module, None);
-            device.destroy_shader_module(self.blit_module, None);
+            device.destroy_shader_module(self.overlay_module, None);
         }
     }
 }
@@ -154,6 +167,12 @@ pub struct FeedRenderer {
     /// sets point at actually changed — not once a frame.
     descriptors_dirty: bool,
     peaking_bound: bool,
+    /// The chrome the shell last handed over, at the raster it drew it at.
+    overlay: Option<Rgba>,
+    /// Cleared when the chrome or the display raster changes, so a still HUD is copied
+    /// to the staging buffer once rather than every frame.
+    overlay_staged: bool,
+    overlay_opacity: f32,
 }
 
 impl std::fmt::Debug for FeedRenderer {
@@ -250,9 +269,9 @@ impl FeedRenderer {
                 Some(Presenter::new(
                     &gpu,
                     surface,
-                    pipelines.layouts[PASS_BLIT],
+                    pipelines.layouts[PASS_OVERLAY],
                     pipelines.vertex_module,
-                    pipelines.blit_module,
+                    pipelines.overlay_module,
                     width,
                     height,
                 )?)
@@ -271,6 +290,9 @@ impl FeedRenderer {
             dummy_3d,
             descriptors_dirty: true,
             peaking_bound: false,
+            overlay: None,
+            overlay_staged: false,
+            overlay_opacity: 1.0,
         })
     }
 
@@ -359,6 +381,37 @@ impl FeedRenderer {
         Ok(())
     }
 
+    /// Hands the shell's chrome over, to be composited after the stretch.
+    ///
+    /// The chrome is expected at the display raster. A mismatch is cropped or padded
+    /// rather than refused: a window that resized between the shell drawing and this
+    /// call should cost one slightly wrong frame, not an error the caller must handle.
+    pub fn set_overlay(&mut self, chrome: &Rgba) {
+        let matches = self
+            .overlay
+            .as_ref()
+            .is_some_and(|current| current == chrome);
+        if matches {
+            return;
+        }
+        self.overlay = Some(chrome.clone());
+        self.overlay_staged = false;
+    }
+
+    /// Drops the chrome. The next frame is the picture alone.
+    pub fn clear_overlay(&mut self) {
+        if self.overlay.is_none() {
+            return;
+        }
+        self.overlay = None;
+        self.overlay_staged = false;
+    }
+
+    /// How strongly the chrome is painted, `0.0`–`1.0`. The picture is never dimmed.
+    pub fn set_overlay_opacity(&mut self, opacity: f32) {
+        self.overlay_opacity = opacity.clamp(0.0, 1.0);
+    }
+
     /// Converts, grades, and stretches one picture into an image.
     pub fn render(
         &mut self,
@@ -373,6 +426,7 @@ impl FeedRenderer {
         let device = &self.gpu.device;
         let pipelines = &self.pipelines;
         let lut_size = self.lut_size;
+        let overlay_opacity = self.overlay_opacity;
         self.gpu.one_shot(|command| {
             record_frame(
                 device,
@@ -382,12 +436,13 @@ impl FeedRenderer {
                 picture,
                 options,
                 lut_size,
-                targets.framebuffers[PASS_BLIT],
+                targets.framebuffers[PASS_OVERLAY],
                 vk::Extent2D {
                     width: display_width,
                     height: display_height,
                 },
-                pipelines.pipelines[PASS_BLIT],
+                pipelines.pipelines[PASS_OVERLAY],
+                overlay_opacity,
             );
             // Safety: the passes above left `output` readable by shaders; move it to a
             // transfer source and copy it back to host memory.
@@ -469,6 +524,7 @@ impl FeedRenderer {
             framebuffer,
             extent,
             pipeline,
+            self.overlay_opacity,
         );
 
         let presenter = self.presenter.as_mut().expect("still presenting");
@@ -513,7 +569,8 @@ impl FeedRenderer {
             self.write_descriptors();
             self.descriptors_dirty = false;
         }
-        self.stage_planes(picture)
+        self.stage_planes(picture)?;
+        self.stage_overlay()
     }
 
     fn ensure_targets(
@@ -546,6 +603,7 @@ impl FeedRenderer {
             display_height,
         )?);
         self.descriptors_dirty = true;
+        self.overlay_staged = false;
         Ok(())
     }
 
@@ -585,6 +643,33 @@ impl FeedRenderer {
         Ok(())
     }
 
+    /// Packs the chrome into its staging buffer at the display raster. Rows and columns
+    /// the chrome does not reach stay transparent, so a stale HUD cannot smear.
+    fn stage_overlay(&mut self) -> Result<(), RenderError> {
+        if self.overlay_staged {
+            return Ok(());
+        }
+        let targets = self.targets.as_ref().expect("targets were ensured");
+        let width = targets.display_width as usize;
+        let height = targets.display_height as usize;
+        let mut packed = vec![0_u8; width * height * 4];
+        if let Some(chrome) = self.overlay.as_ref() {
+            let rows = height.min(chrome.height as usize);
+            let columns = width.min(chrome.width as usize);
+            for row in 0..rows {
+                let from = row * chrome.width as usize * 4;
+                let to = row * width * 4;
+                packed[to..to + columns * 4]
+                    .copy_from_slice(&chrome.pixels[from..from + columns * 4]);
+            }
+        }
+        targets
+            .overlay_staging
+            .write_bytes(&self.gpu.device, &packed)?;
+        self.overlay_staged = true;
+        Ok(())
+    }
+
     fn write_descriptors(&self) {
         let targets = self.targets.as_ref().expect("targets were ensured");
         let linear = self.pipelines.linear;
@@ -616,6 +701,12 @@ impl FeedRenderer {
             bind(mask_view, nearest),
         ];
         let blit = bind(targets.graded.view, linear);
+        // The chrome is rasterised at the display raster, so sampling it is 1:1 —
+        // a linear filter would only soften text the operator needs to read.
+        let overlay = [
+            bind(targets.stretched.view, linear),
+            bind(targets.overlay.view, nearest),
+        ];
         let peak_blur = bind(targets.rgb.view, linear);
         let peak_mask = [
             bind(targets.rgb.view, linear),
@@ -624,7 +715,7 @@ impl FeedRenderer {
 
         // Built inline rather than through a helper: each `image_info` borrows the
         // array above it, and a closure would shorten that borrow to its own body.
-        let mut writes = Vec::with_capacity(12);
+        let mut writes = Vec::with_capacity(14);
         for (binding, image) in ycbcr.iter().enumerate() {
             writes.push(
                 vk::WriteDescriptorSet::default()
@@ -638,6 +729,15 @@ impl FeedRenderer {
             writes.push(
                 vk::WriteDescriptorSet::default()
                     .dst_set(self.pipelines.sets[PASS_FEED])
+                    .dst_binding(binding as u32)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(image),
+            );
+        }
+        for (binding, image) in overlay.iter().enumerate() {
+            writes.push(
+                vk::WriteDescriptorSet::default()
+                    .dst_set(self.pipelines.sets[PASS_OVERLAY])
                     .dst_binding(binding as u32)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .image_info(image),
@@ -711,6 +811,7 @@ fn record_frame(
     target: vk::Framebuffer,
     target_extent: vk::Extent2D,
     target_pipeline: vk::Pipeline,
+    overlay_opacity: f32,
 ) {
     let (chroma_width, chroma_height) = picture.chroma_size();
     let plane_sizes = [
@@ -746,6 +847,35 @@ fn record_frame(
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             );
         }
+    }
+
+    // Safety: recording; the chrome's buffer and image belong to this device. The copy
+    // runs every frame even when the chrome did not change, because the image's contents
+    // are not preserved across the transition out of `UNDEFINED`.
+    unsafe {
+        transition(
+            device,
+            command,
+            targets.overlay.image,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        );
+        copy_buffer_to_image(
+            device,
+            command,
+            targets.overlay_staging.buffer,
+            &targets.overlay,
+            targets.display_width,
+            targets.display_height,
+            1,
+        );
+        transition(
+            device,
+            command,
+            targets.overlay.image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        );
     }
 
     let source = vk::Extent2D {
@@ -810,10 +940,21 @@ fn record_frame(
         pipelines,
         command,
         PASS_BLIT,
+        targets.framebuffers[PASS_BLIT],
+        target_extent,
+        pipelines.pipelines[PASS_BLIT],
+        &[1.0, 0.0],
+    );
+
+    draw(
+        device,
+        pipelines,
+        command,
+        PASS_OVERLAY,
         target,
         target_extent,
         target_pipeline,
-        &[1.0, 0.0],
+        &[overlay_opacity, 0.0],
     );
 }
 
@@ -962,9 +1103,9 @@ fn shader_module(device: &Device, spirv: &[u8]) -> Result<vk::ShaderModule, Rend
     unsafe { device.create_shader_module(&info, None) }.context("vkCreateShaderModule")
 }
 
-/// Builds a blit pipeline against an arbitrary render pass, so a swapchain can have one
-/// in its own colour format.
-pub(crate) fn blit_pipeline(
+/// Builds the final pipeline against an arbitrary render pass, so a swapchain can have
+/// one in its own colour format.
+pub(crate) fn present_pipeline(
     device: &Device,
     render_pass: vk::RenderPass,
     layout: vk::PipelineLayout,
@@ -1015,7 +1156,7 @@ fn build_pipelines(gpu: &Gpu) -> Result<Pipelines, RenderError> {
     let nearest = sampler(device, vk::Filter::NEAREST)?;
 
     // Bindings per pass, indexed by `PASS_*`.
-    let counts = [3_u32, 5, 1, 1, 2];
+    let counts = [3_u32, 5, 1, 1, 2, 2];
     let mut set_layouts = [vk::DescriptorSetLayout::null(); PASS_COUNT];
     for (index, count) in counts.iter().enumerate() {
         let bindings: Vec<_> = (0..*count)
@@ -1033,7 +1174,7 @@ fn build_pipelines(gpu: &Gpu) -> Result<Pipelines, RenderError> {
             .context("vkCreateDescriptorSetLayout")?;
     }
 
-    let constant_sizes = [16_u32, (FEED_CONSTANTS * 4) as u32, 8, 8, 16];
+    let constant_sizes = [16_u32, (FEED_CONSTANTS * 4) as u32, 8, 8, 16, 8];
     let mut layouts = [vk::PipelineLayout::null(); PASS_COUNT];
     for (index, size) in constant_sizes.iter().enumerate() {
         let range = [vk::PushConstantRange::default()
@@ -1053,9 +1194,9 @@ fn build_pipelines(gpu: &Gpu) -> Result<Pipelines, RenderError> {
         device,
         include_bytes!(concat!(env!("OUT_DIR"), "/fullscreen.vert.spv")),
     )?;
-    let blit_module = shader_module(
+    let overlay_module = shader_module(
         device,
-        include_bytes!(concat!(env!("OUT_DIR"), "/blit.frag.spv")),
+        include_bytes!(concat!(env!("OUT_DIR"), "/overlay.frag.spv")),
     )?;
     let fragments = [
         shader_module(
@@ -1066,7 +1207,10 @@ fn build_pipelines(gpu: &Gpu) -> Result<Pipelines, RenderError> {
             device,
             include_bytes!(concat!(env!("OUT_DIR"), "/feed.frag.spv")),
         )?,
-        blit_module,
+        shader_module(
+            device,
+            include_bytes!(concat!(env!("OUT_DIR"), "/blit.frag.spv")),
+        )?,
         shader_module(
             device,
             include_bytes!(concat!(env!("OUT_DIR"), "/peaking_blur.frag.spv")),
@@ -1075,6 +1219,7 @@ fn build_pipelines(gpu: &Gpu) -> Result<Pipelines, RenderError> {
             device,
             include_bytes!(concat!(env!("OUT_DIR"), "/peaking_mask.frag.spv")),
         )?,
+        overlay_module,
     ];
 
     let built = create_pipelines(device, render_pass, &layouts, vertex_module, &fragments);
@@ -1082,7 +1227,7 @@ fn build_pipelines(gpu: &Gpu) -> Result<Pipelines, RenderError> {
     // pipelines referencing them exist.
     unsafe {
         for (index, module) in fragments.iter().enumerate() {
-            if index != PASS_BLIT {
+            if index != PASS_OVERLAY {
                 device.destroy_shader_module(*module, None);
             }
         }
@@ -1117,7 +1262,7 @@ fn build_pipelines(gpu: &Gpu) -> Result<Pipelines, RenderError> {
         pool,
         sets,
         vertex_module,
-        blit_module,
+        overlay_module,
     })
 }
 
@@ -1231,6 +1376,13 @@ fn build_targets(
     let graded = at_source(gpu)?;
     let peaking_blur = at_source(gpu)?;
     let peaking_mask = at_source(gpu)?;
+    let stretched = DeviceImage::new_2d(
+        gpu,
+        display_width,
+        display_height,
+        COLOR_FORMAT,
+        attachment_usage,
+    )?;
     let output = DeviceImage::new_2d(
         gpu,
         display_width,
@@ -1238,14 +1390,28 @@ fn build_targets(
         COLOR_FORMAT,
         attachment_usage | vk::ImageUsageFlags::TRANSFER_SRC,
     )?;
+    // The chrome arrives already rasterised; the GPU only samples it.
+    let overlay = DeviceImage::new_2d(
+        gpu,
+        display_width,
+        display_height,
+        COLOR_FORMAT,
+        vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
+    )?;
+    let overlay_staging = HostBuffer::new(
+        gpu,
+        (display_width as vk::DeviceSize) * (display_height as vk::DeviceSize) * 4,
+        vk::BufferUsageFlags::TRANSFER_SRC,
+    )?;
 
     let mut framebuffers = [vk::Framebuffer::null(); PASS_COUNT];
     let attachments = [
         (PASS_YCBCR, &rgb),
         (PASS_FEED, &graded),
-        (PASS_BLIT, &output),
+        (PASS_BLIT, &stretched),
         (PASS_PEAK_BLUR, &peaking_blur),
         (PASS_PEAK_MASK, &peaking_mask),
+        (PASS_OVERLAY, &output),
     ];
     for (pass, image) in attachments {
         let views = [image.view];
@@ -1282,6 +1448,9 @@ fn build_targets(
         output,
         peaking_blur,
         peaking_mask,
+        stretched,
+        overlay,
+        overlay_staging,
         framebuffers,
         readback,
     })

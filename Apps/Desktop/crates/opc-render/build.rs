@@ -32,7 +32,7 @@ const SHARED: [(&str, &str); 5] = [
 ];
 
 /// Desktop-only: software decode hands over planes, not an AHardwareBuffer.
-const LOCAL: [&str; 1] = ["ycbcr.frag"];
+const LOCAL: [&str; 2] = ["ycbcr.frag", "overlay.frag"];
 
 fn compiler() -> (&'static str, Vec<String>) {
     if Command::new("glslc").arg("--version").output().is_ok() {

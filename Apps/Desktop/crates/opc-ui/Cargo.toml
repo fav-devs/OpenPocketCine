@@ -1,0 +1,13 @@
+[package]
+name = "opc-ui"
+description = "Viewfinder chrome: the HUD overlay, control mapping, and operator state."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+opc-camera = { path = "../opc-camera" }
+
+[lints]
+workspace = true

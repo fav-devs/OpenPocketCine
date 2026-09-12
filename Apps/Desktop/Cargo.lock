@@ -1034,6 +1034,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "opc-ui"
+version = "0.1.0"
+dependencies = [
+ "opc-camera",
+]
+
+[[package]]
 name = "opc-watcher"
 version = "0.1.0"
 dependencies = [
