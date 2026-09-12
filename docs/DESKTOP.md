@@ -40,8 +40,10 @@ OpenPocketViewCore (Swift)  →  OpenPocketCineDesktopFacade (@_cdecl)  →  opc
 | `opc-relay` | Receive buffer, Bonjour discovery, TCP transport, the join state machine |
 | `opc-camera` | Camera commands, DUML transport, and the window-ACK pump |
 | `opc-decode` | HEVC and AVC decoding over libavcodec, and Annex-B replay of a dump |
-| `opc-render` | The Vulkan feed pipeline, the cube upload, and PNG stills |
-| `opc-watcher` | The command-line shell |
+| `opc-render` | The Vulkan feed pipeline, the cube upload, the chrome composite, and PNG stills |
+| `opc-ui` | The viewfinder's chrome: a bitmap font, a CPU canvas, the key map, the format ladder, the tracking arithmetic |
+| `opc-monitor` | The viewfinder — a window on the camera itself |
+| `opc-watcher` | The command-line shell, and a window on a phone's shared feed |
 
 ## What the shell owns
 
@@ -56,7 +58,16 @@ Up to five passes, in the phones' order:
 1. `ycbcr.frag` converts the decoder's planes to RGB **at the source raster**.
 2. `peaking_blur.frag` and `peaking_mask.frag` build the edge mask, when peaking is on.
 3. `feed.frag` grades through the colour cube and paints zebra and peaking.
-4. `blit.frag` stretches the result to the display raster, or to a swapchain image.
+4. `blit.frag` stretches the result into a centred rectangle that keeps the picture's
+   proportions; the bars around it are the render pass's own clear.
+5. `overlay.frag` composites the shell's chrome over that, into an image or a swapchain
+   image.
+
+The chrome gets its own pass rather than a branch inside `feed.frag` for one reason: a
+HUD that went through the colour cube would tell an operator the wrong thing about
+exposure. `opc_render::letterbox` is public because the shell has to map a click back
+through exactly the rectangle the blit drew into — one formula, asserted against the
+pixels it produces.
 
 Cube at the feed raster, *then* stretch. Cubing after the upsample blotched D-Log2 on
 Android ([`../ANDROID.md`](../ANDROID.md)) and would here too.
@@ -168,10 +179,11 @@ otherwise. Anything that calls the core fails at link rather than running a stub
 | 1 | Discovery, join, telemetry, picture ingest, HEVC dump | In tree, **not physically verified** |
 | 2a | Decode and grade: libavcodec, the Vulkan feed pipeline, the cube, PNG stills | In tree, **not physically verified** |
 | 2b | A window: swapchain present, resize, zebra and peaking | In tree, **not physically verified** |
-| 2c | False colour and the scopes; operator chrome | Not started |
+| 2c | Operator chrome: the HUD, the key map, tracking, the composite pass | In tree, **not physically verified** — [`desktop-viewfinder.md`](desktop-viewfinder.md) |
+| 2d | False colour and the scopes | Not started |
 | 3 | Direct camera session: BLE credential read, SoftAP join, UDP datalink, the ACK pump | Commands and transport exposed; the session itself not started — [`desktop-camera-link.md`](desktop-camera-link.md) |
 
-Milestone 2c is false colour and the scopes. `feed.frag` already samples the limits paint
+Milestone 2d is false colour and the scopes. `feed.frag` already samples the limits paint
 and weight cubes; what is missing is generating them, which `LiveColorScience.falseColorBands`
 in the core already knows how to do — the Android facade builds a packed-2D variant for its
 GLES fallback in `FeedEffectsWire`, and the desktop needs a 3D one through the same seam.
@@ -203,10 +215,16 @@ presents, rebuilds on resize, survives a minimised window, and keeps presenting 
 frames-in-flight count. These run on whatever Vulkan device is present, including a
 software one, and skip rather than fail where there is none.
 
+The viewfinder's own behaviour is checked the same way: the key map, the gimbal stick,
+the countdown, the format ladder, the tracking arithmetic and the chrome are decided by
+`opc_monitor::shell`, which has no window, no GPU and no camera in it, and five further
+tests drive that shell and the renderer together on a software device so that chrome
+which is decided correctly but never composited is caught.
+
 What is not checked: nothing has been run against a live host or a camera. No real
 window has been opened — the swapchain is exercised through a headless surface, so
-winit, the platform surface extensions, and the event loop in `crates/opc-watcher/src/watch.rs`
-are unrun. And the Swift facade has no Swift toolchain in the authoring environment, so
+winit, the platform surface extensions, and the event loops in
+`crates/opc-watcher/src/watch.rs` and `crates/opc-monitor/src/view.rs` are unrun. And the Swift facade has no Swift toolchain in the authoring environment, so
 its own tests and the Rust tests that call it are written but unrun. The
 grade-matches-the-core comparison in `crates/opc-render/tests/lut_grade.rs` is the one to
 run first on a machine with Swift.
