@@ -33,6 +33,13 @@ pub enum Action {
     ToggleMirror,
     /// Clear whatever the camera is following.
     ClearTracking,
+    /// Step the body to its next resolution, or its next frame rate at that resolution.
+    /// Which one each becomes depends on what the body says it has, so the shell
+    /// resolves it against the camera's own list.
+    CycleResolution,
+    CycleFrameRate,
+    /// Hide the chrome entirely, for a clean look at the shot.
+    ToggleChrome,
     /// Grab the current frame.
     Still,
     Quit,
@@ -82,23 +89,10 @@ impl Controls {
             Key::Space => Action::Send(Command::RecordStart),
             Key::Escape => Action::Quit,
 
-            // The gimbal stick. Held keys repeat, and a release rests it.
-            Key::Left => Action::Send(Command::GimbalStick {
-                axis0: STICK_CENTRE - STICK_THROW,
-                axis1: STICK_CENTRE,
-            }),
-            Key::Right => Action::Send(Command::GimbalStick {
-                axis0: STICK_CENTRE + STICK_THROW,
-                axis1: STICK_CENTRE,
-            }),
-            Key::Up => Action::Send(Command::GimbalStick {
-                axis0: STICK_CENTRE,
-                axis1: STICK_CENTRE + STICK_THROW,
-            }),
-            Key::Down => Action::Send(Command::GimbalStick {
-                axis0: STICK_CENTRE,
-                axis1: STICK_CENTRE - STICK_THROW,
-            }),
+            // The arrows are the gimbal stick, and a stick has to see every direction
+            // at once — two keys held is a diagonal, not the second key winning. The
+            // shell keeps that state in a `Stick` and sends it on a timer.
+            Key::Left | Key::Right | Key::Up | Key::Down => return None,
 
             Key::Char(character) => match character.to_ascii_lowercase() {
                 'r' => Action::Send(Command::RecordStop),
@@ -118,6 +112,9 @@ impl Controls {
                 'c' => Action::Send(Command::GimbalRecenter),
                 'f' => Action::Send(Command::GimbalFlip),
                 'x' => Action::ClearTracking,
+                '[' => Action::CycleResolution,
+                ']' => Action::CycleFrameRate,
+                'h' => Action::ToggleChrome,
                 'z' => Action::ToggleZebra,
                 'p' => Action::TogglePeaking,
                 'l' => Action::ToggleGrade,
@@ -128,11 +125,51 @@ impl Controls {
         })
     }
 
-    /// The stick resting at centre, sent when a direction key comes up.
-    pub fn release_stick() -> Command {
+}
+
+/// Which directions are held right now.
+///
+/// The gimbal takes one stick position, not a stream of key presses, so the shell holds
+/// this and sends what it adds up to. Opposite directions cancel, which is what a
+/// physical stick does when it is pushed both ways.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Stick {
+    pub left: bool,
+    pub right: bool,
+    pub up: bool,
+    pub down: bool,
+}
+
+impl Stick {
+    /// Records a direction going down or coming up. Returns true when this changed the
+    /// stick, so the shell can send only on a change.
+    pub fn set(&mut self, key: Key, held: bool) -> bool {
+        let slot = match key {
+            Key::Left => &mut self.left,
+            Key::Right => &mut self.right,
+            Key::Up => &mut self.up,
+            Key::Down => &mut self.down,
+            _ => return false,
+        };
+        let changed = *slot != held;
+        *slot = held;
+        changed
+    }
+
+    /// Nothing is held, so the gimbal should be resting.
+    pub fn is_resting(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Everything held, added up, as the camera's own stick units.
+    pub fn command(&self) -> Command {
+        let axis = |negative: bool, positive: bool| {
+            let throw = i32::from(positive) - i32::from(negative);
+            (i32::from(STICK_CENTRE) + throw * i32::from(STICK_THROW)) as u16
+        };
         Command::GimbalStick {
-            axis0: STICK_CENTRE,
-            axis1: STICK_CENTRE,
+            axis0: axis(self.left, self.right),
+            axis1: axis(self.down, self.up),
         }
     }
 }
@@ -154,30 +191,70 @@ mod tests {
         );
     }
 
+    fn thrown(stick: &Stick) -> (u16, u16) {
+        match stick.command() {
+            Command::GimbalStick { axis0, axis1 } => (axis0, axis1),
+            other => panic!("expected a stick throw, got {other:?}"),
+        }
+    }
+
     #[test]
     fn the_arrows_throw_the_stick_around_its_centre() {
-        let mut controls = Controls::new();
-        let mut throw = |key| match controls.press(key) {
-            Some(Action::Send(Command::GimbalStick { axis0, axis1 })) => (axis0, axis1),
-            other => panic!("expected a stick throw, got {other:?}"),
-        };
-        assert_eq!(throw(Key::Left).0, STICK_CENTRE - STICK_THROW);
-        assert_eq!(throw(Key::Right).0, STICK_CENTRE + STICK_THROW);
-        assert_eq!(throw(Key::Up).1, STICK_CENTRE + STICK_THROW);
-        assert_eq!(throw(Key::Down).1, STICK_CENTRE - STICK_THROW);
-        // Each axis rests while the other is thrown.
-        assert_eq!(throw(Key::Left).1, STICK_CENTRE);
+        for (key, expected) in [
+            (Key::Left, (STICK_CENTRE - STICK_THROW, STICK_CENTRE)),
+            (Key::Right, (STICK_CENTRE + STICK_THROW, STICK_CENTRE)),
+            (Key::Up, (STICK_CENTRE, STICK_CENTRE + STICK_THROW)),
+            (Key::Down, (STICK_CENTRE, STICK_CENTRE - STICK_THROW)),
+        ] {
+            let mut stick = Stick::default();
+            assert!(stick.set(key, true));
+            assert_eq!(thrown(&stick), expected, "for {key:?}");
+        }
+    }
+
+    #[test]
+    fn two_directions_held_is_a_diagonal_not_the_last_one_pressed() {
+        let mut stick = Stick::default();
+        stick.set(Key::Right, true);
+        stick.set(Key::Up, true);
+        assert_eq!(
+            thrown(&stick),
+            (STICK_CENTRE + STICK_THROW, STICK_CENTRE + STICK_THROW)
+        );
+    }
+
+    #[test]
+    fn opposite_directions_cancel_the_way_a_real_stick_does() {
+        let mut stick = Stick::default();
+        stick.set(Key::Left, true);
+        stick.set(Key::Right, true);
+        assert_eq!(thrown(&stick), (STICK_CENTRE, STICK_CENTRE));
+        assert!(!stick.is_resting(), "both keys are still held");
     }
 
     #[test]
     fn letting_go_rests_the_stick() {
-        assert_eq!(
-            Controls::release_stick(),
-            Command::GimbalStick {
-                axis0: STICK_CENTRE,
-                axis1: STICK_CENTRE
-            }
-        );
+        let mut stick = Stick::default();
+        stick.set(Key::Left, true);
+        assert!(stick.set(Key::Left, false));
+        assert!(stick.is_resting());
+        assert_eq!(thrown(&stick), (STICK_CENTRE, STICK_CENTRE));
+    }
+
+    #[test]
+    fn a_key_that_is_already_down_does_not_count_as_a_change() {
+        let mut stick = Stick::default();
+        assert!(stick.set(Key::Up, true));
+        assert!(!stick.set(Key::Up, true), "a repeat is not a new throw");
+        assert!(!stick.set(Key::Char('z'), true), "not a direction");
+    }
+
+    #[test]
+    fn the_arrows_do_not_go_through_the_key_map() {
+        let mut controls = Controls::new();
+        for key in [Key::Left, Key::Right, Key::Up, Key::Down] {
+            assert_eq!(controls.press(key), None, "{key:?} belongs to the stick");
+        }
     }
 
     #[test]
@@ -241,6 +318,9 @@ mod tests {
             ('s', Action::Still),
             ('t', Action::ToggleTimer),
             ('x', Action::ClearTracking),
+            ('[', Action::CycleResolution),
+            (']', Action::CycleFrameRate),
+            ('h', Action::ToggleChrome),
         ] {
             assert_eq!(controls.press(Key::Char(key)), Some(expected));
         }

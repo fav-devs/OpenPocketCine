@@ -82,6 +82,9 @@ pub struct Hud {
     pub countdown: Option<Countdown>,
     /// A tracking box being dragged, in picture fractions.
     pub drag: Option<(f64, f64, f64, f64)>,
+    /// Where the picture sits inside the window. `None` means it fills it — a box drawn
+    /// against the window when the picture is letterboxed would sit off the subject.
+    pub fit: Option<Fit>,
     /// Assists the operator has turned on, drawn as a short list.
     pub assists: Vec<&'static str>,
 }
@@ -94,6 +97,7 @@ impl Default for Hud {
             fps: 0,
             countdown: None,
             drag: None,
+            fit: None,
             assists: Vec::new(),
         }
     }
@@ -169,12 +173,12 @@ impl Hud {
 
         // A tracking box first, so the strips sit over it rather than under.
         if let Some((x, y, box_width, box_height)) = self.drag {
-            let fit = Fit {
+            let fit = self.fit.unwrap_or(Fit {
                 x: 0.0,
                 y: 0.0,
                 width: f64::from(width),
                 height: f64::from(height),
-            };
+            });
             canvas.stroke(
                 (fit.x + x * fit.width) as i64,
                 (fit.y + y * fit.height) as i64,

@@ -10,10 +10,12 @@
 pub mod canvas;
 pub mod controls;
 pub mod font;
+pub mod format;
 pub mod hud;
 pub mod tracking;
 
 pub use canvas::{Canvas, Colour};
-pub use controls::{Action, Controls, Key};
+pub use controls::{Action, Controls, Key, Stick};
+pub use format::{next_frame_rate, next_resolution};
 pub use hud::{Countdown, Hud, Phase};
 pub use tracking::{Drag, Fit};
