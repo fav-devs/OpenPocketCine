@@ -140,6 +140,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       android: ${{ steps.filter.outputs.android }}
+      desktop: ${{ steps.filter.outputs.desktop }}
       handbook: ${{ steps.filter.outputs.handbook }}
     steps:
       # `dorny/paths-filter` fetches the base ref to diff on push / dispatch, which
@@ -180,6 +181,17 @@ jobs:
               - 'Package.swift'
               - 'scripts/android-*.sh'
               - 'scripts/ci-install-swift-android.sh'
+              - 'justfile'
+              - '.github/workflows/ci.yml'
+            desktop:
+              - 'Apps/Desktop/**'
+              - 'Sources/OpenPocketViewCore/**'
+              - 'Sources/OpenPocketCineDesktopFacade/**'
+              - 'Sources/COpcDesktop/**'
+              - 'Tests/OpenPocketCineDesktopFacadeTests/**'
+              - 'Apps/Android/app/src/main/cpp/shaders/**'
+              - 'Package.swift'
+              - 'scripts/desktop-build-swift-core.sh'
               - 'justfile'
               - '.github/workflows/ci.yml'
             handbook:
@@ -242,6 +254,49 @@ jobs:
           SWIFT_ANDROID_SDK_ID: swift-6.3.3-RELEASE_android
         run: ./gradlew assembleDebug test lint
 
+  desktop:
+    name: Desktop shell
+    needs: changes
+    if: ${{ needs.changes.outputs.desktop == 'true' }}
+    # Ubuntu runners already ship the Swift the core needs, so this only installs the
+    # shell's own dependencies. Linux stands in for Windows here: the Rust, the shaders,
+    # and the Swift facade are the same, and a Vulkan driver is installable. Windows-only
+    # breakage (FFmpeg discovery, DLL placement) still needs a real Windows check.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # mesa-vulkan-drivers supplies lavapipe, a software Vulkan device. The feed
+      # pipeline and swapchain tests run on it; they skip if no device turns up.
+      - name: Install desktop tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libavcodec-dev libavutil-dev libswscale-dev \
+            libvulkan-dev mesa-vulkan-drivers glslang-tools
+
+      - name: Build the Swift core for the desktop shell
+        run: ./scripts/desktop-build-swift-core.sh --configuration release
+
+      - name: Swift facade tests
+        run: swift test --filter Desktop
+
+      - name: Rust format and lint
+        working-directory: Apps/Desktop
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      # `build.rs` finds `.build/release` from the repository root on its own, which is
+      # where the step above put the library.
+      - name: Rust tests
+        working-directory: Apps/Desktop
+        run: cargo test --workspace
+
   handbook:
     name: Protocol handbook
     needs: changes
@@ -272,7 +327,7 @@ jobs:
     # other job's result into one verdict. Path-filter skips and private-repo native/
     # android skips are success.
     if: always()
-    needs: [meta, changes, native, android, handbook]
+    needs: [meta, changes, native, android, desktop, handbook]
     runs-on: ubuntu-latest
     steps:
       - name: Require every job to have passed or been deliberately skipped

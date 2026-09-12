@@ -161,3 +161,6 @@ opencode.json
 .vercel
 .envrc
 .worktrees/
+
+# Rust build output for the desktop watcher shell.
+Apps/Desktop/target/

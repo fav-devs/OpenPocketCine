@@ -1,0 +1,17 @@
+[package]
+name = "opc-watcher"
+description = "Command-line OpenPocketCine watcher: find a shared feed, join it, receive its picture."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+opc-decode = { path = "../opc-decode" }
+opc-relay = { path = "../opc-relay" }
+opc-render = { path = "../opc-render" }
+raw-window-handle = "0.6"
+winit = "0.30"
+
+[lints]
+workspace = true

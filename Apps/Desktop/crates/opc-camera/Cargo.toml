@@ -1,0 +1,13 @@
+[package]
+name = "opc-camera"
+description = "The desktop shell's camera link: commands, DUML transport, and the window-ACK pump."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+opc-core-sys = { path = "../opc-core-sys" }
+
+[lints]
+workspace = true

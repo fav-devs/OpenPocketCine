@@ -16,6 +16,10 @@ indent_size = 2
 [*.{kt,kts,java,gradle,swift}]
 indent_size = 4
 
+# Rust uses 4-space indentation (matches `cargo fmt`, the project's `just desktop-format`).
+[*.rs]
+indent_size = 4
+
 # C / GLSL hang continuation lines on the parameter list, not a 2-space grid.
 [*.{c,h,cc,cpp,hpp,vert,frag,comp,glsl,cmake}]
 indent_size = unset

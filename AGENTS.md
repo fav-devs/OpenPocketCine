@@ -8,6 +8,7 @@ primarily **Osmo Pocket 4 / 4 Pro**, with Nano live view on AVC.
 - **Swift Package Manager / Swift** — portable protocol core (`Sources/OpenPocketViewCore/`).
 - **SwiftUI** — iOS/iPadOS shell (`ios/OpenPocketCine/`, XcodeGen).
 - **Jetpack Compose / Kotlin** — Android shell (`Apps/Android/`).
+- **Rust** — desktop watcher shell (`Apps/Desktop/`), over a `@_cdecl` C ABI.
 - **just** — every repo task. Run `just` to list recipes. `just setup` on macOS.
 
 | Path | What |
@@ -17,6 +18,8 @@ primarily **Osmo Pocket 4 / 4 Pro**, with Nano live view on AVC.
 | `ios/OpenPocketCine/` | SwiftUI shell |
 | `Apps/Android/` | Compose shell and adapters |
 | `Sources/OpenPocketCineAndroidFacade/` | Android JNI facade |
+| `Apps/Desktop/` | Rust desktop watcher shell (Windows first) |
+| `Sources/OpenPocketCineDesktopFacade/` | Desktop C-ABI facade |
 | `docs/` | Engineering references |
 | `handbook/src/content/docs/` | Public docs site (apps, protocol, setup) |
 | `site/` | GitHub Pages landing |
@@ -45,6 +48,10 @@ primarily **Osmo Pocket 4 / 4 Pro**, with Nano live view on AVC.
 - **seams** — new module, core vs shell, spine order: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - **parity** — chrome, assist, connection UX, one-platform feature: [`docs/PARITY.md`](docs/PARITY.md)
 - **JNI** — Gradle, Swift-for-Android, `.so`, facade, OpenZCine pattern: [`ANDROID.md`](ANDROID.md)
+- **desktop** — PC port, Windows, Rust host, `@_cdecl`, watcher shell: [`docs/DESKTOP.md`](docs/DESKTOP.md)
+- **desktop-status** — what the PC port does today, what is unrun, what is next: [`docs/desktop-port-status.md`](docs/desktop-port-status.md)
+- **viewfinder** — laptop as viewfinder, the keys, the chrome, touch, tracking: [`docs/desktop-viewfinder.md`](docs/desktop-viewfinder.md)
+- **desktop-link** — laptop as viewfinder, BLE pairing on PC, the desktop ACK pump: [`docs/desktop-camera-link.md`](docs/desktop-camera-link.md)
 - **live-session** — freeze, black feed, reconnect, UDP bind, ACK, decoder: [`docs/live-session.md`](docs/live-session.md)
 - **watchdog** — stall, GOP-reset grace, recover `0x09/0xa8`: [`docs/feed-watchdog.md`](docs/feed-watchdog.md)
 - **reliability** — freeze-in-seconds, ACK windows, repair owner: [`docs/connection-reliability.md`](docs/connection-reliability.md)
@@ -66,6 +73,7 @@ primarily **Osmo Pocket 4 / 4 Pro**, with Nano live view on AVC.
 - `just check` — full repository quality gate.
 - `just native-check` — Swift lint/test plus iOS simulator build and tests.
 - `just android-check` — Gradle assembleDebug, unit tests, lint.
+- `just desktop-check` — desktop Rust fmt, clippy, and tests against the Swift core.
 - **physical:** operator-visible work is proven on a real iPhone or Android device for the platform changed. Simulator has no BLE or camera Wi-Fi. Compile-only is not done.
 
 ## Completion

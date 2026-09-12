@@ -1,0 +1,15 @@
+[package]
+name = "opc-decode"
+description = "HEVC and AVC decoding for the desktop watcher, over libavcodec."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+links = "opc_decode"
+
+[build-dependencies]
+cc = "1"
+pkg-config = "0.3"
+
+[lints]
+workspace = true

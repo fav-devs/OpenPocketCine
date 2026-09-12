@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/opc-camera",
+    "crates/opc-core-sys",
+    "crates/opc-decode",
+    "crates/opc-monitor",
+    "crates/opc-relay",
+    "crates/opc-render",
+    "crates/opc-ui",
+    "crates/opc-watcher",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/erik-sutton95/OpenPocketCine"
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+unsafe_op_in_unsafe_fn = "deny"
