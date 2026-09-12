@@ -252,6 +252,68 @@ pub const OPC_PKT_ACKED_DATA: u8 = 0x03;
 pub const OPC_PKT_WINDOW_ACK: u8 = 0x04;
 pub const OPC_PKT_COMMAND: u8 = 0x05;
 
+pub const OPC_STATUS_LIST_CAP: usize = 32;
+
+/// What the HUD shows. `-1` means the camera has not said; fields that can legitimately
+/// be negative carry a separate `has_` flag.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct OpcCameraStatus {
+    pub battery_percent: i32,
+    pub charging: i32,
+    pub docked: i32,
+    pub is_recording: i32,
+    pub in_playback: i32,
+    pub record_elapsed_sec: i32,
+    pub record_remaining_sec: i32,
+    pub shooting_mode: i32,
+    pub iso: i32,
+    pub iso_index: i32,
+    pub iso_limit: i32,
+    pub ev_thirds: i32,
+    pub has_ev: i32,
+    pub shutter_denom: i32,
+    pub fps: i32,
+    pub video_resolution: i32,
+    pub video_frame_rate: i32,
+    pub color_mode: i32,
+    pub expo_mode: i32,
+    pub white_balance_kelvin: i32,
+    pub white_balance_tint: i32,
+    pub has_white_balance_tint: i32,
+    pub focus_mode: i32,
+    pub focus_track: i32,
+    pub storage_free_mb: i32,
+    pub storage_total_mb: i32,
+    pub zoom_hundredths: i32,
+    pub available_shutter_count: i32,
+    pub available_iso_count: i32,
+    pub available_format_count: i32,
+    pub available_color_count: i32,
+    pub reserved: i32,
+    pub available_shutter: [i32; OPC_STATUS_LIST_CAP],
+    pub available_iso: [i32; OPC_STATUS_LIST_CAP],
+    pub available_format_resolution: [i32; OPC_STATUS_LIST_CAP],
+    pub available_format_frame_rate: [i32; OPC_STATUS_LIST_CAP],
+    pub available_color: [i32; OPC_STATUS_LIST_CAP],
+}
+
+impl Default for OpcCameraStatus {
+    fn default() -> Self {
+        // Safety: every field is a plain integer or an array of them.
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+impl std::fmt::Debug for OpcCameraStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpcCameraStatus")
+            .field("battery_percent", &self.battery_percent)
+            .field("is_recording", &self.is_recording)
+            .finish_non_exhaustive()
+    }
+}
+
 pub const OPC_WATCHDOG_NONE: i32 = 0;
 pub const OPC_WATCHDOG_RESEND_ENABLE: i32 = 1;
 pub const OPC_WATCHDOG_REBUILD_DECODER: i32 = 2;
@@ -576,6 +638,26 @@ extern "C" {
     pub fn opc_watchdog_tick(handle: *mut c_void, snapshot: *const OpcWatchdogSnapshot) -> i32;
     pub fn opc_watchdog_stage(handle: *mut c_void, out: *mut u8, capacity: usize) -> i64;
     pub fn opc_watchdog_stall_threshold() -> f64;
+
+    pub fn opc_status_create(model_id: i32) -> *mut c_void;
+    pub fn opc_status_destroy(handle: *mut c_void);
+    #[allow(clippy::too_many_arguments)]
+    pub fn opc_status_apply_frame(
+        handle: *mut c_void,
+        sender: u8,
+        receiver: u8,
+        seq: u16,
+        flags: u8,
+        cmd_set: u8,
+        cmd_id: u8,
+        payload: *const u8,
+        count: usize,
+    ) -> i32;
+    pub fn opc_status_apply_push(handle: *mut c_void, payload: *const u8, count: usize) -> i32;
+    pub fn opc_status_read(handle: *mut c_void, out: *mut OpcCameraStatus) -> i32;
+    pub fn opc_status_timecode(handle: *mut c_void, out: *mut u8, capacity: usize) -> i64;
+    pub fn opc_status_firmware(handle: *mut c_void, out: *mut u8, capacity: usize) -> i64;
+    pub fn opc_status_subscribe_keys(out: *mut u8, capacity: usize) -> i64;
 }
 
 /// Reads a NUL-terminated string out of one of the fixed character fields.
@@ -627,6 +709,17 @@ mod layout {
         assert_eq!(size_of::<OpcRelayHello>(), 132);
         assert_eq!(size_of::<OpcRelayFocusPoint>(), 8);
         assert_eq!(size_of::<OpcRelayProtocolInfo>(), 112);
+    }
+
+    #[test]
+    fn the_status_record_matches_the_header_file() {
+        assert_eq!(OPC_STATUS_LIST_CAP, 32);
+        assert_eq!(size_of::<OpcCameraStatus>(), 768);
+        assert_eq!(offset_of!(OpcCameraStatus, available_shutter), 128);
+        assert_eq!(
+            offset_of!(OpcCameraStatus, available_color),
+            128 + 4 * 32 * 4
+        );
     }
 
     #[test]

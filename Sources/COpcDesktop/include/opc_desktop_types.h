@@ -270,4 +270,59 @@ typedef struct {
     int32_t reserved;
 } OpcWatchdogSnapshot;
 
+// ---- Camera status --------------------------------------------------------
+//
+// What the HUD shows. A flat record rather than the core's full `CameraStatus`: the
+// desktop shell reads what it draws, and the rest stays where it belongs.
+//
+// `-1` means the camera has not said. Fields that can legitimately be negative carry a
+// separate `has_` flag instead.
+
+#define OPC_STATUS_LIST_CAP 32
+
+typedef struct {
+    int32_t battery_percent;
+    int32_t charging;
+    int32_t docked;
+    int32_t is_recording;
+    int32_t in_playback;
+    int32_t record_elapsed_sec;
+    int32_t record_remaining_sec;
+    int32_t shooting_mode;
+    int32_t iso;
+    int32_t iso_index;
+    int32_t iso_limit;
+    /// Third-stops from zero; negative is a real value, so read `has_ev` first.
+    int32_t ev_thirds;
+    int32_t has_ev;
+    int32_t shutter_denom;
+    int32_t fps;
+    int32_t video_resolution;
+    int32_t video_frame_rate;
+    int32_t color_mode;
+    int32_t expo_mode;
+    int32_t white_balance_kelvin;
+    /// Tint can be negative, so read `has_white_balance_tint` first.
+    int32_t white_balance_tint;
+    int32_t has_white_balance_tint;
+    int32_t focus_mode;
+    int32_t focus_track;
+    int32_t storage_free_mb;
+    int32_t storage_total_mb;
+    /// Zoom in hundredths: 250 is 2.5x.
+    int32_t zoom_hundredths;
+    int32_t available_shutter_count;
+    int32_t available_iso_count;
+    int32_t available_format_count;
+    int32_t available_color_count;
+    int32_t reserved;
+    /// The values this body offers, as it reported them. A picker that invents its own
+    /// list offers settings the camera will refuse.
+    int32_t available_shutter[OPC_STATUS_LIST_CAP];
+    int32_t available_iso[OPC_STATUS_LIST_CAP];
+    int32_t available_format_resolution[OPC_STATUS_LIST_CAP];
+    int32_t available_format_frame_rate[OPC_STATUS_LIST_CAP];
+    int32_t available_color[OPC_STATUS_LIST_CAP];
+} OpcCameraStatus;
+
 #endif

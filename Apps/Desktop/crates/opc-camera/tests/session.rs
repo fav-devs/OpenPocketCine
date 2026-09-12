@@ -33,6 +33,8 @@ struct FakeCamera {
     /// Set to freeze the feed while the session stays connected — the failure that looks
     /// like nothing at all from a log.
     mute_video: Arc<AtomicBool>,
+    /// Set to start reporting the camera as recording.
+    recording: Arc<AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -48,10 +50,12 @@ impl FakeCamera {
         let seen = Arc::new(Mutex::new(Seen::default()));
         let stop = Arc::new(AtomicBool::new(false));
         let mute_video = Arc::new(AtomicBool::new(false));
+        let recording = Arc::new(AtomicBool::new(false));
 
         let thread_seen = Arc::clone(&seen);
         let thread_stop = Arc::clone(&stop);
         let thread_mute = Arc::clone(&mute_video);
+        let thread_recording = Arc::clone(&recording);
         let handle = std::thread::spawn(move || {
             let mut buffer = [0u8; 4096];
             let mut peer: Option<SocketAddr> = None;
@@ -87,6 +91,12 @@ impl FakeCamera {
                                 video_packet(frame_number, &[0x00, 0x00, 0x00, 0x01, 0x26]);
                             let _ = socket.send_to(&packet, from);
                         }
+                        // Telemetry rides alongside the picture, as on a real body.
+                        if let Some(status) =
+                            status_packet(thread_recording.load(Ordering::Relaxed))
+                        {
+                            let _ = socket.send_to(&status, from);
+                        }
                     }
                     Some(PktType::Command) => {
                         for frame in scan_frames(datagram).unwrap_or_default() {
@@ -109,6 +119,7 @@ impl FakeCamera {
             seen,
             stop,
             mute_video,
+            recording,
             handle: Some(handle),
         }
     }
@@ -116,6 +127,11 @@ impl FakeCamera {
     /// Keeps answering everything but stops sending pictures.
     fn freeze(&self) {
         self.mute_video.store(true, Ordering::Relaxed);
+    }
+
+    /// Starts reporting the camera as rolling.
+    fn start_recording(&self) {
+        self.recording.store(true, Ordering::Relaxed);
     }
 
     fn seen(&self) -> Seen {
@@ -148,6 +164,30 @@ fn video_packet(frame_number: u8, body: &[u8]) -> Vec<u8> {
     packet[18] = 0;
     packet.extend_from_slice(body);
     packet
+}
+
+/// A `0x02/0x80` status push wrapped in an acked-data datagram.
+///
+/// Bit 7 of the leading flags word is the camera's own "am I recording"; the rest of the
+/// payload is zeroed, which the decoder reads as an idle body.
+fn status_packet(recording: bool) -> Option<Vec<u8>> {
+    let mut payload = vec![0u8; 13];
+    if recording {
+        payload[0] = 0x80;
+    }
+    let frame = opc_camera::DumlFrame {
+        sender: 0x02,
+        receiver: 0x0A,
+        seq: 0,
+        flags: 0x00,
+        cmd_set: 0x02,
+        cmd_id: 0x80,
+        payload,
+    };
+    let encoded = opc_camera::encode_frame(&frame).ok()?;
+    let mut datagram = transport_header(PktType::AckedData, encoded.len(), 0x1234, 16).ok()?;
+    datagram.extend_from_slice(&encoded);
+    Some(datagram)
 }
 
 /// Polls until `wanted` says it has seen enough, or the deadline passes.
@@ -393,4 +433,48 @@ fn a_healthy_feed_is_left_alone() {
         .filter(|(set, id)| *set == 0x09 && *id == 0xA8)
         .count();
     assert_eq!(enables, 1);
+}
+
+#[test]
+fn the_hud_learns_what_the_camera_is_doing() {
+    let camera = FakeCamera::start(2);
+    let mut session = CameraSession::connect_to(camera.address, 0x1234, 0x0100).expect("a session");
+
+    // Status rides alongside the picture, so wait for the session to be told something.
+    run_until(&mut session, Duration::from_secs(3), |events| {
+        events.contains(&SessionEvent::StatusChanged)
+    });
+    assert!(!session.status().is_recording, "the body starts idle");
+
+    camera.start_recording();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut saw_recording = false;
+    while Instant::now() < deadline {
+        session.poll().expect("polling should not fail");
+        if session.status().is_recording {
+            saw_recording = true;
+            break;
+        }
+    }
+    assert!(
+        saw_recording,
+        "the HUD should follow the camera into recording"
+    );
+}
+
+#[test]
+fn opening_a_session_subscribes_for_the_pushes_the_hud_needs() {
+    let camera = FakeCamera::start(usize::MAX);
+    let mut session = CameraSession::connect_to(camera.address, 0x1234, 0x0100).expect("a session");
+    run_until(&mut session, Duration::from_secs(2), |events| {
+        events.contains(&SessionEvent::Opened)
+    });
+
+    // `0x00/0x99` is the subscribe opcode; the camera only sends its available-value
+    // lists to a subscriber.
+    let commands = camera.seen().commands;
+    assert!(
+        commands.iter().any(|(set, id)| *set == 0x00 && *id == 0x99),
+        "a session should subscribe on open, saw {commands:?}"
+    );
 }

@@ -102,6 +102,28 @@ command delivery are all asserted from the camera's side of the wire.
 
 It also asserts the datalink never binds the camera's own port.
 
+## What the camera says about itself
+
+The body describes its state in a stream of pushes, and `CameraStatusDecoder` already
+knows how to read every one — including which model encodes a colour mode which way. The
+desktop session folds them in and the shell reads the result.
+
+Two kinds arrive. Ordinary status frames carry battery, recording state, elapsed time,
+ISO, shutter, white balance, format and zoom. `0x00/0x99` subscription pushes carry
+timecode and, more usefully, **the lists of values this body actually offers** — shutter
+speeds, ISO indices, video formats, colour modes. A picker that invents its own list
+offers an operator settings the camera will refuse, so the session subscribes as soon as
+it opens.
+
+Two habits carry through the whole record: `-1` means the camera has not said, and a
+field that can legitimately be negative — exposure compensation, white-balance tint —
+gets its own `has_` flag instead. A camera reporting ISO 0 is not a camera that has said
+nothing.
+
+`set_model` tells the decoder which body this is. Without it the model-specific
+encodings fall back to what every Osmo shares, which reads some colour modes wrong on a
+Pocket 3 or a Nano.
+
 ## When the feed stops
 
 A frozen feed does not announce itself. The socket stays open, telemetry keeps arriving,
@@ -220,6 +242,7 @@ What the operator asked for, and where each piece stands.
 | Wi-Fi join | `CameraSoftAPSwitch` | **Done** | Policy and commands **done**; the runner is not |
 | The UDP session itself | `DumlTransport`, `AckWindows`, `HevcDepacketizer` | **Done** | **Done** |
 | Surviving a frozen feed | `FeedWatchdog` | **Done** | **Done** |
+| HUD telemetry | `CameraStatusDecoder` | **Done** | **Done** |
 
 The session runs and carries commands. What is missing before an operator sees anything
 is Bluetooth pairing and the Wi-Fi join in front of it, and the UI behind it.
@@ -232,8 +255,6 @@ is Bluetooth pairing and the Wi-Fi join in front of it, and the UI behind it.
 - **The SET mailbox.** `CameraSetMailbox` owns retransmit and settle timing — a missed
   acknowledgement must not revert what the operator sees. Until it is exposed, desktop
   SETs are fire-and-forget and a dropped one is a control that silently did not take.
-- **Status decode.** `CameraStatus` turns telemetry into battery, format, ISO and REC
-  state. The HUD needs it.
 - **Reconnect.** `SessionRecovery` bounds the retry after a drop.
 
 The DJI per-frame marker is already handled: `Hevc.stripDjiMarker` runs inside the

@@ -14,6 +14,7 @@ use crate::depacketizer::Depacketizer;
 use crate::health::FeedHealth;
 use crate::packed::DumlFrame;
 use crate::sequence::{Outgoing, Phase, Sequencer};
+use crate::status::{Status, StatusDecoder};
 use crate::transport::{self, AckPump, PktType};
 use crate::watchdog::{Recovery, Watchdog};
 use crate::{softap, CameraError, Command};
@@ -32,6 +33,8 @@ pub enum SessionEvent {
     Picture(Vec<u8>),
     /// A command reply or a piece of telemetry.
     Frame(DumlFrame),
+    /// The camera said something the HUD shows.
+    StatusChanged,
     /// The camera never answered the handshake.
     Unreachable,
     /// The feed stalled and the watchdog acted. `RebuildDecoder` and `FullRejoin` are
@@ -92,6 +95,7 @@ pub struct CameraSession {
     depacketizer: Depacketizer,
     health: FeedHealth,
     watchdog: Watchdog,
+    status: StatusDecoder,
     started: Instant,
     buffer: Vec<u8>,
 }
@@ -138,6 +142,7 @@ impl CameraSession {
             depacketizer: Depacketizer::new(),
             health: FeedHealth::new(),
             watchdog: Watchdog::new(),
+            status: StatusDecoder::new(None),
             started,
             buffer: vec![0; READ_BUFFER],
         })
@@ -162,6 +167,17 @@ impl CameraSession {
     /// How many access units were abandoned incomplete.
     pub fn dropped_access_units(&self) -> i32 {
         self.depacketizer.dropped()
+    }
+
+    /// What the camera last said about itself.
+    pub fn status(&self) -> Status {
+        self.status.status()
+    }
+
+    /// Tells the status decoder which body this is, so it reads the model-specific
+    /// encodings — colour modes differ between a Pocket 4, a Pocket 3 and a Nano.
+    pub fn set_model(&mut self, model_id: i32) {
+        self.status = StatusDecoder::new(Some(model_id));
     }
 
     /// Which rung of the recover ladder the watchdog is resting on.
@@ -292,6 +308,9 @@ impl CameraSession {
             let opening = self.sequencer.phase() == Phase::Handshaking;
             self.sequencer.note_handshake_reply(now);
             if opening {
+                // Ask for the pushes the HUD needs before anything else is queued: the
+                // camera only sends its available-value lists to a subscriber.
+                self.send_subscriptions()?;
                 events.push(SessionEvent::Opened);
             }
             return Ok(());
@@ -311,11 +330,44 @@ impl CameraSession {
             }
             Some(PktType::Telemetry | PktType::AckedData | PktType::Command) => {
                 self.health.note_status(now);
+                let mut changed = false;
                 for frame in transport::scan_frames(datagram)? {
+                    // `0x00/0x99` carries a subscription push — timecode and the lists
+                    // of values this body actually offers — and is read differently.
+                    changed |= if (frame.cmd_set, frame.cmd_id) == (0x00, 0x99) {
+                        self.status.apply_push(&frame.payload)
+                    } else {
+                        self.status.apply(&frame)
+                    };
                     events.push(SessionEvent::Frame(frame));
+                }
+                if changed {
+                    events.push(SessionEvent::StatusChanged);
                 }
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    /// Subscribes to the status streams the HUD reads.
+    fn send_subscriptions(&mut self) -> Result<(), SessionError> {
+        for (index, key) in subscribe_keys().into_iter().enumerate() {
+            let payload = transport::subscribe(&key, index as u32 + 1, self.duml_seq)?;
+            self.duml_seq = self.duml_seq.wrapping_add(1);
+            self.command_counter = self.command_counter.wrapping_add(1);
+
+            let routing = transport::routing_header(self.udp_seq, self.command_counter, false)?;
+            let mut datagram = transport::transport_header(
+                PktType::Command,
+                routing.len() + payload.len(),
+                self.session_id,
+                self.udp_seq,
+            )?;
+            self.udp_seq = self.udp_seq.wrapping_add(8);
+            datagram.extend_from_slice(&routing);
+            datagram.extend_from_slice(&payload);
+            self.socket.send(&datagram)?;
         }
         Ok(())
     }
@@ -368,4 +420,25 @@ impl CameraSession {
         datagram.extend_from_slice(&frame);
         Ok(datagram)
     }
+}
+
+/// The subscription names the core says the HUD needs.
+fn subscribe_keys() -> Vec<String> {
+    // Safety: probing with a null destination only reports the size.
+    let needed = unsafe { opc_core_sys::opc_status_subscribe_keys(std::ptr::null_mut(), 0) };
+    if needed <= 0 {
+        return Vec::new();
+    }
+    let mut bytes = vec![0u8; needed as usize];
+    // Safety: `bytes` has exactly the capacity the core asked for.
+    let written =
+        unsafe { opc_core_sys::opc_status_subscribe_keys(bytes.as_mut_ptr(), bytes.len()) };
+    if written != needed {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&bytes)
+        .split('\n')
+        .filter(|key| !key.is_empty())
+        .map(str::to_string)
+        .collect()
 }
