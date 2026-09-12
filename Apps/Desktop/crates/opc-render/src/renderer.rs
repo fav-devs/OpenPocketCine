@@ -41,6 +41,28 @@ const PASS_PEAK_MASK: usize = 4;
 const PASS_OVERLAY: usize = 5;
 const PASS_COUNT: usize = 6;
 
+/// Where a picture of `source` shape sits inside a `display` of another, keeping its
+/// proportions and centring the remainder: `(x, y, width, height)` in display pixels.
+///
+/// The blit draws into exactly this rectangle, so the bars around it are the render
+/// pass's own clear. A shell mapping a click back to the picture must use the same
+/// rectangle or it will point the camera somewhere near what the operator meant.
+pub fn letterbox(source: (u32, u32), display: (u32, u32)) -> (u32, u32, u32, u32) {
+    if source.0 == 0 || source.1 == 0 || display.0 == 0 || display.1 == 0 {
+        return (0, 0, display.0, display.1);
+    }
+    let scale = (f64::from(display.0) / f64::from(source.0))
+        .min(f64::from(display.1) / f64::from(source.1));
+    let width = ((f64::from(source.0) * scale).round() as u32).clamp(1, display.0);
+    let height = ((f64::from(source.1) * scale).round() as u32).clamp(1, display.1);
+    (
+        (display.0 - width) / 2,
+        (display.1 - height) / 2,
+        width,
+        height,
+    )
+}
+
 /// A rendered picture, 8-bit RGBA, tightly packed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rgba {
@@ -894,6 +916,7 @@ fn record_frame(
         pipelines.pipelines[PASS_YCBCR],
         // FFmpeg reports 8-bit 4:2:0 from this encoder as limited range.
         &[source_constants[0], source_constants[1], 0.0, 0.0],
+        None,
     );
 
     if let Some(peaking) = options.peaking {
@@ -906,6 +929,7 @@ fn record_frame(
             source,
             pipelines.pipelines[PASS_PEAK_BLUR],
             &source_constants,
+            None,
         );
         draw(
             device,
@@ -921,6 +945,7 @@ fn record_frame(
                 peaking.sense.ratio_threshold(),
                 peaking.sense.noise_gate(),
             ],
+            None,
         );
     }
 
@@ -933,7 +958,22 @@ fn record_frame(
         source,
         pipelines.pipelines[PASS_FEED],
         &feed_constants(picture, target_extent, options, lut_size),
+        None,
     );
+
+    // The picture keeps its proportions; the render pass's clear paints the bars. A
+    // stretched face is a framing decision an operator would make wrongly.
+    let (x, y, width, height) = letterbox(
+        (picture.width, picture.height),
+        (target_extent.width, target_extent.height),
+    );
+    let fit = vk::Rect2D {
+        offset: vk::Offset2D {
+            x: x as i32,
+            y: y as i32,
+        },
+        extent: vk::Extent2D { width, height },
+    };
 
     draw(
         device,
@@ -944,6 +984,7 @@ fn record_frame(
         target_extent,
         pipelines.pipelines[PASS_BLIT],
         &[1.0, 0.0],
+        Some(fit),
     );
 
     draw(
@@ -955,6 +996,7 @@ fn record_frame(
         target_extent,
         target_pipeline,
         &[overlay_opacity, 0.0],
+        None,
     );
 }
 
@@ -1004,6 +1046,8 @@ fn draw(
     extent: vk::Extent2D,
     pipeline: vk::Pipeline,
     constants: &[f32],
+    // Where inside `extent` the triangle lands. `None` fills it.
+    into: Option<vk::Rect2D>,
 ) {
     let clear = [vk::ClearValue {
         color: vk::ClearColorValue {
@@ -1014,16 +1058,17 @@ fn draw(
         offset: vk::Offset2D { x: 0, y: 0 },
         extent,
     };
+    let painted = into.unwrap_or(area);
     let begin = vk::RenderPassBeginInfo::default()
         .render_pass(pipelines.render_pass)
         .framebuffer(framebuffer)
         .render_area(area)
         .clear_values(&clear);
     let viewport = vk::Viewport {
-        x: 0.0,
-        y: 0.0,
-        width: extent.width as f32,
-        height: extent.height as f32,
+        x: painted.offset.x as f32,
+        y: painted.offset.y as f32,
+        width: painted.extent.width as f32,
+        height: painted.extent.height as f32,
         min_depth: 0.0,
         max_depth: 1.0,
     };
@@ -1033,7 +1078,7 @@ fn draw(
         device.cmd_begin_render_pass(command, &begin, vk::SubpassContents::INLINE);
         device.cmd_bind_pipeline(command, vk::PipelineBindPoint::GRAPHICS, pipeline);
         device.cmd_set_viewport(command, 0, &[viewport]);
-        device.cmd_set_scissor(command, 0, &[area]);
+        device.cmd_set_scissor(command, 0, &[painted]);
         device.cmd_bind_descriptor_sets(
             command,
             vk::PipelineBindPoint::GRAPHICS,

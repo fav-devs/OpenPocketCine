@@ -93,7 +93,11 @@ fn chrome_paints_over_the_picture_and_leaves_the_rest_alone() {
         plain.pixel(48, 32),
         "where the chrome is transparent the picture must be untouched"
     );
-    assert_ne!(under, (r, g, b, a), "the picture was grey before the chrome");
+    assert_ne!(
+        under,
+        (r, g, b, a),
+        "the picture was grey before the chrome"
+    );
 }
 
 #[test]
