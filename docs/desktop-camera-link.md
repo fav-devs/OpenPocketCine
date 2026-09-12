@@ -102,6 +102,27 @@ command delivery are all asserted from the camera's side of the wire.
 
 It also asserts the datalink never binds the camera's own port.
 
+## Pairing
+
+The exchange that ends with the camera's Wi-Fi credentials, from the protocol notes:
+
+1. Wake the session (`0x00/0x2B`).
+2. Offer a pairing PIN (`0x07/0x45`). The camera answers `00 01` if it already knows
+   this client, or `00 02` if a human has to approve on the body.
+3. On approval it sends its own `0x07/0x46` **request** — answer that, echoing its
+   sequence.
+4. Ask it to wake its access point (`0x53/0x10`).
+5. Read the Wi-Fi name (`0x07/0x07`), then the password (`0x07/0x0E`).
+
+`Pairing` in `opc-camera` runs that with no radio attached: it decides the next step
+from what the camera has said, and the driver turns steps into writes. So the branch that
+needs a person standing at the camera is testable, as is the one where a step goes
+unanswered and has to be retried, and the deadline that gives up rather than hanging.
+
+A notification is not a frame. The camera splits replies across several, and the core's
+`DumlNotificationAssembler` puts them back together — a reader that treats each
+notification as complete sees truncated payloads rather than an error.
+
 ## Bluetooth, per platform
 
 The shell's job, and the least portable piece in the port.
@@ -116,6 +137,11 @@ The shell's job, and the least portable piece in the port.
 Only credential reading needs Bluetooth; once the Wi-Fi is joined the camera session is
 pure UDP.
 
+`BleTransport` is the interface a stack has to provide: scan, connect, write a frame,
+hand over notifications, disconnect. It is deliberately small, because everything about
+*what* to write is `Pairing`'s and everything about what the bytes mean is the core's.
+**The `btleplug` implementation behind it is not written yet.**
+
 ## Wi-Fi, per platform
 
 Joining the camera's SoftAP means leaving whatever network the laptop was on, because
@@ -127,9 +153,19 @@ advantage of this port, not a workaround.
 
 | Platform | Join | Notes |
 | --- | --- | --- |
-| Windows | WLAN API, or a temporary profile via `netsh` | Needs the profile removed on disconnect so the laptop goes back to its normal network. |
-| Linux | NetworkManager (`nmcli`) or wpa_supplicant | |
-| macOS | CoreWLAN `CWInterface.associate` | No entitlement dance, unlike iOS. |
+| Windows | `netsh wlan`: add a profile, then connect | The profile is written `connectionMode=manual`, so the laptop does not wander back onto the camera after the shoot. |
+| Linux | `nmcli device wifi connect` | |
+| macOS | `networksetup -setairportnetwork` | No entitlement dance, unlike iOS. |
+
+`JoinPolicy` decides *whether to try again and when*, on the core's deadlines — 90
+seconds in total, 10 between attempts, and no attempt started that cannot finish before
+the deadline. `command_line` builds the argument list for each platform's tool, and
+`profile_xml` builds the Windows document. Both are tested without running anything;
+only the running is untested, and it is three lines behind the `WifiJoiner` trait.
+
+One rule worth knowing: a platform that will not say which network it is on counts as
+being on target. Refusing to proceed on that basis strands an operator who is in fact
+connected.
 
 A local VPN that did not opt out of the process can take the route even after the join.
 `LocalVPNFilter` in the core carries the operator-facing hint for that case.
@@ -148,7 +184,8 @@ What the operator asked for, and where each piece stands.
 | Tracking | `setTrackingBox`, `clearTrackingBox`, `pollTracking` | **Done** | Not wired |
 | Frame rate and resolution | `setVideoFormat` | **Done** | Not wired |
 | ISO, shutter, EV, white balance | `setIsoIndex`, `setShutter`, `setEv`, `setWhiteBalance` | **Done** | Not wired |
-| Bluetooth pairing | `getWifiSsid`, `getWifiPassword` | **Done** | Not started |
+| Bluetooth pairing | `getWifiSsid`, `getWifiPassword`, `BleAdvert`, the notification assembler | **Done** | Flow **done**; the radio behind it is not |
+| Wi-Fi join | `CameraSoftAPSwitch` | **Done** | Policy and commands **done**; the runner is not |
 | The UDP session itself | `DumlTransport`, `AckWindows`, `HevcDepacketizer` | **Done** | **Done** |
 
 The session runs and carries commands. What is missing before an operator sees anything
@@ -156,9 +193,9 @@ is Bluetooth pairing and the Wi-Fi join in front of it, and the UI behind it.
 
 ## What is not covered yet
 
-- **Bluetooth and the Wi-Fi join.** The session assumes it is already on the camera's
-  network. Until these land, the operator joins the Wi-Fi by hand and the app cannot
-  read the password itself.
+- **The platform implementations.** `Pairing` and `JoinPolicy` decide what to do;
+  `BleTransport` and `WifiJoiner` are the interfaces that would carry it out, and neither
+  has an implementation yet. Until they do, the operator joins the Wi-Fi by hand.
 - **The watchdog.** `FeedWatchdog` in the core owns stall detection and the recover
   ladder. Without it a session that freezes stays frozen: the sequencer enables live view
   once and, by design, never again.

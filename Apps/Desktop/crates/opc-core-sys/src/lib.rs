@@ -458,6 +458,52 @@ extern "C" {
     pub fn opc_softap_is_associated(ipv4: *const c_char) -> i32;
     pub fn opc_softap_is_path_ready(addresses: *const c_char) -> i32;
     pub fn opc_softap_is_camera_ssid(ssid: *const c_char) -> i32;
+
+    pub fn opc_ble_gatt_uuids(out: *mut u8, capacity: usize) -> i64;
+    pub fn opc_ble_advert_decode(
+        payload: *const u8,
+        count: usize,
+        model_id: *mut i32,
+        new_format: *mut i32,
+        raw_product_type: *mut i32,
+    ) -> i32;
+    pub fn opc_ble_assembler_create() -> *mut c_void;
+    pub fn opc_ble_assembler_destroy(handle: *mut c_void);
+    pub fn opc_ble_assembler_append(
+        handle: *mut c_void,
+        bytes: *const u8,
+        count: usize,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+    pub fn opc_ble_assembler_take(handle: *mut c_void, out: *mut u8, capacity: usize) -> i64;
+    pub fn opc_duml_status_string(
+        payload: *const u8,
+        count: usize,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+
+    pub fn opc_pair_set_pin(
+        pin: *const c_char,
+        identifier: *const c_char,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+    pub fn opc_pair_approval_ack(seq: u16, out: *mut u8, capacity: usize) -> i64;
+    pub fn opc_pair_wake_access_point(out: *mut u8, capacity: usize) -> i64;
+
+    pub fn opc_join_deadline_seconds() -> f64;
+    pub fn opc_join_retry_pause_seconds() -> f64;
+    pub fn opc_join_should_retry(seconds_left: f64) -> i32;
+    pub fn opc_join_is_on_target(current_ssid: *const c_char, target: *const c_char) -> i32;
+    pub fn opc_join_ssid_to_kick(
+        current_ssid: *const c_char,
+        target: *const c_char,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+    pub fn opc_join_frequency_hint(out: *mut u8, capacity: usize) -> i64;
 }
 
 /// Reads a NUL-terminated string out of one of the fixed character fields.

@@ -283,3 +283,40 @@ fn a_transport_sequence_reads_back() {
         Some(0x0500)
     );
 }
+
+#[test]
+fn the_gatt_map_comes_from_the_core() {
+    let map = opc_camera::GattMap::from_core().expect("the core should publish the map");
+    assert!(map.service.starts_with("0000FFF0"));
+    assert!(map.notify.starts_with("0000FFF4"));
+    assert!(map.write.starts_with("0000FFF5"));
+    assert!(map.configuration.starts_with("00002902"));
+}
+
+#[test]
+fn an_advert_decodes_without_the_shell_reading_bytes() {
+    // Whatever the payload, the core answers with a shape rather than a crash.
+    let decoded = opc_camera::Advert::decode(&[0x00, 0x01, 0x02, 0x03]);
+    assert!(decoded.is_some());
+}
+
+#[test]
+fn the_join_timing_is_the_cores_own() {
+    let timing = opc_camera::wifi::JoinTiming::from_core();
+    assert_eq!(timing.deadline, 90.0);
+    assert_eq!(timing.retry_pause, 10.0);
+}
+
+#[test]
+fn a_pairing_step_encodes_through_the_core() {
+    // The three writes that are not ordinary commands.
+    assert!(!opc_camera::pair_set_pin("1234", None)
+        .expect("a pin frame")
+        .is_empty());
+    assert!(!opc_camera::pair_approval_ack(0x42)
+        .expect("an ack frame")
+        .is_empty());
+    assert!(!opc_camera::pair_wake_access_point()
+        .expect("a wake frame")
+        .is_empty());
+}

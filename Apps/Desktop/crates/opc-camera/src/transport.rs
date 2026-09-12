@@ -268,3 +268,43 @@ impl Drop for AckPump {
 // The handle is plain heap state with no thread affinity, and `&mut self` gates every
 // mutating call, so the pump may move between threads but is never shared without a lock.
 unsafe impl Send for AckPump {}
+
+/// `0x07/0x45` SetPairingPIN — where a first-time pairing begins.
+pub fn pair_set_pin(pin: &str, identifier: Option<&str>) -> Result<Vec<u8>, CameraError> {
+    let pin = CString::new(pin).map_err(|_| CameraError::InvalidText)?;
+    let identifier = identifier
+        .map(|text| CString::new(text).map_err(|_| CameraError::InvalidText))
+        .transpose()?;
+    emit(|out, capacity| {
+        let name = identifier
+            .as_ref()
+            .map_or(std::ptr::null(), |text| text.as_ptr());
+        // Safety: both strings outlive the call.
+        unsafe { sys::opc_pair_set_pin(pin.as_ptr(), name, out, capacity) }
+    })
+}
+
+/// Answers the camera's own `0x07/0x46` approval request. Echo its sequence.
+pub fn pair_approval_ack(seq: u16) -> Result<Vec<u8>, CameraError> {
+    emit(|out, capacity| {
+        // Safety: the core only writes into `out`.
+        unsafe { sys::opc_pair_approval_ack(seq, out, capacity) }
+    })
+}
+
+/// `0x53/0x10`. The camera answers and wakes its access point.
+pub fn pair_wake_access_point() -> Result<Vec<u8>, CameraError> {
+    emit(|out, capacity| {
+        // Safety: the core only writes into `out`.
+        unsafe { sys::opc_pair_wake_access_point(out, capacity) }
+    })
+}
+
+/// The string inside a status reply — how the Wi-Fi name and password arrive.
+pub fn status_string(payload: &[u8]) -> Result<String, CameraError> {
+    let bytes = emit(|out, capacity| {
+        // Safety: `payload` outlives the call.
+        unsafe { sys::opc_duml_status_string(payload.as_ptr(), payload.len(), out, capacity) }
+    })?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
