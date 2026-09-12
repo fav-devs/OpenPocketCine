@@ -72,7 +72,10 @@ mod tests {
         // 60 exists at resolution 1 only, so stepping resolution 2 must not reach it.
         for _ in 0..4 {
             let stepped = next_frame_rate(&LADDER, Some((2, 24))).expect("two rates at 2");
-            assert!(LADDER.contains(&stepped), "{stepped:?} is not on the ladder");
+            assert!(
+                LADDER.contains(&stepped),
+                "{stepped:?} is not on the ladder"
+            );
             assert_ne!(stepped.1, 60);
         }
     }

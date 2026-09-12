@@ -124,7 +124,6 @@ impl Controls {
             },
         })
     }
-
 }
 
 /// Which directions are held right now.

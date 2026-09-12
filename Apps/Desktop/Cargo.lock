@@ -1014,6 +1014,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "opc-monitor"
+version = "0.1.0"
+dependencies = [
+ "opc-camera",
+ "opc-decode",
+ "opc-render",
+ "opc-ui",
+ "raw-window-handle",
+ "winit",
+]
+
+[[package]]
 name = "opc-relay"
 version = "0.1.0"
 dependencies = [

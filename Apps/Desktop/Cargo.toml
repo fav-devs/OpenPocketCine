@@ -4,6 +4,7 @@ members = [
     "crates/opc-camera",
     "crates/opc-core-sys",
     "crates/opc-decode",
+    "crates/opc-monitor",
     "crates/opc-relay",
     "crates/opc-render",
     "crates/opc-ui",
