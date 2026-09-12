@@ -76,6 +76,18 @@ impl Sequencer {
         self.enabled
     }
 
+    /// Starts over after the datalink was torn down.
+    ///
+    /// Live view is enabled once per session, so a new session gets a new enable — that
+    /// is not the same as the connect path sending two.
+    pub fn restart(&mut self, now: f64) {
+        self.phase = Phase::Handshaking;
+        self.started = now;
+        self.last_handshake = None;
+        self.last_ack = None;
+        self.enabled = false;
+    }
+
     /// The camera answered the session open.
     pub fn note_handshake_reply(&mut self, now: f64) {
         if self.phase == Phase::Handshaking {
@@ -291,6 +303,27 @@ mod tests {
             .tick(0.2)
             .iter()
             .any(|item| matches!(item, Outgoing::Command(_))));
+    }
+
+    #[test]
+    fn a_restart_opens_a_new_session_and_enables_once_more() {
+        let mut sequencer = Sequencer::new(0.0);
+        sequencer.note_handshake_reply(0.0);
+        assert!(sequencer.tick(0.1).contains(&Outgoing::EnableLiveView));
+        sequencer.note_picture();
+
+        // A torn-down datalink is a new session: handshake again, then one enable.
+        sequencer.restart(10.0);
+        assert_eq!(sequencer.phase(), Phase::Handshaking);
+        assert!(!sequencer.enabled_live_view());
+        assert_eq!(sequencer.tick(10.0), vec![Outgoing::Handshake]);
+        sequencer.note_handshake_reply(10.1);
+        assert!(sequencer.tick(10.2).contains(&Outgoing::EnableLiveView));
+        // And still only once for this new session.
+        for step in 1..50 {
+            let now = 10.2 + f64::from(step) * ACK_INTERVAL;
+            assert!(!sequencer.tick(now).contains(&Outgoing::EnableLiveView));
+        }
     }
 
     #[test]

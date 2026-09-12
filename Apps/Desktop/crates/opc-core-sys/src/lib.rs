@@ -252,6 +252,72 @@ pub const OPC_PKT_ACKED_DATA: u8 = 0x03;
 pub const OPC_PKT_WINDOW_ACK: u8 = 0x04;
 pub const OPC_PKT_COMMAND: u8 = 0x05;
 
+pub const OPC_WATCHDOG_NONE: i32 = 0;
+pub const OPC_WATCHDOG_RESEND_ENABLE: i32 = 1;
+pub const OPC_WATCHDOG_REBUILD_DECODER: i32 = 2;
+pub const OPC_WATCHDOG_REOPEN_DATALINK: i32 = 3;
+pub const OPC_WATCHDOG_FULL_REJOIN: i32 = 4;
+
+/// What the shell knows about the feed right now.
+///
+/// Ages are seconds, and a **negative** age means never seen — zero is a real age.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OpcWatchdogSnapshot {
+    pub now: f64,
+    pub last_decoded_frame_age: f64,
+    pub last_video_packet_age: f64,
+    pub last_access_unit_age: f64,
+    pub last_status_age: f64,
+    pub last_ble_notify_age: f64,
+    pub seconds_since_last_rebuild: f64,
+    pub seconds_since_last_enable: f64,
+    pub seconds_since_focus_track_set: f64,
+    pub seconds_since_zoom_set: f64,
+    pub seconds_since_gimbal_throw: f64,
+    pub seconds_since_camera_set: f64,
+    pub flow_healthy: i32,
+    pub path_ready: i32,
+    pub has_format: i32,
+    pub decoder_failed: i32,
+    pub live: i32,
+    pub saw_picture: i32,
+    pub tcp_poke_ready: i32,
+    pub displayed_image_removed: i32,
+    pub had_video: i32,
+    pub reserved: i32,
+}
+
+impl Default for OpcWatchdogSnapshot {
+    fn default() -> Self {
+        // Nothing seen yet; every age absent.
+        Self {
+            now: 0.0,
+            last_decoded_frame_age: -1.0,
+            last_video_packet_age: -1.0,
+            last_access_unit_age: -1.0,
+            last_status_age: -1.0,
+            last_ble_notify_age: -1.0,
+            seconds_since_last_rebuild: -1.0,
+            seconds_since_last_enable: -1.0,
+            seconds_since_focus_track_set: -1.0,
+            seconds_since_zoom_set: -1.0,
+            seconds_since_gimbal_throw: -1.0,
+            seconds_since_camera_set: -1.0,
+            flow_healthy: 1,
+            path_ready: 1,
+            has_format: 0,
+            decoder_failed: 0,
+            live: 0,
+            saw_picture: 0,
+            tcp_poke_ready: 0,
+            displayed_image_removed: 0,
+            had_video: 0,
+            reserved: 0,
+        }
+    }
+}
+
 /// The three window cursors a pktType-0x04 acknowledgement carries.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -504,6 +570,12 @@ extern "C" {
         capacity: usize,
     ) -> i64;
     pub fn opc_join_frequency_hint(out: *mut u8, capacity: usize) -> i64;
+
+    pub fn opc_watchdog_create() -> *mut c_void;
+    pub fn opc_watchdog_destroy(handle: *mut c_void);
+    pub fn opc_watchdog_tick(handle: *mut c_void, snapshot: *const OpcWatchdogSnapshot) -> i32;
+    pub fn opc_watchdog_stage(handle: *mut c_void, out: *mut u8, capacity: usize) -> i64;
+    pub fn opc_watchdog_stall_threshold() -> f64;
 }
 
 /// Reads a NUL-terminated string out of one of the fixed character fields.
@@ -555,6 +627,14 @@ mod layout {
         assert_eq!(size_of::<OpcRelayHello>(), 132);
         assert_eq!(size_of::<OpcRelayFocusPoint>(), 8);
         assert_eq!(size_of::<OpcRelayProtocolInfo>(), 112);
+    }
+
+    #[test]
+    fn the_watchdog_snapshot_matches_the_header_file() {
+        assert_eq!(size_of::<OpcWatchdogSnapshot>(), 136);
+        assert_eq!(align_of::<OpcWatchdogSnapshot>(), 8);
+        assert_eq!(offset_of!(OpcWatchdogSnapshot, flow_healthy), 96);
+        assert_eq!(offset_of!(OpcWatchdogSnapshot, reserved), 132);
     }
 
     #[test]

@@ -11,9 +11,11 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
 use crate::depacketizer::Depacketizer;
+use crate::health::FeedHealth;
 use crate::packed::DumlFrame;
 use crate::sequence::{Outgoing, Phase, Sequencer};
 use crate::transport::{self, AckPump, PktType};
+use crate::watchdog::{Recovery, Watchdog};
 use crate::{softap, CameraError, Command};
 
 /// How long a read may block before the caller gets a turn to tick the clock. Short
@@ -32,6 +34,9 @@ pub enum SessionEvent {
     Frame(DumlFrame),
     /// The camera never answered the handshake.
     Unreachable,
+    /// The feed stalled and the watchdog acted. `RebuildDecoder` and `FullRejoin` are
+    /// the shell's to carry out; the other two are handled here.
+    Recovering(Recovery),
 }
 
 #[derive(Debug)]
@@ -85,6 +90,8 @@ pub struct CameraSession {
     sequencer: Sequencer,
     pump: AckPump,
     depacketizer: Depacketizer,
+    health: FeedHealth,
+    watchdog: Watchdog,
     started: Instant,
     buffer: Vec<u8>,
 }
@@ -129,6 +136,8 @@ impl CameraSession {
             sequencer: Sequencer::new(0.0),
             pump: AckPump::new(base_seq),
             depacketizer: Depacketizer::new(),
+            health: FeedHealth::new(),
+            watchdog: Watchdog::new(),
             started,
             buffer: vec![0; READ_BUFFER],
         })
@@ -153,6 +162,28 @@ impl CameraSession {
     /// How many access units were abandoned incomplete.
     pub fn dropped_access_units(&self) -> i32 {
         self.depacketizer.dropped()
+    }
+
+    /// Which rung of the recover ladder the watchdog is resting on.
+    pub fn recovery_stage(&self) -> String {
+        self.watchdog.stage()
+    }
+
+    /// Tells the session whether the machine is still on the camera's network. A socket
+    /// that is off-path looks exactly like a camera that stopped answering.
+    pub fn set_path_ready(&mut self, ready: bool) {
+        self.health.set_path_ready(ready);
+    }
+
+    /// The shell reports whether its decoder is wedged; the watchdog escalates on it.
+    pub fn set_decoder_failed(&mut self, failed: bool) {
+        self.health.set_decoder_failed(failed);
+    }
+
+    /// A picture actually reached the screen, which is not the same as one arriving.
+    pub fn note_presented(&mut self) {
+        let now = self.now();
+        self.health.note_decoded_frame(now);
     }
 
     /// Queues an operator command for the next tick.
@@ -180,7 +211,37 @@ impl CameraSession {
         if self.sequencer.phase() == Phase::Unreachable {
             events.push(SessionEvent::Unreachable);
         }
+        self.recover(now, &mut events)?;
         Ok(events)
+    }
+
+    /// Asks the watchdog whether the feed has stalled, and acts on its answer.
+    fn recover(&mut self, now: f64, events: &mut Vec<SessionEvent>) -> Result<(), SessionError> {
+        let live = matches!(self.sequencer.phase(), Phase::Waiting | Phase::Live);
+        let snapshot = self.health.snapshot(now, live);
+        let Some(action) = self.watchdog.tick(&snapshot) else {
+            return Ok(());
+        };
+
+        match action {
+            Recovery::ResendEnable => {
+                // Deliberately not through the sequencer: that one enables once per
+                // session by design, and repeats belong here.
+                let datagram = self.command_datagram(Command::LiveViewEnable)?;
+                self.socket.send(&datagram)?;
+                self.health.note_enable(now);
+            }
+            Recovery::ReopenDatalink => {
+                self.depacketizer.reset();
+                self.sequencer.restart(now);
+                self.health.note_datalink_rebuilt(now);
+            }
+            // A wedged decoder and a full rejoin are the shell's to carry out: one owns
+            // the decoder, the other owns Bluetooth.
+            Recovery::RebuildDecoder | Recovery::FullRejoin => {}
+        }
+        events.push(SessionEvent::Recovering(action));
+        Ok(())
     }
 
     fn drain(&mut self, events: &mut Vec<SessionEvent>) -> Result<(), SessionError> {
@@ -226,9 +287,10 @@ impl CameraSession {
         // Every datagram feeds the cursors, whatever else it means.
         self.pump.observe(datagram);
 
+        let now = self.now();
         if transport::is_handshake(datagram) {
             let opening = self.sequencer.phase() == Phase::Handshaking;
-            self.sequencer.note_handshake_reply(self.now());
+            self.sequencer.note_handshake_reply(now);
             if opening {
                 events.push(SessionEvent::Opened);
             }
@@ -238,14 +300,17 @@ impl CameraSession {
         match PktType::of(datagram) {
             Some(PktType::Video) => {
                 self.sequencer.note_picture();
+                self.health.note_video_packet(now);
                 // The whole datagram, header included: the core reads the packet type at
                 // byte 6 and the fragment index at bytes 16 to 18, and the encoded body
                 // only starts at byte 20.
                 if let Some(unit) = self.depacketizer.feed(datagram) {
+                    self.health.note_access_unit(now);
                     events.push(SessionEvent::Picture(unit));
                 }
             }
             Some(PktType::Telemetry | PktType::AckedData | PktType::Command) => {
+                self.health.note_status(now);
                 for frame in transport::scan_frames(datagram)? {
                     events.push(SessionEvent::Frame(frame));
                 }
@@ -261,8 +326,23 @@ impl CameraSession {
                 transport::handshake(self.session_id, self.udp_seq, self.base_seq)?
             }
             Outgoing::Ack => self.pump.datagram(self.session_id)?,
-            Outgoing::EnableLiveView => self.command_datagram(Command::LiveViewEnable)?,
-            Outgoing::Command(command) => self.command_datagram(command)?,
+            Outgoing::EnableLiveView => {
+                let now = self.now();
+                self.health.note_enable(now);
+                self.command_datagram(Command::LiveViewEnable)?
+            }
+            Outgoing::Command(command) => {
+                let now = self.now();
+                match command {
+                    Command::ZoomFactor(_) | Command::ZoomLens(_) | Command::ZoomSlew(_) => {
+                        self.health.note_zoom(now);
+                    }
+                    Command::FocusTrackSet(_) => self.health.note_focus_track(now),
+                    Command::GimbalStick { .. } => self.health.note_gimbal_throw(now),
+                    _ => self.health.note_camera_set(now),
+                }
+                self.command_datagram(command)?
+            }
         };
         self.socket.send(&datagram)?;
         Ok(())

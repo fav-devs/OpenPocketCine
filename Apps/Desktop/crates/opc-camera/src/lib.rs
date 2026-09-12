@@ -8,12 +8,14 @@
 mod ble;
 mod command;
 mod depacketizer;
+mod health;
 mod packed;
 mod pairing;
 mod sequence;
 mod session;
 pub mod softap;
 mod transport;
+mod watchdog;
 pub mod wifi;
 
 use std::fmt;
@@ -21,6 +23,7 @@ use std::fmt;
 pub use ble::{Advert, BleTransport, Discovered, GattMap, NotificationAssembler};
 pub use command::Command;
 pub use depacketizer::Depacketizer;
+pub use health::FeedHealth;
 pub use packed::DumlFrame;
 pub use pairing::{PairState, PairStep, Pairing, Reply, PAIR_DEADLINE, STEP_RETRY};
 pub use sequence::{Outgoing, Phase, Sequencer, ACK_INTERVAL, HANDSHAKE_DEADLINE, HANDSHAKE_RETRY};
@@ -30,6 +33,7 @@ pub use transport::{
     routing_header, scan_frames, status_string, subscribe, tap_focus, transport_header,
     transport_seq, AckPump, AckWindows, PktType,
 };
+pub use watchdog::{Recovery, Watchdog};
 
 /// Why the core refused a command or a datagram.
 ///

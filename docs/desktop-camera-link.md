@@ -102,6 +102,38 @@ command delivery are all asserted from the camera's side of the wire.
 
 It also asserts the datalink never binds the camera's own port.
 
+## When the feed stops
+
+A frozen feed does not announce itself. The socket stays open, telemetry keeps arriving,
+commands keep working, and the picture simply stops — so nothing in a log says anything
+is wrong.
+
+`FeedWatchdog` in the core owns the answer, and both phones already run it. The desktop
+session supplies observations and carries out the rung it is handed:
+
+| Rung | Who acts |
+| --- | --- |
+| Resend the live-view enable | The session |
+| Rebuild the decoder | The shell — it owns the decoder |
+| Reopen the datalink | The session: reset reassembly, handshake again |
+| Full rejoin | The shell — it owns Bluetooth |
+
+The resend deliberately bypasses the sequencer. The connect path enables live view
+exactly once, and every repeat after that is the watchdog's, which is the contract in
+[`feed-watchdog.md`](feed-watchdog.md). Reopening the datalink restarts the sequencer,
+so the new session gets its own single enable — that is not the same as the connect path
+sending two.
+
+`FeedHealth` remembers when things last happened. It is pure, so the bookkeeping is
+tested on its own: a negative age means *never seen* and zero means *just now*, and
+collapsing the two would quietly disarm the whole ladder. A rebuild forgets the feed but
+keeps the fact that there was one, because the watchdog treats a feed that never started
+differently from one that stopped.
+
+The fake camera covers the whole story end to end: it keeps answering and stops sending
+pictures, and the test asserts the session notices, asks for the feed again, and leaves a
+healthy feed alone.
+
 ## Pairing
 
 The exchange that ends with the camera's Wi-Fi credentials, from the protocol notes:
@@ -187,6 +219,7 @@ What the operator asked for, and where each piece stands.
 | Bluetooth pairing | `getWifiSsid`, `getWifiPassword`, `BleAdvert`, the notification assembler | **Done** | Flow **done**; the radio behind it is not |
 | Wi-Fi join | `CameraSoftAPSwitch` | **Done** | Policy and commands **done**; the runner is not |
 | The UDP session itself | `DumlTransport`, `AckWindows`, `HevcDepacketizer` | **Done** | **Done** |
+| Surviving a frozen feed | `FeedWatchdog` | **Done** | **Done** |
 
 The session runs and carries commands. What is missing before an operator sees anything
 is Bluetooth pairing and the Wi-Fi join in front of it, and the UI behind it.
@@ -196,9 +229,6 @@ is Bluetooth pairing and the Wi-Fi join in front of it, and the UI behind it.
 - **The platform implementations.** `Pairing` and `JoinPolicy` decide what to do;
   `BleTransport` and `WifiJoiner` are the interfaces that would carry it out, and neither
   has an implementation yet. Until they do, the operator joins the Wi-Fi by hand.
-- **The watchdog.** `FeedWatchdog` in the core owns stall detection and the recover
-  ladder. Without it a session that freezes stays frozen: the sequencer enables live view
-  once and, by design, never again.
 - **The SET mailbox.** `CameraSetMailbox` owns retransmit and settle timing — a missed
   acknowledgement must not revert what the operator sees. Until it is exposed, desktop
   SETs are fire-and-forget and a dropped one is a control that silently did not take.

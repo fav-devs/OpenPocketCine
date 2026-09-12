@@ -232,4 +232,42 @@ typedef struct {
     uint32_t payload_len;
 } OpcDumlFrame;
 
+// ---- Feed watchdog --------------------------------------------------------
+//
+// What the shell knows about the feed right now. Ages are seconds, and a **negative**
+// age means "never seen" — zero is a real age. Doubles lead so the record has no
+// padding surprises across the boundary.
+
+/// `FeedWatchdog.Action`: the recover ladder, in order of escalation.
+#define OPC_WATCHDOG_NONE 0
+#define OPC_WATCHDOG_RESEND_ENABLE 1
+#define OPC_WATCHDOG_REBUILD_DECODER 2
+#define OPC_WATCHDOG_REOPEN_DATALINK 3
+#define OPC_WATCHDOG_FULL_REJOIN 4
+
+typedef struct {
+    double now;
+    double last_decoded_frame_age;
+    double last_video_packet_age;
+    double last_access_unit_age;
+    double last_status_age;
+    double last_ble_notify_age;
+    double seconds_since_last_rebuild;
+    double seconds_since_last_enable;
+    double seconds_since_focus_track_set;
+    double seconds_since_zoom_set;
+    double seconds_since_gimbal_throw;
+    double seconds_since_camera_set;
+    int32_t flow_healthy;
+    int32_t path_ready;
+    int32_t has_format;
+    int32_t decoder_failed;
+    int32_t live;
+    int32_t saw_picture;
+    int32_t tcp_poke_ready;
+    int32_t displayed_image_removed;
+    int32_t had_video;
+    int32_t reserved;
+} OpcWatchdogSnapshot;
+
 #endif

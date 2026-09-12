@@ -30,6 +30,9 @@ struct FakeCamera {
     address: SocketAddr,
     seen: Arc<Mutex<Seen>>,
     stop: Arc<AtomicBool>,
+    /// Set to freeze the feed while the session stays connected — the failure that looks
+    /// like nothing at all from a log.
+    mute_video: Arc<AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -44,9 +47,11 @@ impl FakeCamera {
         let address = socket.local_addr().expect("an address");
         let seen = Arc::new(Mutex::new(Seen::default()));
         let stop = Arc::new(AtomicBool::new(false));
+        let mute_video = Arc::new(AtomicBool::new(false));
 
         let thread_seen = Arc::clone(&seen);
         let thread_stop = Arc::clone(&stop);
+        let thread_mute = Arc::clone(&mute_video);
         let handle = std::thread::spawn(move || {
             let mut buffer = [0u8; 4096];
             let mut peer: Option<SocketAddr> = None;
@@ -74,7 +79,7 @@ impl FakeCamera {
                         seen.acks += 1;
                         let acks_seen = seen.acks;
                         drop(seen);
-                        if acks_seen > video_after {
+                        if acks_seen > video_after && !thread_mute.load(Ordering::Relaxed) {
                             // One fragment per frame. The core reports a frame complete
                             // when the *next* frame starts, so this streams steadily.
                             frame_number = frame_number.wrapping_add(1);
@@ -103,8 +108,14 @@ impl FakeCamera {
             address,
             seen,
             stop,
+            mute_video,
             handle: Some(handle),
         }
+    }
+
+    /// Keeps answering everything but stops sending pictures.
+    fn freeze(&self) {
+        self.mute_video.store(true, Ordering::Relaxed);
     }
 
     fn seen(&self) -> Seen {
@@ -293,4 +304,93 @@ fn the_handshake_is_repeated_until_the_camera_answers() {
     });
     // One open is enough; the fake answers the first one.
     assert!(camera.seen().handshakes >= 1);
+}
+
+#[test]
+fn a_frozen_feed_is_noticed_and_recovered() {
+    use opc_camera::Recovery;
+
+    let camera = FakeCamera::start(2);
+    let mut session = CameraSession::connect_to(camera.address, 0x1234, 0x0100).expect("a session");
+
+    // Get a picture first: the watchdog treats a feed that never started differently
+    // from one that stopped.
+    run_until(&mut session, Duration::from_secs(3), |events| {
+        events
+            .iter()
+            .any(|event| matches!(event, SessionEvent::Picture(_)))
+    });
+
+    let enables_before = camera
+        .seen()
+        .commands
+        .iter()
+        .filter(|(set, id)| *set == 0x09 && *id == 0xA8)
+        .count();
+    assert_eq!(enables_before, 1, "one enable on the connect path");
+
+    // The camera keeps answering, and simply stops sending pictures.
+    camera.freeze();
+    let events = run_until(&mut session, Duration::from_secs(8), |events| {
+        events
+            .iter()
+            .any(|event| matches!(event, SessionEvent::Recovering(_)))
+    });
+
+    let recoveries: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            SessionEvent::Recovering(action) => Some(*action),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !recoveries.is_empty(),
+        "a feed that stops should be noticed, not waited on forever"
+    );
+    assert_eq!(
+        recoveries[0],
+        Recovery::ResendEnable,
+        "the ladder starts by asking for live view again"
+    );
+
+    let enables_after = camera
+        .seen()
+        .commands
+        .iter()
+        .filter(|(set, id)| *set == 0x09 && *id == 0xA8)
+        .count();
+    assert!(
+        enables_after > enables_before,
+        "the watchdog should have asked for the feed again"
+    );
+    assert!(!session.recovery_stage().is_empty());
+}
+
+#[test]
+fn a_healthy_feed_is_left_alone() {
+    let camera = FakeCamera::start(2);
+    let mut session = CameraSession::connect_to(camera.address, 0x1234, 0x0100).expect("a session");
+
+    let events = run_until(&mut session, Duration::from_secs(4), |events| {
+        events
+            .iter()
+            .filter(|event| matches!(event, SessionEvent::Picture(_)))
+            .count()
+            >= 20
+    });
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, SessionEvent::Recovering(_))),
+        "nothing should be recovered while pictures keep arriving"
+    );
+    // And still exactly one enable over the whole run.
+    let enables = camera
+        .seen()
+        .commands
+        .iter()
+        .filter(|(set, id)| *set == 0x09 && *id == 0xA8)
+        .count();
+    assert_eq!(enables, 1);
 }
