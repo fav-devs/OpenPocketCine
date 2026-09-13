@@ -102,6 +102,11 @@ impl Pairing {
     }
 
     /// What to write now, if anything. Resends a step the camera has not answered.
+    ///
+    /// `0x00/0x2b` opens the BLE session but is not a request/reply gate: Pocket
+    /// cameras commonly do not answer it.  Mimo and both phone shells therefore
+    /// send `0x07/0x45` after the wake write, rather than waiting for a `0x00/0x2b`
+    /// response that may never arrive.
     pub fn tick(&mut self, now: f64) -> Option<PairStep> {
         if self.is_finished() {
             return None;
@@ -124,8 +129,16 @@ impl Pairing {
             return None;
         }
         let step = self.pending.clone().or_else(|| self.step_for_state())?;
-        self.pending = None;
-        self.last_sent = Some(now);
+        if step == PairStep::Wake {
+            // Advance on the write, not on a reply. Keep SetPin pending so the
+            // next driver tick sends it without waiting for STEP_RETRY.
+            self.state = PairState::Pinning;
+            self.pending = Some(PairStep::SetPin);
+            self.last_sent = None;
+        } else {
+            self.pending = None;
+            self.last_sent = Some(now);
+        }
         Some(step)
     }
 
@@ -145,11 +158,6 @@ impl Pairing {
     pub fn receive(&mut self, now: f64, reply: &Reply, text: Option<&str>) {
         let _ = now;
         match (self.state.clone(), reply.cmd_set, reply.cmd_id) {
-            // Session woke. Offer the PIN.
-            (PairState::Waking, 0x00, 0x2B) => {
-                self.state = PairState::Pinning;
-                self.advance(PairStep::SetPin);
-            }
             // The PIN answer decides whether a human has to get involved.
             (PairState::Pinning, 0x07, 0x45) => match reply.payload.get(1) {
                 Some(0x01) => {
@@ -237,7 +245,6 @@ mod tests {
     fn known_camera() -> Pairing {
         let mut pairing = Pairing::new(0.0);
         assert_eq!(pairing.tick(0.0), Some(PairStep::Wake));
-        pairing.receive(0.1, &reply(0x00, 0x2B, &[]), None);
         assert_eq!(pairing.tick(0.1), Some(PairStep::SetPin));
         pairing.receive(0.2, &reply(0x07, 0x45, &[0x00, 0x01]), None);
         assert_eq!(pairing.tick(0.2), Some(PairStep::WakeAccessPoint));
@@ -269,7 +276,6 @@ mod tests {
     fn a_new_camera_waits_for_the_operator_to_approve() {
         let mut pairing = Pairing::new(0.0);
         pairing.tick(0.0);
-        pairing.receive(0.1, &reply(0x00, 0x2B, &[]), None);
         pairing.tick(0.1);
         // `00 02`: a human has to press approve on the body.
         pairing.receive(0.2, &reply(0x07, 0x45, &[0x00, 0x02]), None);
@@ -286,24 +292,24 @@ mod tests {
     }
 
     #[test]
-    fn an_unanswered_step_is_retried_rather_than_abandoned() {
+    fn an_unanswered_pin_is_retried_rather_than_abandoned() {
         let mut pairing = Pairing::new(0.0);
         assert_eq!(pairing.tick(0.0), Some(PairStep::Wake));
+        assert_eq!(pairing.tick(0.1), Some(PairStep::SetPin));
         assert_eq!(pairing.tick(0.5), None, "too soon");
         assert_eq!(
-            pairing.tick(2.0),
-            Some(PairStep::Wake),
+            pairing.tick(2.1),
+            Some(PairStep::SetPin),
             "retry after the pause"
         );
-        assert_eq!(pairing.tick(4.1), Some(PairStep::Wake));
+        assert_eq!(pairing.tick(4.2), Some(PairStep::SetPin));
     }
 
     #[test]
     fn each_step_follows_the_one_before_it_immediately() {
         let mut pairing = Pairing::new(0.0);
         pairing.tick(0.0);
-        pairing.receive(0.1, &reply(0x00, 0x2B, &[]), None);
-        // Not held back by the retry pause: the camera just answered.
+        // Not held back by the retry pause: SessionWake is fire-and-forget.
         assert_eq!(pairing.tick(0.1), Some(PairStep::SetPin));
     }
 
@@ -321,7 +327,6 @@ mod tests {
     fn a_refused_pin_fails_rather_than_hanging() {
         let mut pairing = Pairing::new(0.0);
         pairing.tick(0.0);
-        pairing.receive(0.1, &reply(0x00, 0x2B, &[]), None);
         pairing.tick(0.1);
         pairing.receive(0.2, &reply(0x07, 0x45, &[0x00, 0xFF]), None);
         assert!(matches!(pairing.state(), PairState::Failed(_)));
@@ -347,6 +352,6 @@ mod tests {
         // Telemetry, a stray reply for another step — none of it moves the flow.
         pairing.receive(0.1, &reply(0x02, 0xA5, &[0x00]), None);
         pairing.receive(0.1, &reply(0x07, 0x0E, &[]), Some("nope"));
-        assert_eq!(pairing.state(), &PairState::Waking);
+        assert_eq!(pairing.state(), &PairState::Pinning);
     }
 }
