@@ -154,6 +154,15 @@ that mutex is destroyed aborts in `vkQueuePresentKHR`. `opc.vk.img` must not
 `opc.vk.img`, then `nativeDestroy`. Do not destroy the swapchain on the
 Compose thread while a present is in flight.
 
+### Desktop Vulkan staging
+
+Desktop FFmpeg pictures are compacted to tight rows before their Y, Cb and Cr plane
+uploads. Do not change that row packing to chase a bottom-edge artifact. The Vulkan
+staging buffers are shared by the upload submission, so the renderer waits for prior GPU
+use before overwriting them; writing a shared host buffer while an earlier transfer is
+still reading it can corrupt the lower raster rows. A per-frame staging ring is the
+future performance optimization, not a reason to weaken this ownership rule.
+
 ## Decoder latch
 
 Pocket 4 / 4 Pro have supplied HEVC 720p; Pocket 3 has supplied AVC 720p;

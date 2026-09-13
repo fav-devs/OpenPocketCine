@@ -79,15 +79,17 @@ int32_t opc_decoder_send(OpcDecoder *decoder, const uint8_t *data, size_t length
         return OPC_DECODE_ERR_SEND;
     }
 
-    // `av_packet_from_data` wants ownership, and the caller's buffer is borrowed, so
-    // point at it for the duration of the call instead of copying the access unit.
+    // FFmpeg may retain a packet until a later receive call. The Rust access-unit
+    // slice is borrowed and is dropped immediately after `Decoder::send`, so packet
+    // data must be reference-counted here rather than pointing at that short-lived
+    // allocation. Otherwise delayed HEVC parsing sees recycled bytes as NAL headers.
     av_packet_unref(decoder->packet);
-    decoder->packet->data = (uint8_t *)data;
-    decoder->packet->size = (int)length;
+    if (av_new_packet(decoder->packet, (int)length) < 0) {
+        return OPC_DECODE_ERR_SEND;
+    }
+    memcpy(decoder->packet->data, data, length);
 
     int status = avcodec_send_packet(decoder->context, decoder->packet);
-    decoder->packet->data = NULL;
-    decoder->packet->size = 0;
     if (status < 0 && status != AVERROR(EAGAIN)) {
         return OPC_DECODE_ERR_SEND;
     }

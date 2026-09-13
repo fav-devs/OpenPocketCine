@@ -4,6 +4,8 @@
 //! has a swapchain to feed. Neither can wait for the other, so they are two threads with
 //! two channels between them, and nothing shared but the messages.
 
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
@@ -116,6 +118,24 @@ fn run(
     commands: &Receiver<ToCamera>,
     events: &Sender<FromCamera>,
 ) {
+    // The window is normally launched without a terminal on Windows. Keep the network
+    // state beside the executable, but never log BLE credentials or camera payloads.
+    let mut log = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|dir| dir.join("opc-monitor.log")))
+        .and_then(|path| OpenOptions::new().create(true).append(true).open(path).ok());
+    macro_rules! link_log {
+        ($($t:tt)*) => {
+            if let Some(ref mut file) = log {
+                let _ = writeln!(file, "link: {}", format_args!($($t)*));
+            }
+        };
+    }
+
+    link_log!(
+        "starting UDP session remote={:?} model={model_id:?}",
+        remote
+    );
     let opened = match remote {
         Some(address) => CameraSession::connect_to(address, session_id, base_seq),
         None => CameraSession::connect(session_id, base_seq),
@@ -123,13 +143,22 @@ fn run(
     let mut session = match opened {
         Ok(session) => session,
         Err(error) => {
+            link_log!("could not open UDP socket: {error}");
             let _ = events.send(FromCamera::Lost(error.to_string()));
             return;
         }
     };
+    link_log!(
+        "UDP socket bound local_port={} remote={} phase={:?}",
+        session.local_port(),
+        session.remote(),
+        session.phase()
+    );
     if let Some(model_id) = model_id {
         session.set_model(model_id);
     }
+    let mut saw_picture = false;
+    let mut logged_access_units = 0usize;
 
     loop {
         loop {
@@ -145,17 +174,48 @@ fn run(
         let polled = match session.poll() {
             Ok(polled) => polled,
             Err(error) => {
+                link_log!("UDP poll failed: {error}");
                 let _ = events.send(FromCamera::Lost(error.to_string()));
                 return;
             }
         };
         for event in polled {
             let message = match event {
-                SessionEvent::Opened => FromCamera::Opened,
-                SessionEvent::Picture(bytes) => FromCamera::Picture(bytes),
-                SessionEvent::StatusChanged => FromCamera::Status(Box::new(session.status())),
-                SessionEvent::Recovering(recovery) => FromCamera::Recovering(recovery),
+                SessionEvent::Opened => {
+                    link_log!("camera accepted session; phase={:?}", session.phase());
+                    FromCamera::Opened
+                }
+                SessionEvent::Picture(bytes) => {
+                    if !saw_picture {
+                        link_log!("received first picture ({} bytes)", bytes.len());
+                        saw_picture = true;
+                    }
+                    if logged_access_units < 3 {
+                        let head = bytes
+                            .iter()
+                            .take(32)
+                            .map(|byte| format!("{byte:02x}"))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        link_log!(
+                            "access unit #{} bytes={} head={head}",
+                            logged_access_units + 1,
+                            bytes.len()
+                        );
+                        logged_access_units += 1;
+                    }
+                    FromCamera::Picture(bytes)
+                }
+                SessionEvent::StatusChanged => {
+                    link_log!("received camera status");
+                    FromCamera::Status(Box::new(session.status()))
+                }
+                SessionEvent::Recovering(recovery) => {
+                    link_log!("feed watchdog: {recovery:?}");
+                    FromCamera::Recovering(recovery)
+                }
                 SessionEvent::Unreachable => {
+                    link_log!("camera did not answer its UDP session handshake");
                     let _ = events.send(FromCamera::Lost(
                         "the camera did not answer — is this machine on its Wi-Fi?".to_string(),
                     ));

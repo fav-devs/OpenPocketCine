@@ -591,6 +591,17 @@ impl FeedRenderer {
             self.write_descriptors();
             self.descriptors_dirty = false;
         }
+        // Plane and overlay staging are single shared host buffers. `prepare` runs
+        // before the presenter waits its next frame fence, so writing them here while
+        // an older submission is copying them is a host/GPU race. It showed up as a
+        // corrupted bottom row on Windows. Keep the producer lifetime explicit until
+        // staging is made per-frame; correctness beats sampling a half-written plane.
+        unsafe {
+            self.gpu
+                .device
+                .device_wait_idle()
+                .context("vkDeviceWaitIdle before staging")?;
+        }
         self.stage_planes(picture)?;
         self.stage_overlay()
     }

@@ -55,6 +55,7 @@ struct View {
     still: PathBuf,
     take_still: bool,
     pointer: (f64, f64),
+    pointer_control: bool,
     started: Instant,
 }
 
@@ -112,7 +113,12 @@ impl View {
     /// The watchdog says the decoder is wedged. A fresh one is cheap; a wedged one
     /// produces a black window with a live HUD, which reads as a camera fault.
     fn rebuild_decoder(&mut self) {
-        match Decoder::new(Codec::Hevc) {
+        let codec = self
+            .decoder
+            .as_ref()
+            .map(Decoder::codec)
+            .unwrap_or(Codec::Hevc);
+        match Decoder::new(codec) {
             Ok(decoder) => {
                 self.decoder = Some(decoder);
                 self.link.note_decoder_failed(false);
@@ -130,6 +136,20 @@ impl View {
 
     /// Decodes everything waiting, keeping the newest picture.
     fn decode(&mut self) {
+        if self.decoder.is_none() {
+            let Some(unit) = self.pending.first() else {
+                return;
+            };
+            let codec = codec_of(&unit.bytes).unwrap_or(Codec::Hevc);
+            match Decoder::new(codec) {
+                Ok(decoder) => self.decoder = Some(decoder),
+                Err(error) => {
+                    eprintln!("could not create {codec:?} decoder: {error}");
+                    self.link.note_decoder_failed(true);
+                    return;
+                }
+            }
+        }
         let Some(decoder) = self.decoder.as_mut() else {
             return;
         };
@@ -161,8 +181,11 @@ impl View {
         }
 
         let (Some(renderer), Some(latest)) = (self.renderer.as_mut(), self.latest.as_ref()) else {
+            // No picture yet. ControlFlow::Wait (set in about_to_wait) keeps the GPU
+            // idle; nothing to present until the first frame arrives.
             return;
         };
+
         self.shell.set_source(latest.width, latest.height);
         if matches!(self.shell.phase(), Phase::Waiting | Phase::Recovering) {
             self.shell.set_phase(Phase::Live);
@@ -231,7 +254,11 @@ fn is_keyframe(access_unit: &[u8]) -> bool {
             index += 1;
             continue;
         };
-        let nal_type = (access_unit[index + start] >> 1) & 0x3F;
+        let first = access_unit[index + start];
+        if codec_of(access_unit) == Some(Codec::H264) {
+            return (first & 0x1F) == 5; // AVC IDR
+        }
+        let nal_type = (first >> 1) & 0x3F;
         if nal_type <= 31 {
             // A coded slice. 16..=23 are BLA through RASL — the types that refresh.
             return (16..=23).contains(&nal_type);
@@ -239,6 +266,34 @@ fn is_keyframe(access_unit: &[u8]) -> bool {
         index += start;
     }
     false
+}
+
+/// The camera declares its codec in the first Annex-B NAL. Most Pockets send HEVC,
+/// but this Pocket 3's live stream is AVC (`67` SPS / `65` IDR), so the decoder must
+/// follow the bytes rather than a model assumption.
+fn codec_of(access_unit: &[u8]) -> Option<Codec> {
+    let mut index = 0;
+    while index + 4 < access_unit.len() {
+        let start = if access_unit[index..].starts_with(&[0, 0, 0, 1]) {
+            4
+        } else if access_unit[index..].starts_with(&[0, 0, 1]) {
+            3
+        } else {
+            index += 1;
+            continue;
+        };
+        let first = *access_unit.get(index + start)?;
+        // AVC parameter sets, IDR and ordinary slices have these unambiguous headers.
+        if matches!(first & 0x1F, 5 | 7 | 8) {
+            return Some(Codec::H264);
+        }
+        // HEVC VPS/SPS/PPS use types 32, 33 and 34.
+        if matches!((first >> 1) & 0x3F, 32..=34) {
+            return Some(Codec::Hevc);
+        }
+        index += start;
+    }
+    None
 }
 
 impl ApplicationHandler for View {
@@ -294,7 +349,12 @@ impl ApplicationHandler for View {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let now = self.now();
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.shell.pointer_cancel();
+                let intents = self.shell.control_cancel();
+                self.carry_out(intents, event_loop);
+                event_loop.exit();
+            }
             WindowEvent::Resized(size) => {
                 let (width, height) = (size.width.max(1), size.height.max(1));
                 if let Some(renderer) = self.renderer.as_mut() {
@@ -317,7 +377,14 @@ impl ApplicationHandler for View {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.pointer = (position.x, position.y);
-                self.shell.pointer_moved(position.x, position.y);
+                let intents = if self.pointer_control {
+                    self.shell.control_moved(position.x, position.y)
+                } else {
+                    self.shell.slint_pointer_moved(position.x, position.y);
+                    self.shell.pointer_moved(position.x, position.y);
+                    Vec::new()
+                };
+                self.carry_out(intents, event_loop);
             }
             WindowEvent::MouseInput {
                 button: MouseButton::Left,
@@ -326,9 +393,20 @@ impl ApplicationHandler for View {
             } => {
                 let (x, y) = self.pointer;
                 match state {
-                    ElementState::Pressed => self.shell.pointer_down(x, y),
+                    ElementState::Pressed => match self.shell.control_down(x, y, now) {
+                        Some(intents) => {
+                            self.pointer_control = true;
+                            self.carry_out(intents, event_loop);
+                        }
+                        None => self.shell.pointer_down(x, y),
+                    },
                     ElementState::Released => {
-                        let intents = self.shell.pointer_up(x, y, now);
+                        let intents = if self.pointer_control {
+                            self.pointer_control = false;
+                            self.shell.control_up(x, y, now)
+                        } else {
+                            self.shell.pointer_up(x, y, now)
+                        };
                         self.carry_out(intents, event_loop);
                     }
                 }
@@ -344,14 +422,25 @@ impl ApplicationHandler for View {
                 let intents = self.shell.touch(touch.id, finger, x, y, now);
                 self.carry_out(intents, event_loop);
             }
+            WindowEvent::Focused(false) => {
+                self.shell.pointer_cancel();
+                let intents = self.shell.control_cancel();
+                self.carry_out(intents, event_loop);
+                self.pointer_control = false;
+            }
             WindowEvent::RedrawRequested => self.draw(),
             _ => {}
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // The feed sets the pace; redrawing continuously keeps latency at one frame.
-        event_loop.set_control_flow(ControlFlow::Poll);
+        if self.latest.is_some() {
+            // Live feed: poll continuously so latency stays at one frame.
+            event_loop.set_control_flow(ControlFlow::Poll);
+        } else {
+            // No picture yet: sleep until the next event to avoid spinning the GPU.
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -362,7 +451,6 @@ impl ApplicationHandler for View {
 pub fn run(options: Options) -> Result<(), String> {
     let (session_id, base_seq) = fresh_session();
     let link = Link::open(options.remote, session_id, base_seq, options.model_id);
-    let decoder = Decoder::new(Codec::Hevc).map_err(|error| error.to_string())?;
     let graded = options.lut.is_some();
 
     let mut view = View {
@@ -370,13 +458,14 @@ pub fn run(options: Options) -> Result<(), String> {
         window: None,
         shell: Shell::new().with_grade(graded),
         link,
-        decoder: Some(decoder),
+        decoder: None,
         pending: Vec::new(),
         latest: None,
         lut: options.lut,
         still: options.still,
         take_still: false,
         pointer: (0.0, 0.0),
+        pointer_control: false,
         started: Instant::now(),
     };
     view.shell.set_phase(Phase::Waiting);
