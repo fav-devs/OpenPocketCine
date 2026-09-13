@@ -6,7 +6,7 @@
 
 use opc_camera::Status;
 
-use crate::canvas::{Canvas, RECORD, TRACKING, WARNING, WHITE};
+use crate::canvas::{Canvas, BAR, BAR_EDGE, PLATE, RECORD, TRACKING, WARNING, WHITE};
 use crate::font;
 use crate::tracking::Fit;
 
@@ -113,31 +113,42 @@ fn scale_for(width: u32) -> usize {
 }
 
 impl Hud {
-    /// The top strip: what the camera is set to.
-    fn top_line(&self) -> String {
+    /// The compact, camera-truth fields used as separate leading chips. Values only
+    /// appear after the body has reported them; chrome must not invent a setting.
+    pub fn top_chips(&self) -> Vec<String> {
         let status = &self.status;
-        let mut parts: Vec<String> = Vec::new();
+        let mut chips = Vec::new();
         if let Some(iso) = status.iso {
-            parts.push(format!("ISO {iso}"));
+            chips.push(format!("ISO {iso}"));
         }
         if let Some(shutter) = status.shutter_label() {
-            parts.push(shutter);
+            chips.push(shutter);
         }
         if let Some(thirds) = status.ev_thirds {
-            let stops = f64::from(thirds) / 3.0;
-            parts.push(format!("EV {stops:+.1}"));
+            chips.push(format!("EV {:+.1}", f64::from(thirds) / 3.0));
         }
         if let Some(kelvin) = status.white_balance_kelvin.filter(|value| *value > 0) {
-            parts.push(format!("{kelvin}K"));
+            chips.push(format!("{kelvin}K"));
         }
         if let Some(zoom) = status.zoom_label() {
-            parts.push(zoom);
+            chips.push(zoom);
         }
-        parts.join("  ")
+        chips
+    }
+
+    /// A terse connection truth, held at the top trailing edge so recovery cannot look
+    /// like a healthy feed merely because the last image remains on screen.
+    pub fn connection_chip(&self) -> &'static str {
+        match self.phase {
+            Phase::Live => "LINK",
+            Phase::Recovering => "RECOVER",
+            Phase::Failed(_) => "OFFLINE",
+            Phase::Finding | Phase::Pairing { .. } | Phase::Joining | Phase::Waiting => "LINKING",
+        }
     }
 
     /// The bottom strip: what the body is doing.
-    fn bottom_line(&self) -> String {
+    pub fn bottom_line(&self) -> String {
         let status = &self.status;
         let mut parts: Vec<String> = Vec::new();
         if let Some(fps) = status.fps {
@@ -155,7 +166,7 @@ impl Hud {
         if !self.assists.is_empty() {
             parts.push(self.assists.join(" "));
         }
-        parts.join("  ")
+        parts.join("  ·  ")
     }
 
     /// Rasterises the chrome for a window of this size.
@@ -170,8 +181,11 @@ impl Hud {
         let scale = scale_for(width);
         let margin = (8 * scale) as i64;
         let line = font::text_height(scale) as i64;
+        // Full-width bar height: one text row plus padding above and below.
+        let bar_h = (margin * 2 + line) as u32;
 
-        // A tracking box first, so the strips sit over it rather than under.
+        // ── Tracking box ────────────────────────────────────────────────────
+        // Drawn first so the bars sit over it.
         if let Some((x, y, box_width, box_height)) = self.drag {
             let fit = self.fit.unwrap_or(Fit {
                 x: 0.0,
@@ -189,33 +203,48 @@ impl Hud {
             );
         }
 
-        let top = self.top_line();
-        if !top.is_empty() {
-            canvas.label(margin, margin, &top, scale, WHITE);
+        // ── Top bar ─────────────────────────────────────────────────────────
+        canvas.fill(0, 0, width, bar_h, BAR);
+        // Thin separator line at the bottom of the bar.
+        canvas.fill(0, bar_h as i64, width, 1, BAR_EDGE);
+
+        // Exposure chips inside the bar — text directly on BAR, no individual plates.
+        let mut chip_x = margin;
+        for chip in self.top_chips() {
+            chip_x +=
+                canvas.text(chip_x, margin, &chip, scale, WHITE) as i64 + margin;
         }
 
-        // The record lamp sits top-right, where it is visible without reading.
+        // Link state and record truth at top-right, inside the bar.
+        let connection = self.connection_chip();
+        let connection_width = font::text_width(connection, scale) as i64;
+        let connection_x = i64::from(width) - margin - connection_width;
+        canvas.text(connection_x, margin, connection, scale, WHITE);
+
         if self.status.is_recording {
             let text = format!("REC {}", self.status.elapsed_label());
             let text_width = font::text_width(&text, scale) as i64;
             let dot = (5 * scale) as u32;
-            let x = i64::from(width) - margin - text_width;
-            canvas.label(x, margin, &text, scale, RECORD);
-            canvas.fill(x - (10 * scale) as i64, margin + line / 3, dot, dot, RECORD);
+            let rec_x = connection_x - margin - text_width - (10 * scale) as i64;
+            canvas.text(rec_x, margin, &text, scale, RECORD);
+            // Red dot to the left of the elapsed time.
+            canvas.fill(rec_x - (10 * scale) as i64, margin + line / 3, dot, dot, RECORD);
         }
+
+        // ── Bottom bar ──────────────────────────────────────────────────────
+        let bottom_y = i64::from(height) - i64::from(bar_h);
+        canvas.fill(0, bottom_y, width, bar_h, BAR);
+        // Separator at the top edge of the bottom bar.
+        canvas.fill(0, bottom_y - 1, width, 1, BAR_EDGE);
 
         let bottom = self.bottom_line();
         if !bottom.is_empty() {
-            canvas.label(
-                margin,
-                i64::from(height) - margin - line,
-                &bottom,
-                scale,
-                WHITE,
-            );
+            canvas.text(margin, bottom_y + margin, &bottom, scale, WHITE);
         }
 
-        // The middle stays clear unless there is something to say.
+        // ── Centre ──────────────────────────────────────────────────────────
+        // A countdown or a phase message. Drawn on a rounded plate so it reads over any
+        // background — both the test-frame gradient and a black window before the feed.
         let centre = self
             .countdown
             .filter(|countdown| !countdown.is_done(now))
@@ -223,19 +252,28 @@ impl Hud {
             .or_else(|| self.phase.message());
         if let Some(text) = centre {
             let big = scale * 2;
-            let text_width = font::text_width(&text, big) as i64;
-            canvas.label(
-                (i64::from(width) - text_width) / 2,
-                (i64::from(height) - font::text_height(big) as i64) / 2,
-                &text,
-                big,
-                if matches!(self.phase, Phase::Failed(_)) {
-                    WARNING
-                } else {
-                    WHITE
-                },
-            );
+            let text_w = font::text_width(&text, big) as i64;
+            let text_h = font::text_height(big) as i64;
+            let pad_x = margin * 3;
+            let pad_y = margin * 2;
+            let panel_w = (text_w + pad_x * 2) as u32;
+            let panel_h = (text_h + pad_y * 2) as u32;
+            let panel_x = (i64::from(width) - i64::from(panel_w)) / 2;
+            let panel_y = (i64::from(height) - i64::from(panel_h)) / 2;
+
+            // Dark panel behind the text, slightly more opaque than the bar.
+            canvas.fill(panel_x, panel_y, panel_w, panel_h, PLATE);
+            // Thin outline so the panel reads as a deliberate element.
+            canvas.stroke(panel_x, panel_y, panel_w, panel_h, 1, BAR_EDGE);
+
+            let colour = if matches!(self.phase, Phase::Failed(_)) {
+                WARNING
+            } else {
+                WHITE
+            };
+            canvas.text(panel_x + pad_x, panel_y + pad_y, &text, big, colour);
         }
+
         canvas
     }
 
@@ -277,7 +315,11 @@ mod tests {
             ..Hud::default()
         };
         let canvas = hud.draw(640, 360, 0.0);
-        assert!(canvas.is_blank(), "the middle of the shot must stay clear");
+        assert_eq!(
+            canvas.pixel(320, 180).map(|pixel| pixel[3]),
+            Some(0),
+            "the persistent link chip must not clutter the middle of the shot"
+        );
     }
 
     #[test]
@@ -354,7 +396,7 @@ mod tests {
             },
             ..Hud::default()
         };
-        let line = hud.top_line();
+        let line = hud.top_chips().join("  ");
         assert!(line.contains("ISO 400"), "{line}");
         assert!(line.contains("1/50"), "{line}");
         assert!(line.contains("EV -1.0"), "{line}");
@@ -367,7 +409,35 @@ mod tests {
             phase: Phase::Live,
             ..Hud::default()
         };
-        assert_eq!(hud.top_line(), "", "no invented values");
+        assert_eq!(hud.top_chips(), Vec::<String>::new(), "no invented values");
+    }
+
+    #[test]
+    fn link_chip_reports_recovery_instead_of_leaving_a_stale_live_claim() {
+        assert_eq!(
+            Hud {
+                phase: Phase::Live,
+                ..Hud::default()
+            }
+            .connection_chip(),
+            "LINK"
+        );
+        assert_eq!(
+            Hud {
+                phase: Phase::Recovering,
+                ..Hud::default()
+            }
+            .connection_chip(),
+            "RECOVER"
+        );
+        assert_eq!(
+            Hud {
+                phase: Phase::Failed("no route".into()),
+                ..Hud::default()
+            }
+            .connection_chip(),
+            "OFFLINE"
+        );
     }
 
     #[test]
@@ -427,9 +497,12 @@ mod tests {
         };
         assert!(!hud.draw(400, 400, 101.0).is_blank(), "counting down");
         assert!(hud.countdown_fired(103.0));
-        assert!(
-            hud.draw(400, 400, 103.0).is_blank(),
-            "once it fires the shot is clear again"
+        assert_eq!(
+            hud.draw(400, 400, 103.0)
+                .pixel(200, 200)
+                .map(|pixel| pixel[3]),
+            Some(0),
+            "once it fires the centre of the shot is clear again"
         );
     }
 

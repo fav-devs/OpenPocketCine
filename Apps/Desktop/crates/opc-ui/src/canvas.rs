@@ -12,9 +12,17 @@ pub const TRANSPARENT: Colour = [0, 0, 0, 0];
 pub const WHITE: Colour = [255, 255, 255, 255];
 /// The record lamp. Bright enough to find on a lit set.
 pub const RECORD: Colour = [255, 48, 48, 255];
+/// Dimmed record fill — idle state of the REC button.
+pub const RECORD_DIM: Colour = [120, 20, 20, 180];
 pub const WARNING: Colour = [255, 196, 0, 255];
 /// The plate the chrome sits on, dark and mostly transparent so it never hides the shot.
 pub const PLATE: Colour = [0, 0, 0, 140];
+/// The full-width status bars — slightly blue-black so they read as deliberate, not burnt.
+pub const BAR: Colour = [6, 6, 10, 210];
+/// A 1-px separator line at bar edges.
+pub const BAR_EDGE: Colour = [255, 255, 255, 22];
+/// Subtle top-edge highlight on buttons (top face of a bevel).
+pub const BEVEL: Colour = [255, 255, 255, 40];
 pub const TRACKING: Colour = [64, 255, 128, 255];
 
 /// A drawable RGBA surface.
@@ -152,6 +160,74 @@ impl Canvas {
         );
         self.text(x, y, text, scale, colour);
         width + 2 * padding as u32
+    }
+
+    /// Filled circle using horizontal scan lines.
+    pub fn circle(&mut self, cx: i64, cy: i64, r: i64, colour: Colour) {
+        if r <= 0 {
+            return;
+        }
+        let r2 = r * r;
+        for dy in -r..=r {
+            let dx = ((r2 - dy * dy) as f64).sqrt() as i64;
+            self.fill(cx - dx, cy + dy, (2 * dx + 1) as u32, 1, colour);
+        }
+    }
+
+    /// Ring (hollow circle) with the given outer and inner radii.
+    pub fn ring(&mut self, cx: i64, cy: i64, outer_r: i64, inner_r: i64, colour: Colour) {
+        if outer_r <= 0 {
+            return;
+        }
+        let outer_r2 = outer_r * outer_r;
+        let inner_r2 = inner_r * inner_r;
+        for dy in -outer_r..=outer_r {
+            let outer_dx2 = outer_r2 - dy * dy;
+            if outer_dx2 < 0 {
+                continue;
+            }
+            let outer_dx = (outer_dx2 as f64).sqrt() as i64;
+            let inner_dx2 = inner_r2 - dy * dy;
+            if inner_dx2 <= 0 {
+                // Full row is inside the ring.
+                self.fill(cx - outer_dx, cy + dy, (2 * outer_dx + 1) as u32, 1, colour);
+            } else {
+                let inner_dx = (inner_dx2 as f64).sqrt() as i64;
+                let left_w = (outer_dx - inner_dx).max(0) as u32;
+                if left_w > 0 {
+                    self.fill(cx - outer_dx, cy + dy, left_w, 1, colour);
+                }
+                let right_w = (outer_dx - inner_dx).max(0) as u32;
+                if right_w > 0 {
+                    self.fill(cx + inner_dx + 1, cy + dy, right_w, 1, colour);
+                }
+            }
+        }
+    }
+
+    /// Filled rounded rectangle.
+    pub fn rounded_rect(&mut self, x: i64, y: i64, w: u32, h: u32, r: u32, colour: Colour) {
+        if w == 0 || h == 0 {
+            return;
+        }
+        let r = (r as i64).min(w as i64 / 2).min(h as i64 / 2);
+        let r2 = r * r;
+        for row in 0..h as i64 {
+            let (lx, rx) = if row < r {
+                let dy = r - row;
+                let dx = ((r2 - dy * dy).max(0) as f64).sqrt() as i64;
+                (x + r - dx, x + w as i64 - r + dx)
+            } else if row >= h as i64 - r {
+                let dy = row - (h as i64 - r - 1);
+                let dx = ((r2 - dy * dy).max(0) as f64).sqrt() as i64;
+                (x + r - dx, x + w as i64 - r + dx)
+            } else {
+                (x, x + w as i64)
+            };
+            if rx > lx {
+                self.fill(lx, y + row, (rx - lx) as u32, 1, colour);
+            }
+        }
     }
 
     /// True when nothing has been drawn.

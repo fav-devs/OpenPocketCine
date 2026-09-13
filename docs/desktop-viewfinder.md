@@ -21,8 +21,10 @@ operator dragged square gets bars, not narrow faces. Framing is what a viewfinde
 The chrome is one strip along the top, one along the bottom, and nothing in the middle
 unless something is wrong:
 
-- **Top left** — ISO, shutter, EV, white balance, zoom.
-- **Top right** — a red lamp and the running time, while the body is rolling.
+- **Top left** — separate camera-truth chips for ISO, shutter, EV, white balance and
+  zoom. A field the camera has not reported is absent rather than guessed.
+- **Top right** — connection state, plus a red lamp and running time while the body is
+  rolling. Recovery never leaves a stale live claim beside a retained frame.
 - **Bottom left** — the frame rate the body is shooting, the rate actually reaching the
   screen, battery, storage, and which assists are on.
 - **Middle** — only a phase message (`WAITING FOR LIVE VIEW`, `APPROVE ON THE CAMERA`,
@@ -49,10 +51,18 @@ takes one position, not a stream of presses, so the held directions are added up
 as one. The stick is re-sent every 200 ms while held, which is a keepalive rather than
 the thing that makes it move, and it rests the moment the key comes up.
 
-## Touch
+## Pointer controls
 
-A finger drags a tracking box, exactly as the mouse does. That is the whole of it —
-there are no on-screen controls, and the chrome is read-only. Everything else is keys.
+The bottom and trailing plates are a desktop operator surface, not scaled-up phone
+chrome: `−`, `1X`, and `+` move zoom in safe 0.5x steps; REC/STOP, STILL, FLIP and
+CTR carry the existing typed commands. The trailing gimbal pad is a **hold** control:
+pressing or moving it sends the matching stick axes and release, cancellation, focus
+loss, and window close send a centred stick immediately. Controls are at least 44 px,
+and they are disabled while the link is recovering or failed.
+
+A finger drags a tracking box on the unobstructed fitted image, exactly as the mouse
+does. A press that starts in a control stays a control — it can never become tracking.
+Keyboard shortcuts remain available.
 
 Touch is handled explicitly rather than left to the system: once winit registers a window
 for touch, Windows stops synthesising mouse clicks from taps, so without this a finger on

@@ -6,8 +6,10 @@
 //! decided by code a test can drive with a fake clock, no camera and no GPU.
 
 use std::collections::VecDeque;
+use std::time::Instant;
 
 use opc_camera::{Command, Status};
+use opc_chrome::{Chrome, ChromeIntent, ChromeState};
 use opc_render::{letterbox, GradeOptions, Peaking, PeakingSense, Rgba, Zebra};
 use opc_ui::{
     next_frame_rate, next_resolution, Action, Controls, Countdown, Drag, Fit, Hud, Key, Phase,
@@ -26,6 +28,9 @@ const STICK_REPEAT: f64 = 0.2;
 const BOX_CONFIRM: f64 = 1.5;
 /// Frames older than this stop counting towards the rate shown.
 const FPS_WINDOW: f64 = 1.0;
+const ZOOM_MIN: f64 = 1.0;
+const ZOOM_MAX: f64 = 6.0;
+
 
 /// What the window is asked to do.
 #[derive(Debug, Clone, PartialEq)]
@@ -95,6 +100,7 @@ pub struct Shell {
     stick: Stick,
     hud: Hud,
     toggles: Toggles,
+    chrome_renderer: Option<Chrome>,
     /// A box being dragged out right now.
     drag: Option<Drag>,
     /// A box already sent, and when it stops being drawn.
@@ -102,7 +108,11 @@ pub struct Shell {
     /// The finger drawing the box, if one is. A second finger must not take over a box
     /// somebody is halfway through drawing.
     finger: Option<u64>,
+    /// A touch that landed in a control. It cannot become a tracking drag.
+    control_finger: Option<u64>,
     window: (u32, u32),
+    /// Intents fired by Slint controls (buttons, slider) since last tick.
+    chrome_pending_intents: Vec<Intent>,
     source: Option<(u32, u32)>,
     /// Tracking boxes are numbered so the camera can tell one request from the next.
     next_track_id: u16,
@@ -127,15 +137,21 @@ impl Default for Shell {
 
 impl Shell {
     pub fn new() -> Self {
+        let chrome_renderer = Chrome::new(Instant::now())
+            .map_err(|e| eprintln!("Slint chrome init failed: {e}"))
+            .ok();
         Self {
             controls: Controls::new(),
             stick: Stick::default(),
             hud: Hud::default(),
             toggles: Toggles::default(),
+            chrome_renderer,
             drag: None,
             committed: None,
             finger: None,
+            control_finger: None,
             window: (0, 0),
+            chrome_pending_intents: Vec::new(),
             source: None,
             next_track_id: 1,
             chrome_visible: true,
@@ -392,14 +408,28 @@ impl Shell {
     /// touch, so this is the only way a finger reaches the picture.
     pub fn touch(&mut self, id: u64, phase: TouchPhase, x: f64, y: f64, now: f64) -> Vec<Intent> {
         let mine = self.finger == Some(id);
+        let control_mine = self.control_finger == Some(id);
         match phase {
-            TouchPhase::Started if self.finger.is_none() => {
+            TouchPhase::Started if self.finger.is_none() && self.control_finger.is_none() => {
+                if let Some(intents) = self.control_down(x, y, now) {
+                    self.control_finger = Some(id);
+                    return intents;
+                }
                 self.pointer_down(x, y);
                 // Claimed only if a box actually started. A finger that landed on a
                 // letterbox bar must not lock out the next one that lands on the shot.
                 if self.drag.is_some() {
                     self.finger = Some(id);
                 }
+            }
+            TouchPhase::Moved if control_mine => return self.control_moved(x, y),
+            TouchPhase::Ended if control_mine => {
+                self.control_finger = None;
+                return self.control_up(x, y, now);
+            }
+            TouchPhase::Cancelled if control_mine => {
+                self.control_finger = None;
+                return self.control_cancel();
             }
             TouchPhase::Moved if mine => self.pointer_moved(x, y),
             TouchPhase::Ended if mine => {
@@ -427,9 +457,73 @@ impl Shell {
         }
     }
 
-    /// The clock moved on: fires the countdown and keeps the stick alive.
+    fn controls_enabled(&self) -> bool {
+        matches!(self.hud.phase, Phase::Live)
+    }
+
+    /// Forward a move to Slint even when the pointer isn't in a control zone.
+    /// This keeps hover states and drag-in-progress updates working correctly.
+    pub fn slint_pointer_moved(&self, x: f64, y: f64) {
+        if let Some(cr) = &self.chrome_renderer {
+            cr.pointer_moved(x as f32, y as f32);
+        }
+    }
+
+    /// Whether this point belongs to a Slint control rather than the tracking-box area.
+    pub fn is_control(&self, x: f64, y: f64) -> bool {
+        if !self.chrome_visible {
+            return false;
+        }
+        if let Some(cr) = &self.chrome_renderer {
+            cr.is_over_control(x, y, self.window.0, self.window.1)
+        } else {
+            false
+        }
+    }
+
+    /// Pointer pressed in a control zone: forward to Slint.
+    /// Returns `Some([])` so the caller knows it was claimed (even if no intent fired yet).
+    pub fn control_down(&mut self, x: f64, y: f64, _now: f64) -> Option<Vec<Intent>> {
+        if !self.chrome_visible {
+            return None;
+        }
+        if !self.is_control(x, y) {
+            return None;
+        }
+        if let Some(cr) = &self.chrome_renderer {
+            cr.pointer_pressed(x as f32, y as f32);
+        }
+        self.chrome_stale = true;
+        Some(Vec::new())
+    }
+
+    /// Pointer moved while a Slint control is held.
+    pub fn control_moved(&mut self, x: f64, y: f64) -> Vec<Intent> {
+        if let Some(cr) = &self.chrome_renderer {
+            cr.pointer_moved(x as f32, y as f32);
+        }
+        Vec::new()
+    }
+
+    /// Pointer released over a control zone.
+    pub fn control_up(&mut self, x: f64, y: f64, _now: f64) -> Vec<Intent> {
+        if let Some(cr) = &self.chrome_renderer {
+            cr.pointer_released(x as f32, y as f32);
+        }
+        Vec::new()
+    }
+
+    /// Focus lost or gesture cancelled — no in-flight Slint gesture to clean up.
+    pub fn control_cancel(&mut self) -> Vec<Intent> {
+        Vec::new()
+    }
+
+    /// The clock moved on: fires the countdown, keeps the stick alive, and
+    /// returns any intents fired by Slint controls since last tick.
     pub fn tick(&mut self, now: f64) -> Vec<Intent> {
         let mut intents = Vec::new();
+        // Drain intents queued by Slint button callbacks.
+        intents.extend(self.chrome_pending_intents.drain(..));
         if self.hud.countdown_fired(now) {
             self.hud.countdown = None;
             self.chrome_stale = true;
@@ -469,7 +563,73 @@ impl Shell {
             if let Some((rectangle, _)) = self.committed {
                 self.hud.drag = Some(rectangle);
             }
-            let canvas = self.hud.draw(self.window.0, self.window.1, now);
+
+            let mut canvas = if let Some(cr) = self.chrome_renderer.as_mut() {
+                let chips = self.hud.top_chips();
+                let chip = |i: usize| chips.get(i).cloned().unwrap_or_default();
+                let link_state = self.hud.connection_chip();
+                let rec_elapsed = self.hud.status.elapsed_label();
+                let bottom_line = self.hud.bottom_line();
+                let state = ChromeState {
+                    phase: &self.hud.phase,
+                    chip1: chip(0),
+                    chip2: chip(1),
+                    chip3: chip(2),
+                    chip4: chip(3),
+                    chip5: chip(4),
+                    link_state,
+                    is_recording: self.hud.status.is_recording,
+                    rec_elapsed,
+                    bottom_line,
+                    zoom: self.controls.zoom() as f32,
+                };
+                let canvas = cr.render(&state, self.window.0, self.window.1);
+                // Process any intents fired by Slint callbacks during this render.
+                for intent in cr.drain_intents() {
+                    let shell_intent = match intent {
+                        ChromeIntent::RecordToggle => {
+                            if self.hud.status.is_recording {
+                                Intent::Send(Command::RecordStop)
+                            } else {
+                                Intent::Send(Command::RecordStart)
+                            }
+                        }
+                        ChromeIntent::TakeStill => Intent::Send(Command::ShootPhoto),
+                        ChromeIntent::GimbalFlip => Intent::Send(Command::GimbalFlip),
+                        ChromeIntent::GimbalRecenter => Intent::Send(Command::GimbalRecenter),
+                        ChromeIntent::ZoomSet(v) => {
+                            let zoom = (v as f64).clamp(ZOOM_MIN, ZOOM_MAX);
+                            self.controls.set_zoom(zoom);
+                            self.chrome_stale = true;
+                            Intent::Send(Command::ZoomFactor(zoom))
+                        }
+                    };
+                    self.chrome_pending_intents.push(shell_intent);
+                }
+                canvas
+            } else {
+                // Fallback: old CPU canvas (Slint unavailable).
+                self.hud.draw(self.window.0, self.window.1, now)
+            };
+
+            // Draw tracking box on top.
+            if let Some((x, y, bw, bh)) = self.hud.drag {
+                let fit = self.hud.fit.unwrap_or(opc_ui::Fit {
+                    x: 0.0,
+                    y: 0.0,
+                    width: f64::from(self.window.0),
+                    height: f64::from(self.window.1),
+                });
+                canvas.stroke(
+                    (fit.x + x * fit.width) as i64,
+                    (fit.y + y * fit.height) as i64,
+                    (bw * fit.width) as u32,
+                    (bh * fit.height) as u32,
+                    2,
+                    opc_ui::canvas::TRACKING,
+                );
+            }
+
             self.chrome = Some(Rgba {
                 width: canvas.width,
                 height: canvas.height,
@@ -484,4 +644,5 @@ impl Shell {
     pub fn chrome_visible(&self) -> bool {
         self.chrome_visible
     }
+
 }

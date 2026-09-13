@@ -1,0 +1,483 @@
+// OpenPocketCine viewfinder chrome — DJI Fly / Mimo design language.
+//
+// Rendered into a transparent RGBA overlay by Slint's software renderer.
+// All interactive controls (buttons, zoom slider) live here so pointer
+// events forwarded from winit → MinimalSoftwareWindow drive real callbacks.
+
+// ── Colour palette ────────────────────────────────────────────────────────────
+
+global Pal {
+    out property <color> chip-bg:      #ffffff26;
+    out property <color> chip-text:    #ffffffe6;
+    out property <color> chip-dim:     #ffffffb0;
+    out property <color> online:       #34c759;
+    out property <color> offline:      #8e8e93;
+    out property <color> rec:          #ff3b30;
+    out property <color> rec-bg:       #ff3b3030;
+    out property <color> warn:         #ffd60a;
+    out property <color> panel-bg:     #000000d9;
+    out property <color> panel-border: #ffffff1a;
+    out property <color> panel-shine:  #ffffff12;
+    out property <color> ctrl-bg:      #000000cc;
+    out property <color> ctrl-border:  #ffffff50;
+}
+
+// ── Chip pill ─────────────────────────────────────────────────────────────────
+
+component Chip {
+    in property <string> text;
+
+    preferred-width: inner.preferred-width + 20px;
+    height: 26px;
+
+    Rectangle {
+        background: Pal.chip-bg;
+        border-radius: 5px;
+
+        inner := Text {
+            x: 10px;
+            width: parent.width - 20px;
+            height: parent.height;
+            text: root.text;
+            color: Pal.chip-text;
+            font-size: 11.5px;
+            font-family: "Segoe UI";
+            font-weight: 500;
+            letter-spacing: 0.3px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// ── Top scrim ─────────────────────────────────────────────────────────────────
+
+component TopScrim {
+    in property <string> chip1;
+    in property <string> chip2;
+    in property <string> chip3;
+    in property <string> chip4;
+    in property <string> chip5;
+    in property <string> link-state;
+    in property <bool>   is-recording;
+    in property <string> rec-elapsed;
+
+    height: 64px;
+
+    Rectangle {
+        background: #000000cc;
+
+        HorizontalLayout {
+            x: 16px;
+            y: 14px;
+            height: 26px;
+            spacing: 7px;
+            alignment: center;
+
+            Rectangle {
+                width: 7px; height: 7px;
+                border-radius: 4px;
+                background: root.link-state == "LINK" ? Pal.online : Pal.offline;
+                y: (parent.height - self.height) / 2;
+            }
+
+            Text {
+                text: root.link-state;
+                color: root.link-state == "LINK" ? Pal.online : Pal.chip-dim;
+                font-size: 10.5px;
+                font-family: "Segoe UI";
+                font-weight: 700;
+                letter-spacing: 1px;
+                vertical-alignment: center;
+            }
+        }
+
+        HorizontalLayout {
+            x: 0;
+            y: 14px;
+            width: parent.width;
+            height: 26px;
+            alignment: center;
+            spacing: 6px;
+
+            if root.chip1 != "": Chip { text: root.chip1; }
+            if root.chip2 != "": Chip { text: root.chip2; }
+            if root.chip3 != "": Chip { text: root.chip3; }
+            if root.chip4 != "": Chip { text: root.chip4; }
+            if root.chip5 != "": Chip { text: root.chip5; }
+        }
+
+        rec-badge := Rectangle {
+            visible: root.is-recording;
+            height: 26px;
+            width: rec-inner.preferred-width + 32px;
+            x: parent.width - self.width - 16px;
+            y: 14px;
+            background: Pal.rec-bg;
+            border-radius: 5px;
+            border-color: Pal.rec;
+            border-width: 1px;
+
+            HorizontalLayout {
+                width: parent.width;
+                height: parent.height;
+                alignment: center;
+                spacing: 7px;
+
+                Rectangle {
+                    width: 7px; height: 7px;
+                    border-radius: 4px;
+                    background: Pal.rec;
+                    y: (parent.height - self.height) / 2;
+                }
+
+                rec-inner := Text {
+                    text: "REC  " + root.rec-elapsed;
+                    color: Pal.rec;
+                    font-size: 11.5px;
+                    font-family: "Segoe UI";
+                    font-weight: 700;
+                    letter-spacing: 0.8px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+// ── Bottom bar (status line only) ─────────────────────────────────────────────
+
+component BottomBar {
+    in property <string> line;
+    height: 44px;
+
+    Rectangle {
+        background: #000000cc;
+
+        Text {
+            x: 16px;
+            y: (parent.height - self.preferred-height) / 2;
+            text: root.line;
+            color: Pal.chip-dim;
+            font-size: 11px;
+            font-family: "Segoe UI";
+            font-weight: 400;
+            letter-spacing: 0.6px;
+        }
+    }
+}
+
+// ── Phase panel ───────────────────────────────────────────────────────────────
+
+component PhasePanel {
+    in property <string> message;
+    in property <bool>   failed;
+
+    min-width: 220px;
+    height: inner-text.preferred-height + 56px;
+
+    Rectangle {
+        background: Pal.panel-bg;
+        border-color: Pal.panel-border;
+        border-width: 1px;
+        border-radius: 14px;
+
+        Rectangle {
+            x: 1px; y: 1px;
+            width: parent.width - 2px;
+            height: 1px;
+            background: Pal.panel-shine;
+        }
+
+        inner-text := Text {
+            x: 36px;
+            y: 28px;
+            width: parent.width - 72px;
+            text: root.message;
+            color: root.failed ? Pal.warn : white;
+            font-size: 16px;
+            font-family: "Segoe UI";
+            font-weight: 300;
+            letter-spacing: 3.5px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// ── Record button — large ring + inner shape ──────────────────────────────────
+
+component RecButton {
+    in property <bool> is-recording: false;
+    callback tapped();
+
+    width: 72px;
+    height: 72px;
+
+    ta := TouchArea { clicked => { root.tapped(); } }
+
+    // White ring
+    Rectangle {
+        border-radius: 36px;
+        border-width: 3px;
+        border-color: white;
+        background: transparent;
+    }
+
+    // Inner: circle → recording, rounded square → stop
+    Rectangle {
+        width: 50px;
+        height: 50px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: root.is-recording ? 6px : 25px;
+        background: Pal.rec;
+        animate border-radius { duration: 120ms; easing: ease-in-out; }
+    }
+}
+
+// ── Small icon button ─────────────────────────────────────────────────────────
+
+component SmallBtn {
+    in property <string> label;
+    callback tapped();
+
+    width: 56px;
+    height: 40px;
+
+    ta := TouchArea { clicked => { root.tapped(); } }
+
+    Rectangle {
+        background: Pal.ctrl-bg;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: Pal.ctrl-border;
+        opacity: ta.has-hover ? 1.0 : 0.85;
+
+        Text {
+            text: root.label;
+            color: white;
+            font-size: 10px;
+            font-family: "Segoe UI";
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// ── Zoom slider ───────────────────────────────────────────────────────────────
+
+component ZoomSlider {
+    in-out property <float> value: 1.0;
+    in property <float> minimum: 1.0;
+    in property <float> maximum: 6.0;
+    callback changed(float);
+
+    height: 40px;
+    min-width: 160px;
+
+    property <float> pct: (root.value - root.minimum) / (root.maximum - root.minimum);
+
+    // Track background
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        height: 4px;
+        background: #ffffff30;
+        border-radius: 2px;
+
+        // Filled portion
+        Rectangle {
+            width: root.pct * parent.width;
+            height: 4px;
+            background: white;
+            border-radius: 2px;
+        }
+    }
+
+    // Handle knob
+    Rectangle {
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        x: root.pct * (root.width - self.width);
+        y: (parent.height - self.height) / 2;
+        background: white;
+    }
+
+    // Invisible touch surface
+    ta := TouchArea {
+        moved => {
+            if self.pressed {
+                let p = (self.mouse-x / root.width).clamp(0, 1);
+                root.value = root.minimum + p * (root.maximum - root.minimum);
+                root.changed(root.value);
+            }
+        }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                let p = (self.mouse-x / root.width).clamp(0, 1);
+                root.value = root.minimum + p * (root.maximum - root.minimum);
+                root.changed(root.value);
+            }
+        }
+    }
+}
+
+// ── Root overlay ──────────────────────────────────────────────────────────────
+
+export component HudOverlay inherits Rectangle {
+    in property <string>  chip1: "";
+    in property <string>  chip2: "";
+    in property <string>  chip3: "";
+    in property <string>  chip4: "";
+    in property <string>  chip5: "";
+    in property <string>  link-state: "LINKING";
+    in property <bool>    is-recording: false;
+    in property <string>  rec-elapsed: "";
+    in property <string>  bottom-line: "";
+    in property <string>  phase-message: "";
+    in property <bool>    phase-failed: false;
+    in-out property <float> zoom-value: 1.0;
+
+    callback record-tapped();
+    callback still-tapped();
+    callback flip-tapped();
+    callback recenter-tapped();
+    callback zoom-changed(float);
+
+    background: #00000000;
+
+    // ── Top bar ──────────────────────────────────────────────────────────
+    TopScrim {
+        x: 0; y: 0;
+        width: parent.width;
+        chip1: root.chip1;
+        chip2: root.chip2;
+        chip3: root.chip3;
+        chip4: root.chip4;
+        chip5: root.chip5;
+        link-state: root.link-state;
+        is-recording: root.is-recording;
+        rec-elapsed: root.rec-elapsed;
+    }
+
+    // ── Bottom bar ───────────────────────────────────────────────────────
+    BottomBar {
+        x: 0;
+        y: parent.height - self.height;
+        width: parent.width;
+        line: root.bottom-line;
+    }
+
+    // ── Zoom slider strip (above bottom bar) ─────────────────────────────
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - 44px - self.height - 8px;
+        width: 420px;
+        height: 52px;
+        background: #000000b0;
+        border-radius: 26px;
+
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            spacing: 10px;
+            alignment: center;
+
+            Text {
+                text: "1×";
+                color: #ffffffa0;
+                font-size: 12px;
+                font-family: "Segoe UI";
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                width: 28px;
+            }
+
+            ZoomSlider {
+                horizontal-stretch: 1;
+                value <=> root.zoom-value;
+                changed(v) => { root.zoom-changed(v); }
+            }
+
+            Text {
+                text: "6×";
+                color: #ffffffa0;
+                font-size: 12px;
+                font-family: "Segoe UI";
+                vertical-alignment: center;
+                horizontal-alignment: left;
+                width: 28px;
+            }
+        }
+    }
+
+    // ── Right control panel ───────────────────────────────────────────────
+    Rectangle {
+        width: 80px;
+        height: 72px + 40px + 40px + 40px + 12px + 12px + 12px;
+        x: parent.width - self.width - 20px;
+        y: (parent.height - self.height) / 2;
+        background: transparent;
+
+        VerticalLayout {
+            spacing: 12px;
+            alignment: start;
+
+            HorizontalLayout {
+                alignment: center;
+                RecButton {
+                    is-recording: root.is-recording;
+                    tapped => { root.record-tapped(); }
+                }
+            }
+
+            HorizontalLayout {
+                alignment: center;
+                SmallBtn {
+                    label: "STILL";
+                    tapped => { root.still-tapped(); }
+                }
+            }
+
+            HorizontalLayout {
+                alignment: center;
+                SmallBtn {
+                    label: "FLIP";
+                    tapped => { root.flip-tapped(); }
+                }
+            }
+
+            HorizontalLayout {
+                alignment: center;
+                SmallBtn {
+                    label: "CTR";
+                    tapped => { root.recenter-tapped(); }
+                }
+            }
+        }
+    }
+
+    // ── Phase panel (centred, shown only when message non-empty) ─────────
+    if root.phase-message != "": PhasePanel {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: pm.preferred-width + 80px > 260px
+             ? pm.preferred-width + 80px
+             : 260px;
+        message: root.phase-message;
+        failed: root.phase-failed;
+    }
+
+    // Hidden text for panel width measurement.
+    pm := Text {
+        visible: false;
+        text: root.phase-message;
+        font-size: 16px;
+        font-family: "Segoe UI";
+        font-weight: 300;
+        letter-spacing: 3.5px;
+    }
+}

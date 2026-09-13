@@ -559,3 +559,98 @@ fn stray_phases_for_a_finger_nobody_is_tracking_do_nothing() {
         .touch(9, TouchPhase::Cancelled, 200.0, 200.0, 0.0)
         .is_empty());
 }
+
+#[test]
+fn gimbal_pad_throws_on_down_and_rests_on_release_and_cancel() {
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    // The trailing pad is 131 px square in this 1280 px-wide layout.
+    let thrown = sent(&shell.control_down(1_220.0, 550.0, 0.0).expect("gimbal pad"));
+    assert!(
+        matches!(thrown.as_slice(), [Command::GimbalStick { axis0, axis1 }] if *axis0 > 1024 && *axis1 > 1024)
+    );
+    assert_eq!(
+        sent(&shell.control_up(1_220.0, 550.0, 0.0)),
+        [Command::GimbalStick {
+            axis0: 1024,
+            axis1: 1024
+        }],
+        "a release is an immediate rest, not a later timer tick"
+    );
+
+    shell.control_down(1_220.0, 550.0, 1.0).expect("gimbal pad");
+    assert_eq!(
+        sent(&shell.control_cancel()),
+        [Command::GimbalStick {
+            axis0: 1024,
+            axis1: 1024
+        }],
+        "focus loss and touch cancellation must also rest the camera"
+    );
+}
+
+#[test]
+fn control_hit_rectangles_beat_tracking_and_buttons_keep_typed_commands() {
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    // Still is the first trailing-bottom button at this layout. Its target is 56 px,
+    // safely above the 44 px minimum, and it must not make a tracking box.
+    assert!(shell.is_control(950.0, 670.0));
+    assert_eq!(
+        sent(&shell.control_down(950.0, 670.0, 0.0).expect("still button")),
+        [],
+    );
+    assert_eq!(
+        sent(&shell.control_up(950.0, 670.0, 0.0)),
+        [Command::ShootPhoto]
+    );
+    assert!(shell.pointer_up(950.0, 670.0, 0.0).is_empty());
+}
+
+#[test]
+fn recovering_controls_are_inert_but_still_claim_their_area() {
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Recovering);
+    assert!(shell.is_control(950.0, 670.0));
+    assert!(sent(&shell.control_down(950.0, 670.0, 0.0).expect("still button")).is_empty());
+    assert!(shell.control_up(950.0, 670.0, 0.0).is_empty());
+}
+
+#[test]
+fn every_primary_control_hit_target_survives_resize() {
+    let mut shell = framed();
+    // Centres of - / 1X / + / REC / STILL / FLIP / CTR / gimbal at 1280×720.
+    for point in [
+        (52.0, 668.0),
+        (118.0, 668.0),
+        (184.0, 668.0),
+        (640.0, 668.0),
+        (954.0, 668.0),
+        (1_020.0, 668.0),
+        (1_086.0, 668.0),
+        (1_190.0, 554.0),
+    ] {
+        assert!(
+            shell.is_control(point.0, point.1),
+            "{point:?} should be a control"
+        );
+    }
+    shell.set_window(1_920, 1_080);
+    // The same trailing and bottom layout scales its plates, while remaining far above
+    // the 44 px target floor.
+    for point in [
+        (60.0, 1_020.0),
+        (142.0, 1_020.0),
+        (224.0, 1_020.0),
+        (960.0, 1_020.0),
+        (1_506.0, 1_020.0),
+        (1_588.0, 1_020.0),
+        (1_670.0, 1_020.0),
+        (1_812.0, 880.0),
+    ] {
+        assert!(
+            shell.is_control(point.0, point.1),
+            "{point:?} should resize with chrome"
+        );
+    }
+}

@@ -86,10 +86,10 @@ fn what_the_camera_is_set_to_reaches_the_glass() {
     };
     let mut shell = shell_at(Phase::Live);
     let bare = frame(&mut renderer, &mut shell, 0.0);
-    assert_eq!(
-        white_pixels(&bare),
-        0,
-        "a live camera with nothing to say should draw no chrome over mid-grey"
+    let controls = white_pixels(&bare);
+    assert!(
+        controls > 0,
+        "the primary operator controls should reach the glass"
     );
 
     shell.set_status(Status {
@@ -100,8 +100,8 @@ fn what_the_camera_is_set_to_reaches_the_glass() {
     });
     let lit = frame(&mut renderer, &mut shell, 0.0);
     assert!(
-        white_pixels(&lit) > 50,
-        "the readout must be legible on screen, {} white pixels",
+        white_pixels(&lit) > controls + 50,
+        "the camera-truth readout must add legible chrome, {} white pixels",
         white_pixels(&lit)
     );
 }

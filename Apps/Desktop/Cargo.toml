@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/opc-camera",
+    "crates/opc-chrome",
     "crates/opc-core-sys",
     "crates/opc-decode",
     "crates/opc-monitor",
