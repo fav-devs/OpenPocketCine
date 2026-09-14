@@ -991,6 +991,25 @@ Camera status later returned to Video mode 1, and normal UDP control traffic
 resumed after reconnecting. Simultaneous SD recording, interrupted-network
 recovery and the full preset schema remain unverified.
 
+## USB modes and interfaces
+
+A Windows 11 host enumerated the body in each USB mode it offers (captures in
+`usb-descriptors/`, taken with `tools/usb-descriptor-dump.ps1`; PnP view only,
+no raw configuration descriptors yet):
+
+| Body mode | PID | Interfaces |
+| --- | --- | --- |
+| Webcam | `0x0023` | `MI_00` UVC video (`0e/03/00`), `MI_02` UAC audio (`01/00/00`) |
+| Transfer File | `0x0020` | `MI_00` RNDIS (`e0/01/03`, Windows binds `usbrndis6`), `MI_02` mass storage (`08/06/50`, two LUNs, `Linux File-Stor Gadget`), `MI_03`–`MI_07` five vendor bulk interfaces (`ff/43/01`, no driver) |
+| Charge Only | — | nothing on the bus |
+| Mode prompt on screen | — | nothing on the bus |
+
+Transfer File mode therefore carries a USB Ethernet link beside the card, so
+the body has an IP address on the cable. Whether the `:7001` poke and the UDP
+`9004` [datalink](../duml-transport/) answer on that address, and what the five
+vendor bulk interfaces carry, is untested. macOS has no RNDIS driver of its
+own; a second configuration with CDC ECM/NCM was not looked for.
+
 ## USB webcam
 
 The operator selected **Webcam on the camera body**, then a native AVFoundation
