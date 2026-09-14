@@ -1438,3 +1438,95 @@ fn a_chip_long_pressed_opens_its_sheet_and_the_sheet_sets_its_options() {
     assert!(shell.tool_on(AssistTool::Grid));
     assert!(shell.assists().grid.thirds && shell.assists().grid.diagonal);
 }
+
+// ── Playback extras ──────────────────────────────────────────────────────────
+
+#[test]
+fn the_conform_tool_slows_playback_and_cycles_back_to_the_clips_own_rate() {
+    use opc_chrome::ChromeIntent;
+    use opc_media::MediaFile;
+    use opc_monitor::MediaAction;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    let clip = MediaFile {
+        path: "DCIM/DJI_001/DJI_20260814125250_0034_D.MP4".to_string(),
+        handle: 0x4010_4480,
+        duration_seconds: 26,
+        fps: Some(120),
+        ..MediaFile::default()
+    };
+    shell.library_listed(vec![clip.clone()], true);
+    shell.open_player(clip, 26_000, false, false);
+    // Nothing to conform to until the file has been read: the clip's own rate.
+    assert_eq!(
+        shell.chrome_intent_for_test(ChromeIntent::PlayerConform),
+        [Intent::Media(MediaAction::Speed(1.0))]
+    );
+    assert_eq!(shell.player().unwrap().conform, None);
+    shell.player_conform_targets(120.0, vec![24.0, 60.0]);
+    assert_eq!(
+        shell.chrome_intent_for_test(ChromeIntent::PlayerConform),
+        [Intent::Media(MediaAction::Speed(0.2))]
+    );
+    assert_eq!(shell.player().unwrap().conform, Some(24.0));
+    assert_eq!(
+        shell.chrome_intent_for_test(ChromeIntent::PlayerConform),
+        [Intent::Media(MediaAction::Speed(0.5))]
+    );
+    assert_eq!(
+        shell.chrome_intent_for_test(ChromeIntent::PlayerConform),
+        [Intent::Media(MediaAction::Speed(1.0))]
+    );
+    assert_eq!(shell.player().unwrap().conform, None);
+}
+
+#[test]
+fn select_mode_deletes_the_checked_tiles_with_one_command_each() {
+    use opc_camera::Command;
+    use opc_chrome::ChromeIntent;
+    use opc_media::MediaFile;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    shell.press(Key::Char('g'), 0.0);
+    let files: Vec<MediaFile> = (1..=2)
+        .map(|n| MediaFile {
+            path: format!("DCIM/DJI_001/DJI_2026081412525{n}_003{n}_D.MP4"),
+            handle: 0x4010_4480 + n,
+            duration_seconds: 20 + i64::from(n),
+            ..MediaFile::default()
+        })
+        .collect();
+    shell.library_listed(files, true);
+    shell.chrome(0.0);
+    assert!(shell
+        .chrome_intent_for_test(ChromeIntent::LibrarySelectMode)
+        .is_empty());
+    shell.library_mut().toggle_checked(1);
+    shell.library_mut().toggle_checked(2);
+    assert!(
+        shell
+            .chrome_intent_for_test(ChromeIntent::LibraryDeleteChecked)
+            .is_empty(),
+        "the first tap only arms"
+    );
+    let fired = shell.chrome_intent_for_test(ChromeIntent::LibraryDeleteChecked);
+    let mut handles: Vec<u32> = fired
+        .iter()
+        .map(|intent| match intent {
+            Intent::Send(Command::MediaDelete { handle, .. }) => *handle,
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    handles.sort_unstable();
+    assert_eq!(handles, [0x4010_4481, 0x4010_4482]);
+    let counters: std::collections::HashSet<u32> = fired
+        .iter()
+        .map(|intent| match intent {
+            Intent::Send(Command::MediaDelete { counter, .. }) => *counter,
+            _ => 0,
+        })
+        .collect();
+    assert_eq!(counters.len(), 2, "one counter per delete");
+    assert!(shell.library().files.is_empty());
+    assert!(!shell.library().selecting);
+}

@@ -633,6 +633,24 @@ extern "C" {
     /// The body's name for a model id.
     pub fn opc_model_name(model_id: i32, out: *mut u8, capacity: usize) -> i64;
 
+    /// Playback: the shot colour in an original's tail, the official cube for it,
+    /// and the conform preview's targets, speed and label.
+    pub fn opc_clip_color_mode(bytes: *const u8, count: usize) -> i32;
+    pub fn opc_lut_auto_file(color_mode: i32, model_id: i32, out: *mut u8, capacity: usize) -> i64;
+    pub fn opc_conform_targets(
+        capture_rate: f64,
+        listed_fps: f64,
+        out: *mut f64,
+        capacity: usize,
+    ) -> i32;
+    pub fn opc_conform_speed(capture_rate: f64, target_rate: f64) -> f64;
+    pub fn opc_conform_label(
+        capture_rate: f64,
+        target_rate: f64,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+
     /// The scale's legend, one `label<TAB>r<TAB>g<TAB>b` line per zone.
     pub fn opc_false_color_legend(
         scale: i32,

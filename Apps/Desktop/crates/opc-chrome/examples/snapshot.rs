@@ -261,6 +261,8 @@ fn main() {
                         starred: false,
                         cached: false,
                         selected: false,
+                        checked: false,
+                        burst: 0,
                     });
                     y += 44.0 + gap;
                     for n in 0..count {
@@ -284,6 +286,8 @@ fn main() {
                             starred: index == 3,
                             cached: index == 2,
                             selected: index == 2,
+                            checked: index == 2 || index == 5,
+                            burst: if index == 4 { 5 } else { 0 },
                         });
                     }
                     y += count.div_ceil(columns) as f32 * (cell_h + gap);
@@ -307,7 +311,12 @@ fn main() {
                         delete_armed: false,
                         progress: Some(0.62),
                         note: "Proxy on disk".into(),
+                        burst: 0,
+                        expanded: false,
                     }),
+                    selecting: true,
+                    checked_count: 2,
+                    batch_armed: false,
                 }
             }),
             player: (name == "player").then(|| PlayerState {
@@ -328,6 +337,9 @@ fn main() {
                 zebra_on: false,
                 peaking_on: false,
                 is_photo: false,
+                conform_label: "120 → 24".into(),
+                conform_on: true,
+                conform_available: true,
             }),
             sheet: (name == "sheet" || name == "settings").then(|| {
                 let row = |title: &str, options: &[&str], selected: Option<usize>, enabled| {

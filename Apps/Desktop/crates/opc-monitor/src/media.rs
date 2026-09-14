@@ -11,6 +11,8 @@ use opc_media::{
     catalog, Browse, BrowseEvent, BrowseStep, MediaCache, MediaFile, MediaJob, MediaReport,
     MediaWorker, ResumeAction, ResumePolicy,
 };
+use opc_monitor::library;
+use opc_monitor::luts;
 use opc_monitor::{MediaAction, Shell};
 
 /// Leaving playback: exit until the bit clears, then enable live view.
@@ -40,6 +42,8 @@ pub struct MediaDriver {
     /// Presentation time of the frame on screen, and the wall clock it was shown at.
     shown_ms: i64,
     shown_at: f64,
+    /// Playback rate: 1 is the clip's own, a conform preview slows it.
+    speed: f64,
     /// The next frame, decoded ahead of its time.
     next: Option<(OwnedPicture, i64)>,
     /// A clip the operator asked to play; the worker is fetching it.
@@ -204,6 +208,15 @@ impl MediaDriver {
                     }
                 }
             }
+            MediaAction::Speed(speed) => {
+                // Re-anchor the clock so the rate change starts from the frame on screen.
+                self.shown_at = now;
+                self.speed = if speed.is_finite() && speed > 0.0 {
+                    speed
+                } else {
+                    1.0
+                };
+            }
             MediaAction::PlayerSeek(position_ms) => {
                 self.seek(shell, position_ms);
                 self.shown_at = now;
@@ -287,8 +300,22 @@ impl MediaDriver {
                 self.reader = Some(reader);
                 self.playing = true;
                 self.shown_at = now;
+                self.speed = 1.0;
                 shell.library_file_ready(&file.path, proxy);
+                // The shot colour lives in the original's tail; a proxy is Rec.709
+                // whatever the take was.
+                let tail_color = self
+                    .cache
+                    .as_ref()
+                    .filter(|cache| cache.has_original(&file))
+                    .and_then(|cache| luts::read_tail(&cache.original_path(&file)))
+                    .and_then(|tail| luts::clip_color_mode(&tail));
+                let capture_rate = info.fps();
+                let listed = file.fps.map_or(0.0, |fps| fps as f64);
+                let targets = library::conform_targets(capture_rate, listed);
                 shell.open_player(file, info.duration_ms, proxy, false);
+                shell.player_conform_targets(capture_rate, targets);
+                shell.auto_lut(tail_color);
             }
             Err(error) => {
                 shell.library_failed(&file.path, &format!("cannot play: {error}"));
@@ -387,7 +414,8 @@ impl MediaDriver {
         // Playback pacing: show each frame when its time comes.
         if self.playing {
             if let Some(reader) = self.reader.as_mut() {
-                let target_ms = self.shown_ms + ((now - self.shown_at) * 1000.0) as i64;
+                let target_ms =
+                    self.shown_ms + ((now - self.shown_at) * 1000.0 * self.speed) as i64;
                 let mut ended = false;
                 while let Some((_, pts)) = &self.next {
                     if *pts > target_ms {

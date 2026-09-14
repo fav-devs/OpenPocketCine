@@ -26,7 +26,7 @@ bottom says what the body is set to, and the keyboard drives it.
 | Setup | Link / Controls / Display / Storage / System tabs; a game controller on the phones' map; prefs saved beside the LUT folder | `opc-monitor/sheets.rs`, `pad.rs`, `prefs.rs`, `gilrs` in `view.rs` |
 | Sheets | `Tab` settings, `E` exposure, the format chip | `opc-monitor/sheets.rs` |
 | SET mailbox | Latest-wins per opcode, 300 ms retransmit, 2 s settle, FORMAT pin | `opc-camera/mailbox.rs`, the core's `CameraSetMailbox` |
-| Library | `G`, then the grid; `Space` and `Esc` in the player | `opc-monitor/library.rs`, `media.rs`, `opc-media` |
+| Library | `G`, then the grid; Select mode with a batch delete; bursts folded under their first frame with Expand / Fold; `Space` and `Esc` in the player; the conform chip cycles the core's `ConformPreview` targets; Auto LUT from the original's `moov` tail | `opc-monitor/library.rs`, `media.rs`, `luts.rs`, `opc-media` |
 
 The chrome is a Slint Mimo replica with every button live (`opc-chrome`); the media
 library and player are `opc-media` (paging, HTTP, cache) driven by `opc-monitor/media.rs`.
@@ -181,8 +181,8 @@ thing that was drawn around rather than near it.
    its layout and would need to hand back the rectangles it drew so `Shell` can hit-test
    a tap before falling through to a tracking drag. Deliberately left until someone has
    held the laptop, because where the controls should sit is not guessable.
-3. **Motion control smoothing and pause / resume**, and the playback extras
-   (conform preview, auto-LUT from the original, batch delete, burst groups).
+3. **Scopes over playback.** The plates sample the live picture only; the player's
+   frames go through the same renderer, so it is a sampling-hook change, not a port.
 
 ## Building it
 

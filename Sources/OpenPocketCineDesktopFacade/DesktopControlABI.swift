@@ -253,3 +253,66 @@ func opc_model_name(_ modelId: Int32, _ out: UnsafeMutablePointer<UInt8>?, _ cap
     let name = CameraModel.resolve(modelId: Int(modelId), name: nil).name
     return DesktopFacade.emit(Data(name.utf8), into: out, capacity: capacity)
 }
+
+// MARK: - Playback
+
+/// The shot colour baked into an original take's `moov` tail (QuickTime Keys
+/// `com.dji.camera.ColorGammaSxS`), as a colour-mode byte, or -1. Proxies carry
+/// Rec.709 whatever the take was, so pass only the original's bytes.
+@_cdecl("opc_clip_color_mode")
+func opc_clip_color_mode(_ bytes: UnsafePointer<UInt8>?, _ count: Int) -> Int32 {
+    guard let bytes, count > 0 else { return -1 }
+    let data = DesktopFacade.borrow(bytes, count)
+    return ClipColorProfile.colorMode(fromMP4: data).map { Int32($0.rawValue) } ?? -1
+}
+
+/// The official DJI cube's file name for this colour and body, or nothing for a
+/// colour that binds no auto LUT.
+@_cdecl("opc_lut_auto_file")
+func opc_lut_auto_file(
+    _ colorMode: Int32, _ modelId: Int32, _ out: UnsafeMutablePointer<UInt8>?, _ capacity: Int
+) -> Int64 {
+    guard (0...255).contains(colorMode), let mode = ColorMode(rawValue: UInt8(colorMode)) else {
+        return 0
+    }
+    let model = CameraModel.resolve(modelId: Int(modelId), name: nil)
+    guard let lut = OfficialDJILUT.auto(colorMode: mode, family: model.family, cameraName: model.name)
+    else { return 0 }
+    return DesktopFacade.emit(Data(lut.fileName.utf8), into: out, capacity: capacity)
+}
+
+/// The conform targets for a clip: the rates below its capture rate the edit could
+/// conform it to. `captureRate` is what the file reports, `listedFps` what the card
+/// listed; either may be 0. Writes up to `capacity` doubles and returns how many.
+@_cdecl("opc_conform_targets")
+func opc_conform_targets(
+    _ captureRate: Double, _ listedFps: Double, _ out: UnsafeMutablePointer<Double>?,
+    _ capacity: Int
+) -> Int32 {
+    let source = ConformPreview.probe(
+        nominalFrameRate: captureRate > 0 ? captureRate : nil,
+        listedRate: listedFps > 0 ? listedFps : nil)
+    let targets = ConformPreview.availability(for: source).targets
+    if let out {
+        for (index, rate) in targets.prefix(capacity).enumerated() {
+            out[index] = rate
+        }
+    }
+    return Int32(targets.count)
+}
+
+/// Playback speed for a capture rate conformed to a target: 120 → 24 plays at 0.2.
+@_cdecl("opc_conform_speed")
+func opc_conform_speed(_ captureRate: Double, _ targetRate: Double) -> Double {
+    ConformPreview.speed(captureRate: captureRate, targetRate: targetRate)
+}
+
+/// The chip text for a conform, e.g. "120 → 24".
+@_cdecl("opc_conform_label")
+func opc_conform_label(
+    _ captureRate: Double, _ targetRate: Double, _ out: UnsafeMutablePointer<UInt8>?,
+    _ capacity: Int
+) -> Int64 {
+    let text = ConformPreview.label(captureRate: captureRate, targetRate: targetRate)
+    return DesktopFacade.emit(Data(text.utf8), into: out, capacity: capacity)
+}

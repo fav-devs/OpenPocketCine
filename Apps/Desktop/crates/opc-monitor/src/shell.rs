@@ -19,7 +19,7 @@ use crate::assists::{
     guide_rect, AssistOptions, AssistTool, ZebraSteps, ZEBRA_HIGHLIGHT_STEPS, ZEBRA_MIDTONE_STEPS,
 };
 use crate::library::{Library, MediaAction, Player};
-use crate::luts::{LutChoice, LutMenu};
+use crate::luts::{self, LutChoice, LutMenu};
 use crate::moves::{MoveEngine, Program, Waypoint};
 use crate::pad::{PadAction, PadButton, REST as PAD_REST};
 use crate::prefs;
@@ -2154,188 +2154,229 @@ impl Shell {
         };
         let intents = cr.drain_intents();
         for intent in intents {
-            match intent {
-                ChromeIntent::RecordToggle => {
-                    fired.push(Intent::Send(if self.hud.status.is_recording {
-                        Command::RecordStop
-                    } else {
-                        Command::RecordStart
-                    }));
+            self.act_on_chrome(intent, &mut fired);
+        }
+        fired
+    }
+
+    /// One control's intent, as the chrome would fire it. For tests that do not want
+    /// to find the control by coordinate.
+    pub fn chrome_intent_for_test(&mut self, intent: ChromeIntent) -> Vec<Intent> {
+        let mut fired = Vec::new();
+        self.act_on_chrome(intent, &mut fired);
+        fired
+    }
+
+    fn act_on_chrome(&mut self, intent: ChromeIntent, fired: &mut Vec<Intent>) {
+        match intent {
+            ChromeIntent::RecordToggle => {
+                fired.push(Intent::Send(if self.hud.status.is_recording {
+                    Command::RecordStop
+                } else {
+                    Command::RecordStart
+                }));
+            }
+            ChromeIntent::TakeStill => fired.push(Intent::Send(Command::ShootPhoto)),
+            ChromeIntent::GimbalFlip => fired.push(Intent::Send(Command::GimbalFlip)),
+            ChromeIntent::GimbalRecenter => {
+                fired.push(Intent::Send(Command::GimbalRecenter));
+            }
+            ChromeIntent::ZoomSet(v) => {
+                let now = self.last_now;
+                fired.extend(self.zoom_write(ZoomWrite::Slider(f64::from(v)), now));
+            }
+            ChromeIntent::GimbalMoved { x, y } => fired.extend(self.pad_moved(x, y)),
+            ChromeIntent::GimbalReleased => fired.extend(self.pad_released()),
+            ChromeIntent::FollowToggle => {
+                // ON is Follow; OFF is the tilt-locked follow the body offers.
+                self.gimbal_mode = if self.gimbal_mode == GimbalMode::Follow {
+                    GimbalMode::TiltLocked
+                } else {
+                    GimbalMode::Follow
+                };
+                self.chrome_stale = true;
+                fired.extend(self.gimbal_mode.commands().into_iter().map(Intent::Send));
+            }
+            ChromeIntent::FollowCycle => {
+                self.gimbal_mode = self.gimbal_mode.next();
+                self.chrome_stale = true;
+                fired.extend(self.gimbal_mode.commands().into_iter().map(Intent::Send));
+            }
+            ChromeIntent::ModeSelected(index) => {
+                if let Some(code) = MODE_CODES.get(index).copied().flatten() {
+                    fired.push(Intent::Send(Command::SetShootingMode(code)));
                 }
-                ChromeIntent::TakeStill => fired.push(Intent::Send(Command::ShootPhoto)),
-                ChromeIntent::GimbalFlip => fired.push(Intent::Send(Command::GimbalFlip)),
-                ChromeIntent::GimbalRecenter => {
-                    fired.push(Intent::Send(Command::GimbalRecenter));
+            }
+            ChromeIntent::OpenFormat => self.toggle_sheet(SheetKind::Format),
+            ChromeIntent::OpenExposure => self.toggle_sheet(SheetKind::Exposure),
+            ChromeIntent::OpenMenu => self.toggle_sheet(SheetKind::Settings),
+            ChromeIntent::AssistBarToggle => {
+                self.assist_bar = !self.assist_bar;
+                self.chrome_stale = true;
+            }
+            ChromeIntent::AssistTap(index) => {
+                if let Some(tool) = AssistTool::TOOLBAR.get(index) {
+                    fired.extend(self.tap_tool(*tool));
                 }
-                ChromeIntent::ZoomSet(v) => {
-                    let now = self.last_now;
-                    fired.extend(self.zoom_write(ZoomWrite::Slider(f64::from(v)), now));
+            }
+            ChromeIntent::AssistConfigure(index) => {
+                if let Some(tool) = AssistTool::TOOLBAR.get(index) {
+                    self.toggle_sheet(SheetKind::Assist(*tool));
                 }
-                ChromeIntent::GimbalMoved { x, y } => fired.extend(self.pad_moved(x, y)),
-                ChromeIntent::GimbalReleased => fired.extend(self.pad_released()),
-                ChromeIntent::FollowToggle => {
-                    // ON is Follow; OFF is the tilt-locked follow the body offers.
-                    self.gimbal_mode = if self.gimbal_mode == GimbalMode::Follow {
-                        GimbalMode::TiltLocked
-                    } else {
-                        GimbalMode::Follow
-                    };
+            }
+            ChromeIntent::PlateMoved { tool, x, y } => {
+                if let Some(tool) = AssistTool::TOOLBAR.get(tool) {
+                    self.park_plate(*tool, x, y);
+                }
+            }
+            ChromeIntent::SheetClose => self.close_sheet(),
+            ChromeIntent::SheetTab(tab) => {
+                self.sheet_tab = tab;
+                if self.sheet == Some(SheetKind::Settings) {
+                    self.on_settings_tab(tab);
+                }
+                self.chrome_stale = true;
+            }
+            ChromeIntent::SheetPick { row, option } => {
+                let pick = self.sheet.and_then(|kind| {
+                    sheets::build(kind, self.sheet_tab, self.sheet_context())
+                        .pick(row, option)
+                        .cloned()
+                });
+                if let Some(pick) = pick {
+                    fired.extend(self.apply_pick(pick));
+                }
+            }
+            ChromeIntent::Exit => fired.push(Intent::Quit),
+            ChromeIntent::OpenGallery => fired.extend(self.open_library()),
+            ChromeIntent::LibraryBack => fired.extend(self.close_library()),
+            ChromeIntent::LibraryTab(index) => {
+                if let Some(tab) = opc_media::LibraryTab::ALL.get(index) {
+                    self.library.tab = *tab;
                     self.chrome_stale = true;
-                    fired.extend(self.gimbal_mode.commands().into_iter().map(Intent::Send));
                 }
-                ChromeIntent::FollowCycle => {
-                    self.gimbal_mode = self.gimbal_mode.next();
-                    self.chrome_stale = true;
-                    fired.extend(self.gimbal_mode.commands().into_iter().map(Intent::Send));
-                }
-                ChromeIntent::ModeSelected(index) => {
-                    if let Some(code) = MODE_CODES.get(index).copied().flatten() {
-                        fired.push(Intent::Send(Command::SetShootingMode(code)));
-                    }
-                }
-                ChromeIntent::OpenFormat => self.toggle_sheet(SheetKind::Format),
-                ChromeIntent::OpenExposure => self.toggle_sheet(SheetKind::Exposure),
-                ChromeIntent::OpenMenu => self.toggle_sheet(SheetKind::Settings),
-                ChromeIntent::AssistBarToggle => {
-                    self.assist_bar = !self.assist_bar;
-                    self.chrome_stale = true;
-                }
-                ChromeIntent::AssistTap(index) => {
-                    if let Some(tool) = AssistTool::TOOLBAR.get(index) {
-                        fired.extend(self.tap_tool(*tool));
-                    }
-                }
-                ChromeIntent::AssistConfigure(index) => {
-                    if let Some(tool) = AssistTool::TOOLBAR.get(index) {
-                        self.toggle_sheet(SheetKind::Assist(*tool));
-                    }
-                }
-                ChromeIntent::PlateMoved { tool, x, y } => {
-                    if let Some(tool) = AssistTool::TOOLBAR.get(tool) {
-                        self.park_plate(*tool, x, y);
-                    }
-                }
-                ChromeIntent::SheetClose => self.close_sheet(),
-                ChromeIntent::SheetTab(tab) => {
-                    self.sheet_tab = tab;
-                    if self.sheet == Some(SheetKind::Settings) {
-                        self.on_settings_tab(tab);
-                    }
-                    self.chrome_stale = true;
-                }
-                ChromeIntent::SheetPick { row, option } => {
-                    let pick = self.sheet.and_then(|kind| {
-                        sheets::build(kind, self.sheet_tab, self.sheet_context())
-                            .pick(row, option)
-                            .cloned()
-                    });
-                    if let Some(pick) = pick {
-                        fired.extend(self.apply_pick(pick));
-                    }
-                }
-                ChromeIntent::Exit => fired.push(Intent::Quit),
-                ChromeIntent::OpenGallery => fired.extend(self.open_library()),
-                ChromeIntent::LibraryBack => fired.extend(self.close_library()),
-                ChromeIntent::LibraryTab(index) => {
-                    if let Some(tab) = opc_media::LibraryTab::ALL.get(index) {
-                        self.library.tab = *tab;
-                        self.chrome_stale = true;
-                    }
-                }
-                ChromeIntent::LibrarySortNext => {
-                    self.library.sort = self.library.sort.next();
-                    self.chrome_stale = true;
-                }
-                ChromeIntent::LibraryRefresh => {
-                    fired.extend(self.press_on_screen(Key::Char('r')));
-                }
-                ChromeIntent::LibrarySelect(index) => {
+            }
+            ChromeIntent::LibrarySortNext => {
+                self.library.sort = self.library.sort.next();
+                self.chrome_stale = true;
+            }
+            ChromeIntent::LibraryRefresh => {
+                fired.extend(self.press_on_screen(Key::Char('r')));
+            }
+            ChromeIntent::LibrarySelect(index) => {
+                if self.library.selecting {
+                    self.library.toggle_checked(index);
+                } else {
                     self.library.select_index(index);
+                }
+                self.chrome_stale = true;
+            }
+            ChromeIntent::LibrarySelectMode => {
+                self.library.toggle_select_mode();
+                self.chrome_stale = true;
+            }
+            ChromeIntent::LibraryDeleteChecked => {
+                let mut counter = self.media_counter;
+                let commands = self.library.delete_checked(|| {
+                    counter = counter.wrapping_add(1).max(1);
+                    counter
+                });
+                self.media_counter = counter;
+                fired.extend(commands.into_iter().map(Intent::Send));
+                self.chrome_stale = true;
+            }
+            ChromeIntent::LibraryBurst => {
+                self.library.toggle_burst();
+                self.chrome_stale = true;
+            }
+            ChromeIntent::PlayerConform => {
+                if let Some(player) = self.player.as_mut() {
+                    player.next_conform();
+                    let speed = player.speed();
+                    fired.push(Intent::Media(MediaAction::Speed(speed)));
+                }
+                self.chrome_stale = true;
+            }
+            ChromeIntent::LibraryPlay => fired.extend(self.library_open_selected()),
+            ChromeIntent::LibraryDownload => {
+                if let Some(file) = self.library.selected_file().cloned() {
+                    self.library.progress.insert(file.path.clone(), (0, None));
+                    self.chrome_stale = true;
+                    fired.push(Intent::Media(MediaAction::Download(file)));
+                }
+            }
+            ChromeIntent::LibraryFavorite => {
+                let counter = self.next_media_counter();
+                if let Some(command) = self.library.toggle_favorite(counter) {
+                    fired.push(Intent::Send(command));
+                }
+                self.chrome_stale = true;
+            }
+            ChromeIntent::LibraryDelete => {
+                let counter = self.next_media_counter();
+                if let Some(command) = self.library.delete_tapped(counter) {
+                    fired.push(Intent::Send(command));
+                }
+                self.chrome_stale = true;
+            }
+            ChromeIntent::LibrarySource(local) => {
+                self.library.local = local;
+                self.library.selected = None;
+                self.chrome_stale = true;
+            }
+            ChromeIntent::PlayerBack => fired.extend(self.close_player()),
+            ChromeIntent::PlayerToggle => fired.extend(self.player_toggle()),
+            ChromeIntent::PlayerInfo => {
+                if let Some(player) = self.player.as_mut() {
+                    player.show_info = !player.show_info;
                     self.chrome_stale = true;
                 }
-                ChromeIntent::LibraryPlay => fired.extend(self.library_open_selected()),
-                ChromeIntent::LibraryDownload => {
-                    if let Some(file) = self.library.selected_file().cloned() {
-                        self.library.progress.insert(file.path.clone(), (0, None));
-                        self.chrome_stale = true;
-                        fired.push(Intent::Media(MediaAction::Download(file)));
-                    }
+            }
+            ChromeIntent::PlayerDownload => {
+                if let Some(file) = self.player.as_ref().map(|p| p.file.clone()) {
+                    self.library.progress.insert(file.path.clone(), (0, None));
+                    fired.push(Intent::Media(MediaAction::Download(file)));
                 }
-                ChromeIntent::LibraryFavorite => {
+            }
+            ChromeIntent::PlayerScreenshot => fired.push(Intent::Still),
+            ChromeIntent::PlayerLut => fired.extend(self.act(Action::ToggleGrade, 0.0)),
+            ChromeIntent::PlayerZebra => fired.extend(self.act(Action::ToggleZebra, 0.0)),
+            ChromeIntent::PlayerPeaking => {
+                fired.extend(self.act(Action::TogglePeaking, 0.0));
+            }
+            ChromeIntent::PlayerFavorite => {
+                if self.player_select() {
                     let counter = self.next_media_counter();
                     if let Some(command) = self.library.toggle_favorite(counter) {
                         fired.push(Intent::Send(command));
                     }
                     self.chrome_stale = true;
                 }
-                ChromeIntent::LibraryDelete => {
+            }
+            ChromeIntent::PlayerDelete => {
+                if self.player_select() {
                     let counter = self.next_media_counter();
                     if let Some(command) = self.library.delete_tapped(counter) {
                         fired.push(Intent::Send(command));
+                        // The clip is gone: back to the grid.
+                        fired.extend(self.close_player());
                     }
                     self.chrome_stale = true;
                 }
-                ChromeIntent::LibrarySource(local) => {
-                    self.library.local = local;
-                    self.library.selected = None;
-                    self.chrome_stale = true;
-                }
-                ChromeIntent::PlayerBack => fired.extend(self.close_player()),
-                ChromeIntent::PlayerToggle => fired.extend(self.player_toggle()),
-                ChromeIntent::PlayerInfo => {
-                    if let Some(player) = self.player.as_mut() {
-                        player.show_info = !player.show_info;
-                        self.chrome_stale = true;
-                    }
-                }
-                ChromeIntent::PlayerDownload => {
-                    if let Some(file) = self.player.as_ref().map(|p| p.file.clone()) {
-                        self.library.progress.insert(file.path.clone(), (0, None));
-                        fired.push(Intent::Media(MediaAction::Download(file)));
-                    }
-                }
-                ChromeIntent::PlayerScreenshot => fired.push(Intent::Still),
-                ChromeIntent::PlayerLut => fired.extend(self.act(Action::ToggleGrade, 0.0)),
-                ChromeIntent::PlayerZebra => fired.extend(self.act(Action::ToggleZebra, 0.0)),
-                ChromeIntent::PlayerPeaking => {
-                    fired.extend(self.act(Action::TogglePeaking, 0.0));
-                }
-                ChromeIntent::PlayerFavorite => {
-                    if self.player_select() {
-                        let counter = self.next_media_counter();
-                        if let Some(command) = self.library.toggle_favorite(counter) {
-                            fired.push(Intent::Send(command));
-                        }
-                        self.chrome_stale = true;
-                    }
-                }
-                ChromeIntent::PlayerDelete => {
-                    if self.player_select() {
-                        let counter = self.next_media_counter();
-                        if let Some(command) = self.library.delete_tapped(counter) {
-                            fired.push(Intent::Send(command));
-                            // The clip is gone: back to the grid.
-                            fired.extend(self.close_player());
-                        }
-                        self.chrome_stale = true;
-                    }
-                }
-                ChromeIntent::PlayerSeek(fraction) => {
-                    if let Some(player) = self.player.as_mut() {
-                        let position = (f64::from(fraction).clamp(0.0, 1.0)
-                            * player.duration_ms as f64)
-                            as i64;
-                        player.position_ms = position;
-                        self.chrome_stale = true;
-                        fired.push(Intent::Media(MediaAction::PlayerSeek(position)));
-                    }
-                }
-                ChromeIntent::FullscreenToggle => fired.push(Intent::ToggleFullscreen),
-                // Surfaces that do not exist on the desktop yet.
-                ChromeIntent::OrientationToggle => {}
             }
+            ChromeIntent::PlayerSeek(fraction) => {
+                if let Some(player) = self.player.as_mut() {
+                    let position =
+                        (f64::from(fraction).clamp(0.0, 1.0) * player.duration_ms as f64) as i64;
+                    player.position_ms = position;
+                    self.chrome_stale = true;
+                    fired.push(Intent::Media(MediaAction::PlayerSeek(position)));
+                }
+            }
+            ChromeIntent::FullscreenToggle => fired.push(Intent::ToggleFullscreen),
+            // Surfaces that do not exist on the desktop yet.
+            ChromeIntent::OrientationToggle => {}
         }
-        fired
     }
 
     // ── Screens ──────────────────────────────────────────────────────────────
@@ -2462,8 +2503,40 @@ impl Shell {
             proxy,
             is_photo,
             show_info: false,
+            capture_rate: 0.0,
+            conform_targets: Vec::new(),
+            conform: None,
         });
         self.chrome_stale = true;
+    }
+
+    /// What the clip could be conformed to, once the file has been read.
+    pub fn player_conform_targets(&mut self, capture_rate: f64, targets: Vec<f64>) {
+        if let Some(player) = self.player.as_mut() {
+            player.capture_rate = capture_rate;
+            player.conform_targets = targets;
+            player.conform = None;
+        }
+        self.chrome_stale = true;
+    }
+
+    /// Auto LUT for the clip on screen: the official cube for its shot colour, from
+    /// the LUT folder, when the operator dropped it there. The clip's own colour
+    /// wins; a proxy with no original on disk falls back to the body's live colour.
+    pub fn auto_lut(&mut self, clip_color: Option<u8>) {
+        let color = clip_color.or(self.hud.status.color_mode);
+        let Some(color) = color else {
+            return;
+        };
+        let Some(file) = luts::auto_lut_file(color, self.model_id) else {
+            return;
+        };
+        if self.lut_menu.custom.contains(&file) {
+            self.apply_pick(Pick::Lut(LutChoice::File(file)));
+            self.set_notice("AUTO LUT · OFFICIAL CUBE FOR THE CLIP");
+        } else {
+            self.set_notice("AUTO LUT · DROP THE OFFICIAL CUBE IN THE LUT FOLDER");
+        }
     }
 
     /// Frames across the clip for the filmstrip scrubber.

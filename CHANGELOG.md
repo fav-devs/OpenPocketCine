@@ -35,7 +35,11 @@ All notable changes to this project are documented here. The format is based on
   size and a clear, a diagnostics report; the operator's settings persist
   beside the LUT folder. Programmed moves gain the phones' smoothness (a
   Bézier fillet at B, streamed as look-ahead targets) and pause / resume from
-  the stopped pose. Unqualified on a physical body.
+  the stopped pose. The library gains the phones' select mode with a batch
+  delete and folds bursts under their first frame; the player gains the
+  conform chip (the core's `ConformPreview` targets and speed) and Auto LUT
+  from the original's `moov` tail through `ClipColorProfile` and
+  `OfficialDJILUT.auto`. Unqualified on a physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

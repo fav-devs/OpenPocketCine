@@ -147,6 +147,16 @@ resolution, and the actions:
   base + step fit vouched for ever goes out; a shared or unfitted handle greys the
   button. A delete is irreversible.
 
+**Select** in the header turns the grid into the phones' multi-select: every tile gets
+a check circle, the footer counts the checks, and **Delete selected** arms on the first
+tap and sends one delete per checked file on the second, again only for handles the fit
+vouched for. **Done** leaves select mode and forgets the checks.
+
+A burst (`…_0034_D_001.JPG`, `_002`, … — the core's `burstRegex`) is one tile carrying
+its first frame and a `×N` badge, as the phones fold it; the selection bar offers
+**Expand ×N**, which lays every member out as its own tile, and **Fold burst** to put
+it back. In select mode a folded burst checks as its lead only.
+
 Listing follows the phones' sequence and the Osmosis notes for the bodies that need
 them: enter playback (`0x02/0x0c`, three tries), fall through to the Pocket 3's
 `0x01/0x01` entry at 20 Hz when the body refuses, wait 1.7 s for the store to mount,
@@ -167,12 +177,26 @@ work on it exactly as on live view. The page is Mimo's: back, an info button tha
 shows the clip's name and figures, the rendition as the title (`Low-Res` for the
 proxy), a download button for the original; below, the time pill, a filmstrip scrubber
 of eight frames decoded from the clip with the playhead over it, the tools
-(Screenshot writes the graded frame with `S`; LUT, Zebra and Peaking toggle), and
-heart · pause · trash. `Space` pauses, `Esc` goes back to the library; trash arms on
+(Screenshot writes the graded frame with `S`; LUT, Zebra and Peaking toggle; the
+conform chip), and heart · pause · trash. `Space` pauses, `Esc` goes back to the library; trash arms on
 the first tap and deletes on the second. A still is converted to the same 4:2:0
 path, so it is graded too. Playback is from the file on disk, never streamed from
 `/v2`: the camera parks `moov` at the end and serves no extension, which no player
 copes with.
+
+**Conform preview.** A high-frame-rate take offers the core's `ConformPreview` targets
+(the rates below its capture rate, from `opc_conform_targets`); the chip cycles
+`Conform → 120 → 24 → 120 → 60 → Conform`, and the player's clock runs at the core's
+`opc_conform_speed` ratio so the slow-motion delivery can be judged before the edit.
+The chip is greyed on a clip with nothing to conform to. Opening a clip resets it.
+
+**Auto LUT.** When the original is on disk, the player reads the take's `moov` tail
+(the last 2 MiB) through the core's `ClipColorProfile` — the `com.dji.camera.ColorGammaSxS`
+key — and asks the core for the official cube's file name for that colour and body
+(`OfficialDJILUT.auto`). If the operator has dropped that cube into the LUT folder it
+is applied and the notice reads `AUTO LUT · OFFICIAL CUBE FOR THE CLIP`; otherwise the
+notice names the file to drop in. A proxy with no original falls back to the body's
+live colour mode. The desktop never ships the cubes.
 
 Every button carries its key hint in small type, so a keyboard operator learns the
 bindings from the screen. When the window is wider than the picture, the two plates park

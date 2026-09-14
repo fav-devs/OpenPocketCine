@@ -113,6 +113,29 @@ impl MediaFile {
         self.filename_timestamp().map_or("", |stamp| &stamp[..8])
     }
 
+    /// A burst member's group, `DJI_…_0034_D` of `DJI_…_0034_D_003.JPG`, as the core
+    /// reads it (`burstRegex`: a `_NNN` before the extension). `None` off a burst.
+    pub fn burst_group_key(&self) -> Option<&str> {
+        let name = self.filename();
+        let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+        let (key, index) = stem.rsplit_once('_')?;
+        if index.len() == 3 && index.bytes().all(|b| b.is_ascii_digit()) && !key.is_empty() {
+            Some(key)
+        } else {
+            None
+        }
+    }
+
+    /// The member's place in its burst, or 0 off a burst.
+    pub fn burst_index(&self) -> u32 {
+        let name = self.filename();
+        let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+        stem.rsplit_once('_')
+            .filter(|(_, index)| index.len() == 3)
+            .and_then(|(_, index)| index.parse().ok())
+            .unwrap_or(0)
+    }
+
     /// `DJI_…_0034_D` sequence used to fit `base + seq × step`.
     pub fn sequence_number(&self) -> u32 {
         let name = self.filename();
@@ -419,5 +442,19 @@ mod tests {
         file.cmd_handle = 5;
         assert!(!file.is_deletable());
         assert_eq!(file.favorite_handle(), 5);
+    }
+
+    #[test]
+    fn a_burst_member_names_its_group_and_place() {
+        let member = clip("DCIM/DJI_001/DJI_20260814125250_0034_D_003.JPG");
+        assert_eq!(member.burst_group_key(), Some("DJI_20260814125250_0034_D"));
+        assert_eq!(member.burst_index(), 3);
+        assert_eq!(member.date_key(), "20260814");
+        let plain = clip("DCIM/DJI_001/DJI_20260814125250_0034_D.MP4");
+        assert_eq!(plain.burst_group_key(), None);
+        assert_eq!(plain.burst_index(), 0);
+        // Only a three-digit suffix is a burst place.
+        let four = clip("DCIM/DJI_001/DJI_20260814125250_0034_D_0003.JPG");
+        assert_eq!(four.burst_group_key(), None);
     }
 }

@@ -200,6 +200,10 @@ pub enum ChromeIntent {
     LibraryDelete,
     /// Device (false) or Local (true): the card, or what is on this machine.
     LibrarySource(bool),
+    /// Select mode on or off, the batch delete, and a burst opened or folded.
+    LibrarySelectMode,
+    LibraryDeleteChecked,
+    LibraryBurst,
     // The player.
     PlayerBack,
     PlayerToggle,
@@ -213,6 +217,8 @@ pub enum ChromeIntent {
     PlayerPeaking,
     PlayerFavorite,
     PlayerDelete,
+    /// The conform chip: the next target, or off.
+    PlayerConform,
 }
 
 /// Which screen the chrome draws.
@@ -253,6 +259,10 @@ pub struct CellState {
     pub starred: bool,
     pub cached: bool,
     pub selected: bool,
+    /// Checked for a batch delete.
+    pub checked: bool,
+    /// A folded burst: how many members the tile stands for; 0 otherwise.
+    pub burst: u32,
 }
 
 /// The selected file's bar at the bottom of the library.
@@ -268,6 +278,9 @@ pub struct SelectionState {
     /// A transfer in flight, 0…1.
     pub progress: Option<f32>,
     pub note: String,
+    /// A burst lead: how many members, and whether they are shown.
+    pub burst: u32,
+    pub expanded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -283,6 +296,10 @@ pub struct LibraryState {
     pub cell_width: f32,
     pub cell_height: f32,
     pub selection: Option<SelectionState>,
+    /// Select mode for a batch delete, and its state.
+    pub selecting: bool,
+    pub checked_count: usize,
+    pub batch_armed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -305,6 +322,11 @@ pub struct PlayerState {
     pub zebra_on: bool,
     pub peaking_on: bool,
     pub is_photo: bool,
+    /// The conform chip's text, and whether a conform is playing.
+    pub conform_label: String,
+    pub conform_on: bool,
+    /// Greyed when the clip has nothing to conform to.
+    pub conform_available: bool,
 }
 
 /// One row of a sheet: a title and the chips beside it.
@@ -648,6 +670,13 @@ impl Chrome {
         simple!(on_library_download, ChromeIntent::LibraryDownload);
         simple!(on_library_favorite, ChromeIntent::LibraryFavorite);
         simple!(on_library_delete, ChromeIntent::LibraryDelete);
+        simple!(on_library_select_mode, ChromeIntent::LibrarySelectMode);
+        simple!(
+            on_library_delete_checked,
+            ChromeIntent::LibraryDeleteChecked
+        );
+        simple!(on_library_burst, ChromeIntent::LibraryBurst);
+        simple!(on_player_conform, ChromeIntent::PlayerConform);
         simple!(on_player_back, ChromeIntent::PlayerBack);
         simple!(on_player_toggle, ChromeIntent::PlayerToggle);
         simple!(on_player_info, ChromeIntent::PlayerInfo);
@@ -1062,6 +1091,8 @@ impl Chrome {
                         starred: cell.starred,
                         cached: cell.cached,
                         selected: cell.selected,
+                        checked: cell.checked,
+                        burst: cell.burst as i32,
                     }
                 })
                 .collect();
@@ -1074,6 +1105,9 @@ impl Chrome {
             c.set_library_sort(library.sort_label.clone().into());
             c.set_library_status(library.status.clone().into());
             c.set_library_has_selection(library.selection.is_some());
+            c.set_library_selecting(library.selecting);
+            c.set_library_checked_count(library.checked_count as i32);
+            c.set_library_batch_armed(library.batch_armed);
             if let Some(selection) = &library.selection {
                 c.set_library_selection(MediaSelection {
                     title: selection.title.clone().into(),
@@ -1085,6 +1119,8 @@ impl Chrome {
                     delete_armed: selection.delete_armed,
                     progress: selection.progress.unwrap_or(-1.0),
                     note: selection.note.clone().into(),
+                    burst: selection.burst as i32,
+                    expanded: selection.expanded,
                 });
             }
         } else if state.screen == Screen::Viewfinder && c.get_library_has_selection() {
@@ -1106,6 +1142,9 @@ impl Chrome {
                 cached: player.cached,
                 deletable: player.deletable,
                 delete_armed: player.delete_armed,
+                conform_label: player.conform_label.clone().into(),
+                conform_on: player.conform_on,
+                conform_available: player.conform_available,
                 lut_on: player.lut_on,
                 zebra_on: player.zebra_on,
                 peaking_on: player.peaking_on,

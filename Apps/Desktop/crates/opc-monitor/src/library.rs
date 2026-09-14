@@ -43,6 +43,8 @@ pub enum MediaAction {
     CacheSize,
     /// Empty the cache on disk.
     ClearCache,
+    /// Playback rate for the conform preview; 1 is the clip's own.
+    Speed(f64),
 }
 
 /// The card as listed, and how the operator is looking at it.
@@ -72,6 +74,13 @@ pub struct Library {
     pub listing: bool,
     /// The paths on screen, in grid order, so a tapped index finds its file.
     pub visible: Vec<String>,
+    /// Select mode: taps check tiles for a batch delete.
+    pub selecting: bool,
+    pub checked: HashSet<String>,
+    /// The batch delete was tapped once; the next tap sends it.
+    pub batch_armed: bool,
+    /// Burst groups shown member by member rather than as one tile.
+    pub expanded: HashSet<String>,
 }
 
 impl Library {
@@ -132,7 +141,7 @@ impl Library {
     /// day headers. Also records the cell order for taps (headers are empty slots).
     pub fn state(&mut self, width: f32) -> LibraryState {
         let today = today_key();
-        let visible: Vec<MediaFile> = self.visible_files().into_iter().cloned().collect();
+        let visible: Vec<MediaFile> = self.grid_files();
         let columns = (((width - 2.0 * INSET + GAP) / (CELL_W + GAP)).floor() as usize).max(1);
         let mut cells: Vec<CellState> = Vec::new();
         let mut order: Vec<String> = Vec::new();
@@ -156,6 +165,8 @@ impl Library {
                     starred: false,
                     cached: false,
                     selected: false,
+                    checked: false,
+                    burst: 0,
                 });
                 order.push(String::new());
                 y += HEADER_H + GAP;
@@ -180,6 +191,8 @@ impl Library {
                 starred: self.is_starred(file),
                 cached: self.cached.contains(&file.path),
                 selected: self.selected.as_deref() == Some(file.path.as_str()),
+                checked: self.checked.contains(&file.path),
+                burst: self.burst_count(file),
             });
             order.push(file.path.clone());
             column += 1;
@@ -212,6 +225,10 @@ impl Library {
                 delete_armed: self.delete_armed.as_deref() == Some(file.path.as_str()),
                 progress,
                 note,
+                burst: self.burst_count(file),
+                expanded: file
+                    .burst_group_key()
+                    .is_some_and(|key| self.expanded.contains(key)),
             }
         });
         let status = if self.listing {
@@ -240,7 +257,124 @@ impl Library {
             cell_width: CELL_W,
             cell_height: CELL_H,
             selection,
+            selecting: self.selecting,
+            checked_count: self.checked.len(),
+            batch_armed: self.batch_armed,
         }
+    }
+
+    /// The tiles to lay out: the visible files with each burst folded under its lead
+    /// unless the operator expanded it.
+    fn grid_files(&self) -> Vec<MediaFile> {
+        let mut out: Vec<MediaFile> = Vec::new();
+        let mut leads: HashSet<String> = HashSet::new();
+        for file in self.visible_files() {
+            match file.burst_group_key() {
+                Some(key) if !self.expanded.contains(key) => {
+                    if leads.insert(key.to_string()) {
+                        out.push(
+                            self.burst_lead(key)
+                                .cloned()
+                                .unwrap_or_else(|| file.clone()),
+                        );
+                    }
+                }
+                _ => out.push(file.clone()),
+            }
+        }
+        out
+    }
+
+    /// The lowest-numbered member of a burst.
+    fn burst_lead(&self, key: &str) -> Option<&MediaFile> {
+        self.files
+            .iter()
+            .filter(|file| file.burst_group_key() == Some(key))
+            .min_by_key(|file| file.burst_index())
+    }
+
+    /// How many members a folded burst tile stands for; 0 for a plain tile or an
+    /// expanded member.
+    fn burst_count(&self, file: &MediaFile) -> u32 {
+        let Some(key) = file.burst_group_key() else {
+            return 0;
+        };
+        if self.expanded.contains(key) {
+            return 0;
+        }
+        self.files
+            .iter()
+            .filter(|f| f.burst_group_key() == Some(key))
+            .count() as u32
+    }
+
+    /// Select mode on or off. Leaving it forgets the checks.
+    pub fn toggle_select_mode(&mut self) {
+        self.selecting = !self.selecting;
+        self.checked.clear();
+        self.batch_armed = false;
+        self.delete_armed = None;
+    }
+
+    /// A tile tapped in select mode: checked or not.
+    pub fn toggle_checked(&mut self, index: usize) {
+        let Some(path) = self.visible.get(index).filter(|path| !path.is_empty()) else {
+            return;
+        };
+        if !self.checked.remove(path) {
+            self.checked.insert(path.clone());
+        }
+        self.batch_armed = false;
+    }
+
+    /// The selection's burst opened up, or folded back.
+    pub fn toggle_burst(&mut self) {
+        let Some(key) = self
+            .selected_file()
+            .and_then(|file| file.burst_group_key())
+            .map(str::to_string)
+        else {
+            return;
+        };
+        if !self.expanded.remove(&key) {
+            self.expanded.insert(key);
+        }
+    }
+
+    /// Delete selected tapped: the first tap arms, the second sends one delete per
+    /// checked file the fit vouched for, newest counter first.
+    pub fn delete_checked(&mut self, mut next_counter: impl FnMut() -> u32) -> Vec<Command> {
+        if self.checked.is_empty() {
+            return Vec::new();
+        }
+        if !self.batch_armed {
+            self.batch_armed = true;
+            return Vec::new();
+        }
+        self.batch_armed = false;
+        let checked = std::mem::take(&mut self.checked);
+        let mut commands = Vec::new();
+        let mut deleted = 0;
+        for path in checked {
+            let Some(file) = self.file(&path).cloned() else {
+                continue;
+            };
+            if !file.is_deletable() {
+                continue;
+            }
+            self.files.retain(|f| f.path != path);
+            if self.selected.as_deref() == Some(path.as_str()) {
+                self.selected = None;
+            }
+            commands.push(Command::MediaDelete {
+                handle: file.handle,
+                counter: next_counter(),
+            });
+            deleted += 1;
+        }
+        self.status = format!("Deleted {deleted} files");
+        self.selecting = false;
+        commands
     }
 
     /// The visible files whose thumbnails have not been asked for yet.
@@ -342,6 +476,98 @@ pub struct Player {
     pub proxy: bool,
     pub is_photo: bool,
     pub show_info: bool,
+    /// The clip's capture rate and the rates it could be conformed to, from the core.
+    pub capture_rate: f64,
+    pub conform_targets: Vec<f64>,
+    /// Which target the preview plays at, if any.
+    pub conform: Option<f64>,
+}
+
+impl Player {
+    /// The conform chip: "120 → 24", or "Conform" when off.
+    pub fn conform_label(&self) -> String {
+        match self.conform {
+            Some(target) => conform_label(self.capture_rate, target),
+            None => "Conform".to_string(),
+        }
+    }
+
+    /// Playback speed for the preview: 1 without a conform.
+    pub fn speed(&self) -> f64 {
+        self.conform
+            .map_or(1.0, |target| conform_speed(self.capture_rate, target))
+    }
+
+    /// Cycles off → first target → … → off.
+    pub fn next_conform(&mut self) {
+        let next = match self.conform {
+            None => self.conform_targets.first().copied(),
+            Some(current) => self
+                .conform_targets
+                .iter()
+                .position(|t| (t - current).abs() < 1e-9)
+                .and_then(|at| self.conform_targets.get(at + 1))
+                .copied(),
+        };
+        self.conform = next;
+    }
+}
+
+/// The conform targets for a clip, from the core: the rates below its capture rate.
+/// None without the core linked.
+#[cfg(opc_core_linked)]
+pub fn conform_targets(capture_rate: f64, listed_fps: f64) -> Vec<f64> {
+    let mut out = [0.0_f64; 8];
+    // Safety: `out` has the capacity handed over.
+    let count = unsafe {
+        opc_core_sys::opc_conform_targets(capture_rate, listed_fps, out.as_mut_ptr(), out.len())
+    };
+    let count = usize::try_from(count).unwrap_or(0).min(out.len());
+    out[..count].to_vec()
+}
+
+#[cfg(not(opc_core_linked))]
+pub fn conform_targets(_capture_rate: f64, _listed_fps: f64) -> Vec<f64> {
+    Vec::new()
+}
+
+#[cfg(opc_core_linked)]
+pub fn conform_speed(capture_rate: f64, target: f64) -> f64 {
+    // Safety: plain values in.
+    unsafe { opc_core_sys::opc_conform_speed(capture_rate, target) }
+}
+
+#[cfg(not(opc_core_linked))]
+pub fn conform_speed(capture_rate: f64, target: f64) -> f64 {
+    if capture_rate > 0.0 && target > 0.0 {
+        target / capture_rate
+    } else {
+        1.0
+    }
+}
+
+#[cfg(opc_core_linked)]
+pub fn conform_label(capture_rate: f64, target: f64) -> String {
+    // Safety: probing with a null destination only reports the size needed.
+    let needed =
+        unsafe { opc_core_sys::opc_conform_label(capture_rate, target, std::ptr::null_mut(), 0) };
+    if needed <= 0 {
+        return String::new();
+    }
+    let mut bytes = vec![0u8; needed as usize];
+    // Safety: `bytes` has exactly the capacity the core asked for.
+    let written = unsafe {
+        opc_core_sys::opc_conform_label(capture_rate, target, bytes.as_mut_ptr(), bytes.len())
+    };
+    if written != needed {
+        return String::new();
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+#[cfg(not(opc_core_linked))]
+pub fn conform_label(capture_rate: f64, target: f64) -> String {
+    format!("{capture_rate:.0} → {target:.0}")
 }
 
 /// `mm:ss`, zero-padded like Mimo's time pill.
@@ -387,6 +613,9 @@ impl Player {
             zebra_on: toggles.zebra,
             peaking_on: toggles.peaking,
             is_photo: self.is_photo,
+            conform_label: self.conform_label(),
+            conform_on: self.conform.is_some(),
+            conform_available: !self.conform_targets.is_empty(),
         }
     }
 }
@@ -522,6 +751,182 @@ mod tests {
         assert!(library.thumbs_wanted().is_empty());
     }
 
+    fn burst_member(n: u32) -> MediaFile {
+        MediaFile {
+            path: format!("DCIM/DJI_001/DJI_20260814125205_0005_D_{n:03}.JPG"),
+            handle: 0x4010_4500 + n,
+            ..MediaFile::default()
+        }
+    }
+
+    #[test]
+    fn a_burst_folds_under_its_lowest_member_until_expanded() {
+        let mut library = Library {
+            files: vec![
+                burst_member(3),
+                clip(1, true),
+                burst_member(1),
+                burst_member(2),
+            ],
+            ..Library::default()
+        };
+        let state = library.state(1280.0);
+        assert_eq!(
+            state.cells.len(),
+            3,
+            "a header, the clip and one burst tile"
+        );
+        let (index, tile) = state
+            .cells
+            .iter()
+            .enumerate()
+            .find(|(_, cell)| cell.burst > 0)
+            .expect("the folded burst");
+        assert_eq!(tile.burst, 3);
+        assert!(
+            tile.path.ends_with("_001.JPG"),
+            "the lead is the first frame"
+        );
+
+        library.select_index(index);
+        let selection = library.state(1280.0).selection.unwrap();
+        assert_eq!(selection.burst, 3);
+        assert!(!selection.expanded);
+
+        library.toggle_burst();
+        let state = library.state(1280.0);
+        assert_eq!(state.cells.len(), 5, "every member gets a tile");
+        assert!(state.cells.iter().all(|cell| cell.burst == 0));
+        assert!(state.selection.unwrap().expanded);
+
+        library.toggle_burst();
+        assert_eq!(library.state(1280.0).cells.len(), 3);
+    }
+
+    #[test]
+    fn select_mode_checks_tiles_and_a_batch_delete_arms_then_sends() {
+        let mut library = Library {
+            files: vec![
+                clip(1, true),
+                clip(2, false),
+                MediaFile {
+                    handle_shared: true,
+                    ..clip(3, true)
+                },
+            ],
+            ..Library::default()
+        };
+        library.state(1280.0);
+        let mut counter = 10;
+        let mut next = || {
+            counter += 1;
+            counter
+        };
+        assert!(
+            library.delete_checked(&mut next).is_empty(),
+            "nothing checked"
+        );
+
+        library.toggle_select_mode();
+        library.toggle_checked(0);
+        assert!(library.checked.is_empty(), "a header is not a file");
+        library.toggle_checked(1);
+        library.toggle_checked(2);
+        library.toggle_checked(3);
+        library.toggle_checked(2);
+        library.toggle_checked(2);
+        let state = library.state(1280.0);
+        assert!(state.selecting);
+        assert_eq!(state.checked_count, 3);
+        assert_eq!(state.cells.iter().filter(|cell| cell.checked).count(), 3);
+
+        assert!(
+            library.delete_checked(&mut next).is_empty(),
+            "first tap arms"
+        );
+        assert!(library.state(1280.0).batch_armed);
+        let mut sent = library.delete_checked(&mut next);
+        sent.sort_by_key(|command| match command {
+            Command::MediaDelete { handle, .. } => *handle,
+            _ => 0,
+        });
+        let handles: Vec<u32> = sent
+            .iter()
+            .map(|command| match command {
+                Command::MediaDelete { handle, .. } => *handle,
+                _ => 0,
+            })
+            .collect();
+        assert_eq!(
+            handles,
+            [0x4010_4401, 0x4010_4402],
+            "the shared handle stays"
+        );
+        let counters: HashSet<u32> = sent
+            .iter()
+            .map(|command| match command {
+                Command::MediaDelete { counter, .. } => *counter,
+                _ => 0,
+            })
+            .collect();
+        assert_eq!(counters.len(), 2, "each delete has its own counter");
+        assert_eq!(library.files.len(), 1);
+        assert!(!library.selecting, "done after the batch");
+        assert_eq!(library.status, "Deleted 2 files");
+
+        library.toggle_select_mode();
+        library.toggle_checked(1);
+        library.toggle_select_mode();
+        assert!(
+            library.checked.is_empty(),
+            "leaving select mode forgets the checks"
+        );
+    }
+
+    #[test]
+    fn the_conform_chip_cycles_the_targets_and_sets_the_speed() {
+        let library = Library::default();
+        let mut player = Player {
+            file: clip(1, true),
+            playing: true,
+            position_ms: 0,
+            duration_ms: 26_000,
+            proxy: false,
+            is_photo: false,
+            show_info: false,
+            capture_rate: 120.0,
+            conform_targets: vec![24.0, 60.0],
+            conform: None,
+        };
+        let state = player.state(&library, Toggles::default());
+        assert_eq!(state.conform_label, "Conform");
+        assert!(state.conform_available && !state.conform_on);
+        assert_eq!(player.speed(), 1.0);
+
+        player.next_conform();
+        assert_eq!(player.conform, Some(24.0));
+        assert!((player.speed() - 0.2).abs() < 1e-9);
+        let state = player.state(&library, Toggles::default());
+        assert!(state.conform_on);
+        assert_eq!(state.conform_label, "120 → 24");
+
+        player.next_conform();
+        assert_eq!(player.conform, Some(60.0));
+        assert!((player.speed() - 0.5).abs() < 1e-9);
+
+        player.next_conform();
+        assert_eq!(player.conform, None, "past the last target it is off again");
+        assert_eq!(player.speed(), 1.0);
+
+        let mut bare = Player {
+            conform_targets: Vec::new(),
+            ..player
+        };
+        bare.next_conform();
+        assert_eq!(bare.conform, None);
+        assert!(!bare.state(&library, Toggles::default()).conform_available);
+    }
+
     #[test]
     fn the_player_reads_its_clock_as_the_phones_do() {
         let library = Library {
@@ -536,6 +941,9 @@ mod tests {
             proxy: true,
             is_photo: false,
             show_info: false,
+            capture_rate: 30.0,
+            conform_targets: Vec::new(),
+            conform: None,
         };
         let state = player.state(&library, Toggles::default());
         assert_eq!(state.position_label, "00:09");

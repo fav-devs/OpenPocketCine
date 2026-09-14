@@ -82,6 +82,62 @@ pub fn is_safe_file_name(name: &str) -> bool {
         && name != ".."
 }
 
+/// The shot colour an original take carries in its `moov` tail, read by the core.
+/// `None` for a proxy, a take without the Keys atom, or without the core linked.
+#[cfg(opc_core_linked)]
+pub fn clip_color_mode(tail: &[u8]) -> Option<u8> {
+    // Safety: the slice outlives the call.
+    let mode = unsafe { opc_core_sys::opc_clip_color_mode(tail.as_ptr(), tail.len()) };
+    u8::try_from(mode).ok()
+}
+
+#[cfg(not(opc_core_linked))]
+pub fn clip_color_mode(_tail: &[u8]) -> Option<u8> {
+    None
+}
+
+/// The official DJI cube's file name for a colour and body, from the core. The desktop
+/// does not ship the cubes; the operator drops them in the LUT folder.
+#[cfg(opc_core_linked)]
+pub fn auto_lut_file(color_mode: u8, model_id: i32) -> Option<String> {
+    // Safety: probing with a null destination only reports the size needed.
+    let needed = unsafe {
+        opc_core_sys::opc_lut_auto_file(i32::from(color_mode), model_id, std::ptr::null_mut(), 0)
+    };
+    if needed <= 0 {
+        return None;
+    }
+    let mut bytes = vec![0u8; needed as usize];
+    // Safety: `bytes` has exactly the capacity the core asked for.
+    let written = unsafe {
+        opc_core_sys::opc_lut_auto_file(
+            i32::from(color_mode),
+            model_id,
+            bytes.as_mut_ptr(),
+            bytes.len(),
+        )
+    };
+    (written == needed).then(|| String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[cfg(not(opc_core_linked))]
+pub fn auto_lut_file(_color_mode: u8, _model_id: i32) -> Option<String> {
+    None
+}
+
+/// The last 2 MiB of a file, where a Pocket take keeps its `moov`.
+pub fn read_tail(path: &Path) -> Option<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    const TAIL: u64 = 2 * 1024 * 1024;
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let start = size.saturating_sub(TAIL);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::with_capacity((size - start) as usize);
+    file.read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

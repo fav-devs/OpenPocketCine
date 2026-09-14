@@ -1247,6 +1247,9 @@ export struct MediaCell {
     starred: bool,
     cached: bool,
     selected: bool,
+    checked: bool,
+    /// A folded burst: how many members the tile stands for.
+    burst: int,
 }
 
 export struct MediaSelection {
@@ -1260,6 +1263,8 @@ export struct MediaSelection {
     /// -1 when nothing is transferring, else 0…1.
     progress: float,
     note: string,
+    burst: int,
+    expanded: bool,
 }
 
 component Pill {
@@ -1338,8 +1343,14 @@ component LibraryPage {
     in property <length> cell-h;
     in property <MediaSelection> selection;
     in property <bool> has-selection;
+    in property <bool> selecting;
+    in property <int> checked-count;
+    in property <bool> batch-armed;
 
     callback back();
+    callback select-mode();
+    callback delete-checked();
+    callback burst();
     callback source-tapped(bool);
     callback tab-picked(int);
     callback sort-tapped();
@@ -1402,6 +1413,12 @@ component LibraryPage {
                 alignment: center;
                 TextButton {
                     y: 8px;
+                    text: root.selecting ? "Done" : "Select";
+                    accent: root.selecting;
+                    tapped => { root.select-mode(); }
+                }
+                TextButton {
+                    y: 8px;
                     text: root.sort-label;
                     tapped => { root.sort-tapped(); }
                 }
@@ -1461,6 +1478,32 @@ component LibraryPage {
                 colorize: Pal.accent;
                 width: 18px; height: 18px; x: parent.width - self.width - 10px; y: 10px;
             }
+            // A folded burst: how many frames are under this tile, top right beside the star.
+            if !cell.header && cell.burst > 1: Rectangle {
+                x: parent.width - self.width - (cell.starred ? 34px : 10px); y: 9px;
+                width: bt.preferred-width + 14px; height: 20px;
+                border-radius: 10px; background: #000000b3;
+                bt := Text {
+                    text: "×" + cell.burst;
+                    color: Pal.ink; font-family: Pal.font; font-size: 11px; font-weight: 700;
+                    x: (parent.width - self.preferred-width) / 2;
+                    y: (parent.height - self.preferred-height) / 2;
+                }
+            }
+            // Select mode: a check circle on every tile.
+            if !cell.header && root.selecting: Rectangle {
+                x: parent.width - self.width - 10px; y: parent.height - self.height - 10px;
+                width: 24px; height: 24px; border-radius: 12px;
+                background: cell.checked ? Pal.accent : #00000099;
+                border-width: 2px;
+                border-color: cell.checked ? Pal.accent : Pal.ink;
+                if cell.checked: Image {
+                    source: @image-url("../assets/icons/check.svg");
+                    colorize: #000000;
+                    width: 16px; height: 16px;
+                    x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                }
+            }
             if !cell.header && cell.is-video: HorizontalLayout {
                 x: 10px; y: parent.height - 30px; height: 20px;
                 spacing: 6px;
@@ -1488,14 +1531,38 @@ component LibraryPage {
         height: root.foot-h;
         background: #0a0a0a;
 
-        if !root.has-selection: Text {
+        if root.selecting: Text {
+            text: root.checked-count + " selected";
+            color: Pal.ink;
+            font-family: Pal.font; font-size: 15px; font-weight: 700;
+            x: root.inset; y: (parent.height - self.preferred-height) / 2;
+        }
+        if root.selecting: Rectangle {
+            width: batch.preferred-width;
+            height: parent.height;
+            x: parent.width - self.width - root.inset;
+            batch := HorizontalLayout {
+                spacing: 8px;
+                alignment: center;
+                TextButton {
+                    y: (root.foot-h - self.height) / 2;
+                    text: root.batch-armed ? "Confirm delete " + root.checked-count : "Delete selected";
+                    icon: @image-url("../assets/icons/trash.svg");
+                    danger: true;
+                    enabled: root.checked-count > 0;
+                    tapped => { root.delete-checked(); }
+                }
+            }
+        }
+
+        if !root.has-selection && !root.selecting: Text {
             text: root.status;
             color: #8a8a8a;
             font-family: Pal.font; font-size: 13px; font-weight: 600;
             x: root.inset; y: (parent.height - self.preferred-height) / 2;
         }
 
-        if root.has-selection: VerticalLayout {
+        if root.has-selection && !root.selecting: VerticalLayout {
             x: root.inset; y: 0; height: parent.height;
             width: parent.width * 0.42;
             alignment: center;
@@ -1521,13 +1588,18 @@ component LibraryPage {
             }
         }
 
-        if root.has-selection: Rectangle {
+        if root.has-selection && !root.selecting: Rectangle {
             width: actions.preferred-width;
             height: parent.height;
             x: parent.width - self.width - root.inset;
             actions := HorizontalLayout {
                 spacing: 8px;
                 alignment: center;
+                if root.selection.burst > 0 || root.selection.expanded: TextButton {
+                    y: (root.foot-h - self.height) / 2;
+                    text: root.selection.expanded ? "Fold burst" : "Expand ×" + root.selection.burst;
+                    tapped => { root.burst(); }
+                }
                 TextButton {
                     y: (root.foot-h - self.height) / 2;
                     text: root.selection.is-video ? "Play" : "View";
@@ -1583,12 +1655,17 @@ export struct PlayerView {
     peaking-on: bool,
     /// A still: no transport, the picture is the whole screen.
     is-photo: bool,
+    /// The conform preview chip.
+    conform-label: string,
+    conform-on: bool,
+    conform-available: bool,
 }
 
 component Tool {
     in property <image> icon;
     in property <string> text;
     in property <bool> on;
+    in property <bool> enabled: true;
     callback tapped();
     width: 96px;
     height: 72px;
@@ -1624,6 +1701,7 @@ component PlayerPage {
     callback lut();
     callback zebra();
     callback peaking();
+    callback conform();
     callback favorite();
     callback delete();
 
@@ -1751,6 +1829,7 @@ component PlayerPage {
                 Tool { icon: @image-url("../assets/icons/contrast-2.svg"); text: "LUT"; on: root.view.lut-on; tapped => { root.lut(); } }
                 Tool { icon: @image-url("../assets/icons/wave-sine.svg"); text: "Zebra"; on: root.view.zebra-on; tapped => { root.zebra(); } }
                 Tool { icon: @image-url("../assets/icons/aperture.svg"); text: "Peaking"; on: root.view.peaking-on; tapped => { root.peaking(); } }
+                Tool { icon: @image-url("../assets/icons/player-play.svg"); text: root.view.conform-label; on: root.view.conform-on; enabled: root.view.conform-available; tapped => { root.conform(); } }
             }
         }
 
@@ -1871,6 +1950,9 @@ export component HudOverlay inherits Window {
     in property <length> library-cell-h: 124px;
     in property <MediaSelection> library-selection;
     in property <bool> library-has-selection: false;
+    in property <bool> library-selecting: false;
+    in property <int> library-checked-count: 0;
+    in property <bool> library-batch-armed: false;
     in property <PlayerView> player;
     in property <[image]> player-strip: [];
 
@@ -1932,6 +2014,10 @@ export component HudOverlay inherits Window {
     callback library-favorite();
     callback library-delete();
     callback library-source-tapped(bool);
+    callback library-select-mode();
+    callback library-delete-checked();
+    callback library-burst();
+    callback player-conform();
     callback player-back();
     callback player-toggle();
     callback player-seek(float);
@@ -2186,6 +2272,12 @@ export component HudOverlay inherits Window {
         has-selection: root.library-has-selection;
         back => { root.library-back(); }
         source-tapped(local) => { root.library-source-tapped(local); }
+        select-mode => { root.library-select-mode(); }
+        delete-checked => { root.library-delete-checked(); }
+        burst => { root.library-burst(); }
+        selecting: root.library-selecting;
+        checked-count: root.library-checked-count;
+        batch-armed: root.library-batch-armed;
         tab-picked(i) => { root.library-tab-picked(i); }
         sort-tapped => { root.library-sort-tapped(); }
         refresh => { root.library-refresh(); }
@@ -2209,6 +2301,7 @@ export component HudOverlay inherits Window {
         lut => { root.player-lut(); }
         zebra => { root.player-zebra(); }
         peaking => { root.player-peaking(); }
+        conform => { root.player-conform(); }
         favorite => { root.player-favorite(); }
         delete => { root.player-delete(); }
     }
