@@ -219,3 +219,37 @@ func opc_tracking_poll(
 func opc_model_supports_tap_focus(_ modelId: Int32) -> Int32 {
     CameraModel.resolve(modelId: Int(modelId), name: nil).supportsTapFocus ? 1 : 0
 }
+
+// MARK: - Sticks, triggers and bodies
+
+/// A game controller's left stick onto the gimbal axes, with the phones' deadzone,
+/// expo and sensitivity ticks (1…5, 4 is the captured throw). Writes axis0, axis1.
+@_cdecl("opc_gimbal_stick_axes")
+func opc_gimbal_stick_axes(
+    _ x: Double, _ y: Double, _ sensitivity: Int32, _ out: UnsafeMutablePointer<Int32>?
+) -> Int32 {
+    guard let out else { return OPC_RELAY_ERR_NULL }
+    let axes = GimbalStick.encode(x: x, y: y, sensitivity: Int(sensitivity))
+    out[0] = Int32(axes.axis0)
+    out[1] = Int32(axes.axis1)
+    return OPC_RELAY_OK
+}
+
+/// Hold-to-zoom on the triggers: `dt` seconds of the right-minus-left axis onto the
+/// current factor, at the phones' rate and deadzone, clamped to the body's top stop.
+@_cdecl("opc_zoom_trigger_step")
+func opc_zoom_trigger_step(
+    _ current: Double, _ left: Double, _ right: Double, _ dt: Double, _ max: Double
+) -> Double {
+    CamFov.zoomStep(
+        current: current, y: CamFov.triggerZoomAxis(left: left, right: right), dt: dt, max: max)
+}
+
+/// The body's name for a model id, as the core knows it.
+@_cdecl("opc_model_name")
+func opc_model_name(_ modelId: Int32, _ out: UnsafeMutablePointer<UInt8>?, _ capacity: Int)
+    -> Int64
+{
+    let name = CameraModel.resolve(modelId: Int(modelId), name: nil).name
+    return DesktopFacade.emit(Data(name.utf8), into: out, capacity: capacity)
+}

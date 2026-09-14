@@ -707,6 +707,8 @@ component BottomBar {
     in property <bool> is-recording;
     in property <bool> photo-mode;
     in property <bool> enabled;
+    in property <bool> show-pad: true;
+    in property <bool> show-modes: true;
     in property <[string]> modes;
     in property <[bool]> modes-available;
     in property <int> mode-selected;
@@ -762,7 +764,8 @@ component BottomBar {
         Rectangle { width: 8px; }
         GimbalPad {
             y: 0;
-            enabled: root.enabled;
+            visible: root.show-pad;
+            enabled: root.enabled && root.show-pad;
             gimbal-moved(x, y) => { root.gimbal-moved(x, y); }
             gimbal-released => { root.gimbal-released(); }
         }
@@ -823,6 +826,7 @@ component BottomBar {
         x: 0;
         y: parent.height - self.height - 6px;
         width: parent.width;
+        visible: root.show-modes;
         modes: root.modes;
         available: root.modes-available;
         selected: root.mode-selected;
@@ -1845,6 +1849,12 @@ export component HudOverlay inherits Window {
     in property <bool> assist-open: false;
     in property <[AssistChipView]> assist-chips: [];
     in property <[PlateView]> plates: [];
+    // The phones' DISP toggles: which parts of the chrome are drawn.
+    in property <bool> show-exposure: true;
+    in property <bool> show-status: true;
+    in property <bool> show-zoom: true;
+    in property <bool> show-pad: true;
+    in property <bool> show-modes: true;
     /// A programmed move's readout, shown in the top bar while a take runs.
     in property <string> move-text: "";
 
@@ -2066,7 +2076,7 @@ export component HudOverlay inherits Window {
         configure(i) => { root.assist-configure(i); }
     }
 
-    if root.screen == 0: ZoomDial {
+    if root.screen == 0 && root.show-zoom: ZoomDial {
         x: root.fit-x + (root.fit-width - self.width) / 2;
         y: root.mid-top + root.bar-h + 10px;
         value <=> root.zoom-value;
@@ -2077,7 +2087,7 @@ export component HudOverlay inherits Window {
         changed(v) => { root.zoom-changed(v); }
     }
 
-    if root.screen == 0: ExposureColumn {
+    if root.screen == 0 && root.show-exposure: ExposureColumn {
         // Park in the left gutter when there is one wide enough, else over the picture edge.
         x: root.left-gutter >= self.width + 24px ? (root.left-gutter - self.width) / 2 : root.fit-x + 16px;
         y: root.mid-top + (root.mid-bottom - root.mid-top - self.height) / 2;
@@ -2087,7 +2097,7 @@ export component HudOverlay inherits Window {
         wb: root.wb;
     }
 
-    if root.screen == 0: StatusColumn {
+    if root.screen == 0 && root.show-status: StatusColumn {
         x: root.right-gutter >= self.width + 24px
             ? root.width - root.right-gutter + (root.right-gutter - self.width) / 2
             : root.fit-x + root.fit-width - self.width - 16px;
@@ -2103,6 +2113,8 @@ export component HudOverlay inherits Window {
         x: 0; y: parent.height - self.height; width: parent.width;
         is-recording: root.is-recording;
         photo-mode: root.photo-mode;
+        show-pad: root.show-pad;
+        show-modes: root.show-modes;
         enabled: root.controls-enabled;
         modes: root.modes;
         modes-available: root.modes-available;

@@ -164,6 +164,7 @@ fn main() {
                     ..Overlays::default()
                 }
             },
+            parts: opc_chrome::ChromeParts::default(),
             plates: if name == "assists" {
                 vec![
                     PlateState {
@@ -341,7 +342,13 @@ fn main() {
                 if name == "settings" {
                     return SheetState {
                         title: "SETTINGS".into(),
-                        tabs: vec!["CAMERA".into(), "AUDIO".into(), "ASSIST".into()],
+                        tabs: [
+                            "CAMERA", "AUDIO", "ASSIST", "LINK", "CONTROLS", "DISPLAY", "STORAGE",
+                            "SYSTEM",
+                        ]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
                         tab: 0,
                         rows: vec![
                             row("Focus", &["Single", "Continuous"], Some(1), true),

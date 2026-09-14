@@ -39,6 +39,10 @@ pub enum MediaAction {
     PlayerSeek(i64),
     /// Back to the library from the player or the viewer.
     ClosePlayer,
+    /// Count the cache on disk, for the Storage tab.
+    CacheSize,
+    /// Empty the cache on disk.
+    ClearCache,
 }
 
 /// The card as listed, and how the operator is looking at it.

@@ -220,10 +220,7 @@ fn opening_the_audio_tab_reads_the_dsp_blob_once() {
         "the camera tab asks for nothing"
     );
     shell.chrome(0.0);
-    // The AUDIO tab, second of three, centred in the sheet header at 1280 wide.
-    let (x, y) = (640.0, 56.0 + 16.0 + 30.0);
-    shell.control_down(x, y, 0.0);
-    shell.control_up(x, y, 0.0);
+    shell.select_settings_tab(opc_monitor::sheets::TAB_AUDIO);
     assert_eq!(sent(&shell.tick(0.1)), [Command::AudioDspGet]);
     shell.set_status(Status {
         audio_dsp_blob: Some([0; 26]),
@@ -277,6 +274,116 @@ fn a_scope_chip_puts_a_movable_plate_on_the_picture() {
     shell.control_up(x, y, 0.4);
     assert!(!shell.scopes_wanted());
     assert_eq!(shell.plate_rect(AssistTool::Wave), None);
+}
+
+// ── Operator setup ───────────────────────────────────────────────────────────
+
+#[test]
+fn a_controller_drives_the_shell_on_the_phones_map() {
+    use opc_monitor::sheets::Pick;
+    use opc_monitor::PadButton;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    assert_eq!(
+        sent(&shell.controller_button(PadButton::A, 0.0)),
+        [Command::RecordStart]
+    );
+    shell.set_status(Status {
+        is_recording: true,
+        ..Status::default()
+    });
+    assert_eq!(
+        sent(&shell.controller_button(PadButton::A, 0.1)),
+        [Command::RecordStop],
+        "A is a record toggle"
+    );
+    assert_eq!(
+        sent(&shell.controller_button(PadButton::B, 0.2)),
+        [Command::GimbalRecenter]
+    );
+    assert_eq!(
+        sent(&shell.controller_button(PadButton::RightShoulder, 0.3)),
+        [Command::ZoomJump(3.0)]
+    );
+    assert_eq!(
+        sent(&shell.controller_button(PadButton::DpadUp, 0.4)),
+        [Command::SetIsoIndex(0x03)],
+        "no ISO known yet: one up from auto on the wire's table"
+    );
+    shell.set_status(Status {
+        iso_index: Some(0x05),
+        shutter_denominator: Some(60),
+        ..Status::default()
+    });
+    assert_eq!(
+        sent(&shell.controller_button(PadButton::DpadUp, 0.5)),
+        [Command::SetIsoIndex(0x06)]
+    );
+    assert_eq!(
+        sent(&shell.controller_button(PadButton::DpadLeft, 0.6)),
+        [Command::SetShutter(50)],
+        "open is a longer exposure"
+    );
+    // The stick throws with the operator's sensitivity: 4 is the captured throw.
+    let full = sent(&shell.controller_stick(1.0, 0.0, 0.7));
+    assert_eq!(full, [opc_ui::stick_command(1.0, 0.0)]);
+    shell.pick_for_test(Pick::StickSensitivity(2));
+    let half = sent(&shell.controller_stick(1.0, 0.0, 0.8));
+    assert_eq!(half, [opc_ui::stick_command(0.5, 0.0)]);
+    // Letting go rests the gimbal once, and a resting stick sends nothing more.
+    assert_eq!(
+        sent(&shell.controller_stick(0.0, 0.0, 0.9)),
+        [Command::GimbalStick {
+            axis0: 1024,
+            axis1: 1024
+        }]
+    );
+    assert!(shell.controller_stick(0.0, 0.0, 1.0).is_empty());
+    // The controller can be switched off in the Controls tab.
+    shell.pick_for_test(Pick::Gamepad(false));
+    assert!(shell.controller_button(PadButton::A, 1.1).is_empty());
+    assert!(!shell.prefs().gamepad);
+}
+
+#[test]
+fn the_display_tab_hides_the_chrome_and_its_parts() {
+    use opc_monitor::sheets::Pick;
+    use opc_monitor::Part;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    shell.chrome(0.0);
+    assert!(shell.is_control(640.0, 56.0 + 30.0), "the zoom ruler");
+    shell.pick_for_test(Pick::ShowPart(Part::Zoom, false));
+    shell.chrome(0.1);
+    assert!(
+        !shell.is_control(640.0, 56.0 + 30.0),
+        "a hidden ruler is not a control"
+    );
+    assert!(!shell.prefs().show_zoom);
+    shell.pick_for_test(Pick::Disp(true));
+    assert!(shell.chrome(0.2).is_none(), "DISP 2 is the clean view");
+    shell.pick_for_test(Pick::Disp(false));
+    assert!(shell.chrome(0.3).is_some());
+}
+
+#[test]
+fn the_setup_tabs_read_what_the_window_told_the_shell() {
+    let mut shell = framed();
+    shell.set_link_info("Wi-Fi datalink · 192.168.2.1:9004");
+    shell.set_renderer_name("llvmpipe");
+    shell.set_gamepad(Some("Pad".into()));
+    shell.set_cache_size(42_000_000);
+    shell.note_recovery("RebuildDecoder");
+    shell.set_phase(opc_ui::Phase::Live);
+    let setup = shell.setup();
+    assert_eq!(setup.cache, "42 MB");
+    assert_eq!(setup.phase, "LINK");
+    assert_eq!(setup.gamepad.as_deref(), Some("Pad"));
+    let report = shell.diagnostics_text(12.0);
+    assert!(report.contains("192.168.2.1:9004"));
+    assert!(report.contains("llvmpipe"));
+    assert!(report.contains("RebuildDecoder"));
+    assert!(report.contains("phase LINK"));
 }
 
 #[test]

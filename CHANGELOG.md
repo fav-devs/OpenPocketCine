@@ -29,7 +29,11 @@ All notable changes to this project are documented here. The format is based on
   body's DSP blob and send it back patched. The scopes — waveform, parade,
   histogram, vectorscope, traffic lights, the ND chip and the audio meters —
   are movable plates sampled from the picture on the CPU and plotted on the
-  core's axis. Unqualified on a physical body.
+  core's axis. Settings gains the Link, Controls, Display, Storage and System
+  tabs: reconnect, joystick sensitivity through the core's stick curve, a game
+  controller on the phones' map, DISP and per-part chrome toggles, the cache
+  size and a clear, a diagnostics report; the operator's settings persist
+  beside the LUT folder. Unqualified on a physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

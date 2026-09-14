@@ -626,6 +626,13 @@ extern "C" {
     ) -> i64;
     pub fn opc_audio_meter_floor_db() -> f64;
 
+    /// A controller stick onto the gimbal axes with the phones' curve and sensitivity.
+    pub fn opc_gimbal_stick_axes(x: f64, y: f64, sensitivity: i32, out: *mut i32) -> i32;
+    /// Hold-to-zoom on the triggers, at the phones' rate.
+    pub fn opc_zoom_trigger_step(current: f64, left: f64, right: f64, dt: f64, max: f64) -> f64;
+    /// The body's name for a model id.
+    pub fn opc_model_name(model_id: i32, out: *mut u8, capacity: usize) -> i64;
+
     /// The scale's legend, one `label<TAB>r<TAB>g<TAB>b` line per zone.
     pub fn opc_false_color_legend(
         scale: i32,

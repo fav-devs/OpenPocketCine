@@ -10,7 +10,8 @@ use std::time::Instant;
 
 use opc_camera::{Command, Status, TrackingPoll};
 use opc_chrome::{
-    AssistChip, Chrome, ChromeIntent, ChromeState, Overlays, PlateKind, PlateState, Screen,
+    AssistChip, Chrome, ChromeIntent, ChromeParts, ChromeState, Overlays, PlateKind, PlateState,
+    Screen,
 };
 use opc_media::MediaFile;
 
@@ -20,11 +21,13 @@ use crate::assists::{
 use crate::library::{Library, MediaAction, Player};
 use crate::luts::{LutChoice, LutMenu};
 use crate::moves::{MoveEngine, Program, Waypoint};
+use crate::pad::{PadAction, PadButton, REST as PAD_REST};
+use crate::prefs;
 use crate::scopes::{
     self, LightsReading, NdReading, Plate, ScopeOptions, ScopeSamples, ScopeScale,
     LIGHTS_COMPENSATION,
 };
-use crate::sheets::{self, Pick, Prefs, SheetKind, Slot};
+use crate::sheets::{self, Pick, Prefs, SetupInfo, SheetKind, Slot, TAB_AUDIO, TAB_STORAGE};
 use crate::zoom::{self, ZoomHop, ZoomNote, ZoomPolicy, ZoomRules, ZoomWrite};
 use opc_camera::SetOutcome;
 use opc_render::{letterbox, AssistScalars, FalseColorScale, GradeOptions, Peaking, Rgba, Zebra};
@@ -68,6 +71,10 @@ pub enum Intent {
     ToggleFullscreen,
     /// Something for the media browser: a fetch, a screen change, the player.
     Media(MediaAction),
+    /// Tear the datalink down and open a fresh one.
+    Reconnect,
+    /// Write a diagnostics report to the cache folder.
+    Diagnostics,
 }
 
 /// The gimbal's live mode, as commanded. The body's GET cannot tell FPV from Tilt
@@ -258,6 +265,12 @@ pub struct Shell {
     nd: Option<NdReading>,
     /// Plates dragged away from their default place, as window pixels.
     plate_positions: Vec<(AssistTool, f32, f32)>,
+    /// What the setup tabs read about this machine and this link.
+    setup: SetupInfo,
+    /// Where the prefs are saved, once the window has said so.
+    prefs_path: Option<std::path::PathBuf>,
+    /// The controller's left stick, so a release can rest it.
+    controller_held: bool,
     /// A box sent to the body and the polling that follows it.
     tracking: Option<TrackingState>,
     stick_sent_at: f64,
@@ -362,6 +375,12 @@ impl Shell {
             lights: LightsReading::default(),
             nd: None,
             plate_positions: Vec::new(),
+            setup: SetupInfo {
+                chrome_visible: true,
+                ..SetupInfo::default()
+            },
+            prefs_path: None,
+            controller_held: false,
             stick_sent_at: f64::NEG_INFINITY,
             presented: VecDeque::new(),
             chrome: None,
@@ -631,6 +650,7 @@ impl Shell {
     pub fn set_phase(&mut self, phase: Phase) {
         if self.hud.phase != phase {
             self.hud.phase = phase;
+            self.setup.phase = self.hud.connection_chip().to_string();
             self.chrome_stale = true;
         }
     }
@@ -894,6 +914,236 @@ impl Shell {
     /// The body's model id, when the link knows it. Colour modes encode per model.
     pub fn set_model(&mut self, model_id: Option<i32>) {
         self.model_id = model_id.unwrap_or(-1);
+        self.setup.model = model_name(self.model_id);
+    }
+
+    /// Reads the operator's saved settings and keeps saving them from here on.
+    pub fn with_saved_prefs(mut self) -> Self {
+        let path = prefs::path();
+        if let Some(saved) = prefs::load(&path) {
+            self.prefs = saved;
+        }
+        self.prefs_path = Some(path);
+        self
+    }
+
+    fn persist_prefs(&self) {
+        if let Some(path) = &self.prefs_path {
+            if let Err(error) = prefs::save(path, &self.prefs) {
+                eprintln!("could not save the settings: {error}");
+            }
+        }
+    }
+
+    /// What the Link tab reads: how this machine reaches the body.
+    pub fn set_link_info(&mut self, link: &str) {
+        self.setup.link = link.to_string();
+        self.chrome_stale = true;
+    }
+
+    /// The controller's name while one is connected.
+    pub fn set_gamepad(&mut self, name: Option<String>) {
+        if self.setup.gamepad != name {
+            self.setup.gamepad = name;
+            self.chrome_stale = true;
+        }
+    }
+
+    /// The media cache's size on disk, from the window.
+    pub fn set_cache_size(&mut self, bytes: u64) {
+        self.setup.cache = if bytes < 1_000_000 {
+            format!("{} KB", bytes / 1000)
+        } else if bytes < 1_000_000_000 {
+            format!("{} MB", bytes / 1_000_000)
+        } else {
+            format!("{:.1} GB", bytes as f64 / 1e9)
+        };
+        self.chrome_stale = true;
+    }
+
+    pub fn set_renderer_name(&mut self, name: &str) {
+        self.setup.renderer = name.to_string();
+    }
+
+    /// What the watchdog last did, for the Link tab.
+    pub fn note_recovery(&mut self, what: &str) {
+        self.setup.recovery = what.to_string();
+        self.chrome_stale = true;
+    }
+
+    /// A line for the top bar, from the window.
+    pub fn say(&mut self, text: &str) {
+        self.set_notice(text);
+    }
+
+    /// The setup readouts, for tests.
+    pub fn setup(&self) -> &SetupInfo {
+        &self.setup
+    }
+
+    /// Everything a bug report needs, as text.
+    pub fn diagnostics_text(&self, now: f64) -> String {
+        let status = &self.hud.status;
+        let toggles = self.toggles;
+        format!(
+            "OpenPocketCine desktop {}\nuptime {now:.1} s\n{link}\nphase {phase}\nbody {model} (id {id})\nfirmware {fw}\nrenderer {renderer}\nrecovery {recovery}\nwindow {w}x{h}\nsource {src:?}\nformat {format}\ncolour mode {color:?} iso {iso:?}\nzoom {zoom:?} stops {stops:?}\nrecording {rec}\ntoggles {toggles:?}\nprefs {prefs:?}\nassists {assists:?}\nscopes {scopes:?}\n",
+            env!("CARGO_PKG_VERSION"),
+            link = self.setup.link,
+            phase = self.setup.phase,
+            model = self.setup.model,
+            id = self.model_id,
+            fw = status.firmware.clone().unwrap_or_default(),
+            renderer = self.setup.renderer,
+            recovery = self.setup.recovery,
+            w = self.window.0,
+            h = self.window.1,
+            src = self.source,
+            format = status.format_label(),
+            color = status.color_mode,
+            iso = status.iso,
+            zoom = status.zoom_hundredths,
+            stops = self.zoom_rules.stops(),
+            rec = status.is_recording,
+            prefs = self.prefs,
+            assists = self.assists,
+            scopes = self.scope_options,
+        )
+    }
+
+    /// The gimbal stick from an analog source, with the operator's sensitivity.
+    fn stick_axes(&self, x: f64, y: f64) -> Command {
+        stick_axes(x, y, self.prefs.stick_sensitivity)
+    }
+
+    /// A game controller's left stick.
+    pub fn controller_stick(&mut self, x: f64, y: f64, now: f64) -> Vec<Intent> {
+        if !self.prefs.gamepad || self.screen != Screen::Viewfinder {
+            return Vec::new();
+        }
+        self.last_now = self.last_now.max(now);
+        let resting = x.abs() < PAD_REST && y.abs() < PAD_REST;
+        if resting {
+            if !self.controller_held {
+                return Vec::new();
+            }
+            self.controller_held = false;
+            return self.pad_released();
+        }
+        self.controller_held = true;
+        self.pad_moved(x as f32, y as f32)
+    }
+
+    /// The triggers: hold to zoom, at the phones' rate.
+    pub fn controller_zoom(&mut self, left: f64, right: f64, dt: f64, now: f64) -> Vec<Intent> {
+        if !self.prefs.gamepad || self.screen != Screen::Viewfinder || dt <= 0.0 {
+            return Vec::new();
+        }
+        if left.abs() < PAD_REST && right.abs() < PAD_REST {
+            return Vec::new();
+        }
+        let current = self.controls.zoom();
+        let next = zoom_trigger_step(current, left, right, dt, self.zoom_rules.max());
+        if (next - current).abs() < 0.005 {
+            return Vec::new();
+        }
+        self.zoom_write(ZoomWrite::Slider(next), now)
+    }
+
+    /// A controller button, on its way down.
+    pub fn controller_button(&mut self, button: PadButton, now: f64) -> Vec<Intent> {
+        if !self.prefs.gamepad || self.screen != Screen::Viewfinder {
+            return Vec::new();
+        }
+        self.last_now = self.last_now.max(now);
+        match button.action() {
+            PadAction::Record => {
+                let command = if self.hud.status.is_recording {
+                    Command::RecordStop
+                } else {
+                    Command::RecordStart
+                };
+                self.act(Action::Send(command), now)
+            }
+            PadAction::Recenter => self.act(Action::Send(Command::GimbalRecenter), now),
+            PadAction::Flip => self.act(Action::Send(Command::GimbalFlip), now),
+            PadAction::Track => self.act(Action::ClearTracking, now),
+            PadAction::ZoomIn => self.act(Action::ZoomIn, now),
+            PadAction::ZoomOut => self.act(Action::ZoomOut, now),
+            PadAction::IsoUp => self.iso_step(1),
+            PadAction::IsoDown => self.iso_step(-1),
+            PadAction::ShutterOpen => self.shutter_step(1),
+            PadAction::ShutterClose => self.shutter_step(-1),
+        }
+    }
+
+    /// The on-screen pad or a controller stick moved. Right and up are positive, the
+    /// same axes as the keys.
+    fn pad_moved(&mut self, x: f32, y: f32) -> Vec<Intent> {
+        self.pad_held = true;
+        self.pad_target = (f64::from(x), f64::from(y));
+        if self.prefs.ramp_tau() > 0.0 {
+            // A pointer event carries no clock: step one nominal frame.
+            let now = self.ramp_ticked_at + 0.04;
+            self.ramp_step(now)
+        } else {
+            vec![Intent::Send(self.stick_axes(f64::from(x), f64::from(y)))]
+        }
+    }
+
+    /// The pad or the controller stick let go: rest the gimbal, eased if the ramp is on.
+    fn pad_released(&mut self) -> Vec<Intent> {
+        self.pad_held = false;
+        self.pad_target = (0.0, 0.0);
+        if self.prefs.ramp_tau() > 0.0 && self.stick.is_resting() {
+            // The ramp eases the stick back; the ticks send the steps.
+            let now = self.ramp_ticked_at + 0.04;
+            self.ramp_step(now)
+        } else {
+            vec![Intent::Send(Command::GimbalStick {
+                axis0: 1024,
+                axis1: 1024,
+            })]
+        }
+    }
+
+    /// The next ISO index up or down the body's own list (or the wire's table).
+    fn iso_step(&mut self, delta: i32) -> Vec<Intent> {
+        let status = &self.hud.status;
+        let list: Vec<u8> = if status.available_iso.is_empty() {
+            sheets::ISO_INDEX.iter().map(|(code, _)| *code).collect()
+        } else {
+            status.available_iso.clone()
+        };
+        let at = status
+            .iso_index
+            .and_then(|now| list.iter().position(|code| *code == now))
+            .unwrap_or(0) as i32;
+        let next = (at + delta).clamp(0, list.len() as i32 - 1) as usize;
+        if next == at as usize && status.iso_index.is_some() {
+            return Vec::new();
+        }
+        vec![Intent::Send(Command::SetIsoIndex(list[next]))]
+    }
+
+    /// The next shutter along the body's list: "open" is a longer exposure, so a
+    /// smaller denominator.
+    fn shutter_step(&mut self, delta: i32) -> Vec<Intent> {
+        let status = &self.hud.status;
+        let mut list: Vec<i32> = if status.available_shutter.is_empty() {
+            sheets::SHUTTER_DEFAULT.to_vec()
+        } else {
+            status.available_shutter.clone()
+        };
+        list.sort_unstable_by(|a, b| b.cmp(a));
+        let at = status
+            .shutter_denominator
+            .and_then(|now| list.iter().position(|denom| *denom == now))
+            .unwrap_or(0) as i32;
+        let next = (at + delta).clamp(0, list.len() as i32 - 1) as usize;
+        if next == at as usize && status.shutter_denominator.is_some() {
+            return Vec::new();
+        }
+        vec![Intent::Send(Command::SetShutter(list[next]))]
     }
 
     /// Which sheet is open, if any.
@@ -908,10 +1158,30 @@ impl Shell {
         } else {
             Some(kind)
         };
-        if self.sheet == Some(SheetKind::Settings) && self.sheet_tab == 1 {
-            self.ask_audio_dsp();
+        if self.sheet == Some(SheetKind::Settings) {
+            self.on_settings_tab(self.sheet_tab);
         }
         self.chrome_stale = true;
+    }
+
+    /// Shows a settings tab, as a tap on its name would.
+    pub fn select_settings_tab(&mut self, tab: usize) {
+        self.sheet_tab = tab.min(sheets::SETTINGS_TABS.len() - 1);
+        if self.sheet == Some(SheetKind::Settings) {
+            self.on_settings_tab(self.sheet_tab);
+        }
+        self.chrome_stale = true;
+    }
+
+    /// Some tabs read something the window has to go and fetch.
+    fn on_settings_tab(&mut self, tab: usize) {
+        if tab == TAB_AUDIO {
+            self.ask_audio_dsp();
+        }
+        if tab == TAB_STORAGE {
+            self.chrome_pending_intents
+                .push(Intent::Media(MediaAction::CacheSize));
+        }
     }
 
     pub fn close_sheet(&mut self) {
@@ -940,6 +1210,7 @@ impl Shell {
             assists: self.assists,
             zebra_steps: self.zebra_steps(),
             scopes: self.scope_options,
+            setup: &self.setup,
         }
     }
 
@@ -1169,8 +1440,17 @@ impl Shell {
             .map(|plate| (plate.x, plate.y, plate.width, plate.height))
     }
 
-    /// Carries out a chip tap on the open sheet.
+    /// Carries out a chip tap on the open sheet, and saves the settings it changed.
     fn apply_pick(&mut self, pick: Pick) -> Vec<Intent> {
+        let before = self.prefs;
+        let intents = self.apply_pick_inner(pick);
+        if self.prefs != before {
+            self.persist_prefs();
+        }
+        intents
+    }
+
+    fn apply_pick_inner(&mut self, pick: Pick) -> Vec<Intent> {
         self.chrome_stale = true;
         match pick {
             Pick::Send(commands) => {
@@ -1284,6 +1564,26 @@ impl Shell {
                 self.scope_options.nd_notation = notation;
                 Vec::new()
             }
+            Pick::Reconnect => vec![Intent::Reconnect],
+            Pick::StickSensitivity(tick) => {
+                self.prefs.stick_sensitivity = tick.clamp(1, 5);
+                Vec::new()
+            }
+            Pick::Gamepad(on) => {
+                self.prefs.gamepad = on;
+                Vec::new()
+            }
+            Pick::Disp(clean) => {
+                self.chrome_visible = !clean;
+                self.setup.chrome_visible = self.chrome_visible;
+                Vec::new()
+            }
+            Pick::ShowPart(part, on) => {
+                self.prefs.set_shows(part, on);
+                Vec::new()
+            }
+            Pick::ClearCache => vec![Intent::Media(MediaAction::ClearCache)],
+            Pick::Diagnostics => vec![Intent::Diagnostics],
             Pick::Wind(on) => self.audio_dsp_write(|blob| Command::AudioWind { on, blob }),
             Pick::Directional(mode) => {
                 self.audio_dsp_write(|blob| Command::AudioDirectional { mode, blob })
@@ -1484,7 +1784,7 @@ impl Shell {
         let rested_now = x == 0.0 && y == 0.0 && (before.x != 0.0 || before.y != 0.0);
         if moved || rested_now {
             self.stick_sent_at = now;
-            return vec![Intent::Send(opc_ui::stick_command(x, y))];
+            return vec![Intent::Send(self.stick_axes(x, y))];
         }
         Vec::new()
     }
@@ -1549,6 +1849,7 @@ impl Shell {
             }
             Action::ToggleChrome => {
                 self.chrome_visible = !self.chrome_visible;
+                self.setup.chrome_visible = self.chrome_visible;
                 Vec::new()
             }
             Action::ToggleSettings => {
@@ -1824,35 +2125,8 @@ impl Shell {
                     let now = self.last_now;
                     fired.extend(self.zoom_write(ZoomWrite::Slider(f64::from(v)), now));
                 }
-                ChromeIntent::GimbalMoved { x, y } => {
-                    // The pad reports right and up positive, the same axes as the keys.
-                    self.pad_held = true;
-                    self.pad_target = (f64::from(x), f64::from(y));
-                    if self.prefs.ramp_tau() > 0.0 {
-                        // A pointer event carries no clock: step one nominal frame.
-                        let now = self.ramp_ticked_at + 0.04;
-                        fired.extend(self.ramp_step(now));
-                    } else {
-                        fired.push(Intent::Send(opc_ui::stick_command(
-                            f64::from(x),
-                            f64::from(y),
-                        )));
-                    }
-                }
-                ChromeIntent::GimbalReleased => {
-                    self.pad_held = false;
-                    self.pad_target = (0.0, 0.0);
-                    if self.prefs.ramp_tau() > 0.0 && self.stick.is_resting() {
-                        // The ramp eases the stick back; the ticks send the steps.
-                        let now = self.ramp_ticked_at + 0.04;
-                        fired.extend(self.ramp_step(now));
-                    } else {
-                        fired.push(Intent::Send(Command::GimbalStick {
-                            axis0: 1024,
-                            axis1: 1024,
-                        }));
-                    }
-                }
+                ChromeIntent::GimbalMoved { x, y } => fired.extend(self.pad_moved(x, y)),
+                ChromeIntent::GimbalReleased => fired.extend(self.pad_released()),
                 ChromeIntent::FollowToggle => {
                     // ON is Follow; OFF is the tilt-locked follow the body offers.
                     self.gimbal_mode = if self.gimbal_mode == GimbalMode::Follow {
@@ -1898,8 +2172,8 @@ impl Shell {
                 ChromeIntent::SheetClose => self.close_sheet(),
                 ChromeIntent::SheetTab(tab) => {
                     self.sheet_tab = tab;
-                    if self.sheet == Some(SheetKind::Settings) && tab == 1 {
-                        self.ask_audio_dsp();
+                    if self.sheet == Some(SheetKind::Settings) {
+                        self.on_settings_tab(tab);
                     }
                     self.chrome_stale = true;
                 }
@@ -2362,10 +2636,7 @@ impl Shell {
                 intents.extend(self.ramp_step(now));
             } else if held && now - self.stick_sent_at >= STICK_REPEAT {
                 self.stick_sent_at = now;
-                intents.push(Intent::Send(opc_ui::stick_command(
-                    self.ramp.x,
-                    self.ramp.y,
-                )));
+                intents.push(Intent::Send(self.stick_axes(self.ramp.x, self.ramp.y)));
             }
         } else if !self.stick.is_resting() && now - self.stick_sent_at >= STICK_REPEAT {
             self.stick_sent_at = now;
@@ -2489,6 +2760,13 @@ impl Shell {
                     overlays,
                     assist_bar,
                     plates,
+                    parts: ChromeParts {
+                        exposure: self.prefs.show_exposure,
+                        status: self.prefs.show_status,
+                        zoom: self.prefs.show_zoom,
+                        pad: self.prefs.show_pad,
+                        modes: self.prefs.show_modes,
+                    },
                     move_text,
                     sheet,
                     screen,
@@ -2579,4 +2857,73 @@ impl TrackingState {
             next_poll_at: now + TRACK_POLL_INTERVAL,
         }
     }
+}
+
+/// The body's name for a model id, from the core; a plain "camera" without it.
+#[cfg(opc_core_linked)]
+fn model_name(model_id: i32) -> String {
+    // Safety: probing with a null destination only reports the size needed.
+    let needed = unsafe { opc_core_sys::opc_model_name(model_id, std::ptr::null_mut(), 0) };
+    if needed <= 0 {
+        return "camera".to_string();
+    }
+    let mut bytes = vec![0u8; needed as usize];
+    // Safety: `bytes` has exactly the capacity the core asked for.
+    let written =
+        unsafe { opc_core_sys::opc_model_name(model_id, bytes.as_mut_ptr(), bytes.len()) };
+    if written != needed {
+        return "camera".to_string();
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+#[cfg(not(opc_core_linked))]
+fn model_name(model_id: i32) -> String {
+    if model_id < 0 {
+        "camera".to_string()
+    } else {
+        format!("camera 0x{model_id:02X}")
+    }
+}
+
+/// An analog stick onto the gimbal axes with the phones' curve and sensitivity ticks.
+/// Without the core, a plain scaled throw stands in.
+#[cfg(opc_core_linked)]
+fn stick_axes(x: f64, y: f64, sensitivity: u8) -> Command {
+    let mut out = [0_i32; 2];
+    // Safety: `out` has the two slots the core writes.
+    let status = unsafe {
+        opc_core_sys::opc_gimbal_stick_axes(x, y, i32::from(sensitivity), out.as_mut_ptr())
+    };
+    if status != opc_core_sys::OPC_RELAY_OK {
+        return opc_ui::stick_command(x, y);
+    }
+    Command::GimbalStick {
+        axis0: u16::try_from(out[0]).unwrap_or(opc_ui::STICK_CENTRE),
+        axis1: u16::try_from(out[1]).unwrap_or(opc_ui::STICK_CENTRE),
+    }
+}
+
+#[cfg(not(opc_core_linked))]
+fn stick_axes(x: f64, y: f64, sensitivity: u8) -> Command {
+    let gain = f64::from(sensitivity.clamp(1, 5)) / 4.0;
+    opc_ui::stick_command((x * gain).clamp(-1.0, 1.0), (y * gain).clamp(-1.0, 1.0))
+}
+
+/// Hold-to-zoom on the triggers at the phones' rate; three stops a second without the core.
+#[cfg(opc_core_linked)]
+fn zoom_trigger_step(current: f64, left: f64, right: f64, dt: f64, max: f64) -> f64 {
+    // Safety: plain values in.
+    unsafe { opc_core_sys::opc_zoom_trigger_step(current, left, right, dt, max) }
+}
+
+#[cfg(not(opc_core_linked))]
+fn zoom_trigger_step(current: f64, left: f64, right: f64, dt: f64, max: f64) -> f64 {
+    let axis = right.clamp(0.0, 1.0) - left.clamp(0.0, 1.0);
+    let throw = if axis.abs() < PAD_REST {
+        0.0
+    } else {
+        axis.signum() * (axis.abs() - PAD_REST) / (1.0 - PAD_REST)
+    };
+    (current + throw * 3.0 * dt).clamp(1.0, max.max(1.0))
 }

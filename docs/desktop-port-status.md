@@ -23,6 +23,7 @@ bottom says what the body is set to, and the keyboard drives it.
 | Frame rate, resolution | `[` `]` | `opc-ui/format.rs` |
 | Assists | `A` opens the phones' toolbar (long press for options); `Z` `P` `L` `M`, `H` hides the chrome | `opc-monitor/assists.rs`, `shell.rs`, `Toggles` |
 | Scopes | WAVE / PARADE / HISTO / VECTOR / LIGHTS / ND / AUDIO as movable plates, sampled on the CPU at 15 Hz | `opc-monitor/scopes.rs`, the core's `ScopeDisplayScale` through `opc_scope_*` |
+| Setup | Link / Controls / Display / Storage / System tabs; a game controller on the phones' map; prefs saved beside the LUT folder | `opc-monitor/sheets.rs`, `pad.rs`, `prefs.rs`, `gilrs` in `view.rs` |
 | Sheets | `Tab` settings, `E` exposure, the format chip | `opc-monitor/sheets.rs` |
 | SET mailbox | Latest-wins per opcode, 300 ms retransmit, 2 s settle, FORMAT pin | `opc-camera/mailbox.rs`, the core's `CameraSetMailbox` |
 | Library | `G`, then the grid; `Space` and `Esc` in the player | `opc-monitor/library.rs`, `media.rs`, `opc-media` |
@@ -180,8 +181,8 @@ thing that was drawn around rather than near it.
    its layout and would need to hand back the rectangles it drew so `Shell` can hit-test
    a tap before falling through to a tracking drag. Deliberately left until someone has
    held the laptop, because where the controls should sit is not guessable.
-3. **Operator setup** (link, controls, display, storage, system tabs), then motion
-   control smoothing and pause / resume, and the playback extras.
+3. **Motion control smoothing and pause / resume**, and the playback extras
+   (conform preview, auto-LUT from the original, batch delete, burst groups).
 
 ## Building it
 

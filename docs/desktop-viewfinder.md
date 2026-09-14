@@ -52,7 +52,7 @@ Three sheets open over the picture and close on `Esc`, the `×`, or a tap outsid
 - **Exposure** (`AUTO`/`M` chip, or `E`) — `Auto`/`Manual`, then ISO and shutter for
   manual, ISO max and EV for auto. The rows the mode does not use are drawn greyed, the
   way Mimo shows them.
-- **Settings** (`⋮`, or `Tab`) — three tabs. **Camera:** focus mode, focus-track mode (Default / Product Showcase / Subject Lock / Registered Priority), white balance
+- **Settings** (`⋮`, or `Tab`) — eight tabs. **Camera:** focus mode, focus-track mode (Default / Product Showcase / Subject Lock / Registered Priority), white balance
   presets, colour profile (from the body's own list), field of view, gimbal mode,
   speed and **ramp** (Off / Soft / Medium, the phones' first-order ease on the stick,
   applied to the arrow keys and the on-screen pad alike). **Audio:** channel, vocal
@@ -65,6 +65,21 @@ Three sheets open over the picture and close on `Esc`, the `×`, or a tap outsid
   `.cube` the operator dropped into the LUT folder the row names), mirror, the timecode
   in the top bar, and the `T` countdown length (3, 5 or 10 s).
 
+  **Link:** the transport and address, the link phase, the body and its firmware, what
+  the watchdog last did, and a **Reconnect** that tears the datalink down and opens a
+  fresh session. **Controls:** joystick sensitivity (the phones' 1–5 ticks through the
+  core's stick curve, for the on-screen pad and a controller; the arrow keys keep their
+  fixed throw), the gimbal ramp, and the **game controller** switch with the phones'
+  map: left stick pans and tilts, the triggers hold-to-zoom at the phones' rate, A
+  records, B recentres, X flips, Y clears tracking, the shoulders step the zoom stops,
+  the D-pad walks ISO and shutter along the body's own lists. **Display:** DISP 1 / 2
+  (live or clean, the same as `H`) and which parts of the chrome are drawn — exposure
+  plate, status plate, zoom ruler, gimbal pad, mode strip; the phones' screen flip has
+  no laptop meaning and says so. **Storage:** the media cache's size on disk and a
+  **Clear**, and where the LUT folder is. **System:** the app version, what speaks the
+  protocol, the renderer, a **diagnostics report** written next to the LUT folder, and
+  where the source and licences are. Everything the operator sets here is kept in
+  `desktop-prefs.txt` beside the LUT folder and read back on the next start.
 - **Assist toolbar** (`ASSIST` in the top bar, or `A`) — the phones' fifteen-tool
   strip under the top bar: `LUT PEAK FALSE | ZEBRA WAVE PARADE | HISTO VECTOR LIGHTS
   ND | GUIDES GRID CROSS | MIRROR | AUDIO`. A tap flips the tool; a long press or a

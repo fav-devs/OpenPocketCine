@@ -38,8 +38,13 @@ pub enum Slot {
     C,
 }
 
-/// The settings tabs, in order.
-pub const SETTINGS_TABS: [&str; 3] = ["CAMERA", "AUDIO", "ASSIST"];
+/// The settings tabs, in order: the camera's own, then the operator's setup.
+pub const SETTINGS_TABS: [&str; 8] = [
+    "CAMERA", "AUDIO", "ASSIST", "LINK", "CONTROLS", "DISPLAY", "STORAGE", "SYSTEM",
+];
+/// Which tab is which, for the shell.
+pub const TAB_AUDIO: usize = 1;
+pub const TAB_STORAGE: usize = 6;
 
 /// Settings the body does not report back, kept as last commanded, plus the desktop's
 /// own overlays.
@@ -57,6 +62,87 @@ pub struct Prefs {
     pub ramp: u8,
     /// The `T` take countdown, in seconds.
     pub countdown_seconds: u32,
+    /// The phones' joystick sensitivity ticks, 1…5; 4 is the captured throw.
+    pub stick_sensitivity: u8,
+    /// Whether a game controller drives the shell.
+    pub gamepad: bool,
+    /// Which parts of the chrome are drawn (the phones' DISP toggles).
+    pub show_exposure: bool,
+    pub show_status: bool,
+    pub show_zoom: bool,
+    pub show_pad: bool,
+    pub show_modes: bool,
+}
+
+/// A part of the chrome the Display tab can hide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Part {
+    Exposure,
+    Status,
+    Zoom,
+    Pad,
+    Modes,
+}
+
+impl Part {
+    pub const ALL: [Self; 5] = [
+        Self::Exposure,
+        Self::Status,
+        Self::Zoom,
+        Self::Pad,
+        Self::Modes,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Exposure => "Exposure plate",
+            Self::Status => "Status plate",
+            Self::Zoom => "Zoom ruler",
+            Self::Pad => "Gimbal pad",
+            Self::Modes => "Mode strip",
+        }
+    }
+}
+
+impl Prefs {
+    pub fn shows(&self, part: Part) -> bool {
+        match part {
+            Part::Exposure => self.show_exposure,
+            Part::Status => self.show_status,
+            Part::Zoom => self.show_zoom,
+            Part::Pad => self.show_pad,
+            Part::Modes => self.show_modes,
+        }
+    }
+
+    pub fn set_shows(&mut self, part: Part, on: bool) {
+        match part {
+            Part::Exposure => self.show_exposure = on,
+            Part::Status => self.show_status = on,
+            Part::Zoom => self.show_zoom = on,
+            Part::Pad => self.show_pad = on,
+            Part::Modes => self.show_modes = on,
+        }
+    }
+}
+
+/// What the setup tabs read about this machine and this link. Filled by the window.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SetupInfo {
+    /// "Wi-Fi datalink · 192.168.2.1:9004".
+    pub link: String,
+    pub phase: String,
+    pub model: String,
+    pub firmware: String,
+    /// What the watchdog last did, or empty.
+    pub recovery: String,
+    /// The connected controller's name, if one is.
+    pub gamepad: Option<String>,
+    /// "123 MB", or empty until counted.
+    pub cache: String,
+    pub renderer: String,
+    /// DISP 1 (chrome shown) or DISP 2 (clean).
+    pub chrome_visible: bool,
 }
 
 impl Prefs {
@@ -80,6 +166,13 @@ impl Default for Prefs {
             timecode: false,
             ramp: 0,
             countdown_seconds: 3,
+            stick_sensitivity: 4,
+            gamepad: true,
+            show_exposure: true,
+            show_status: true,
+            show_zoom: true,
+            show_pad: true,
+            show_modes: true,
         }
     }
 }
@@ -142,6 +235,15 @@ pub enum Pick {
     Brightness(u32),
     LightsCompensation(u32),
     NdNotation(NdNotation),
+    /// The setup tabs.
+    Reconnect,
+    StickSensitivity(u8),
+    Gamepad(bool),
+    /// DISP: clean (true) hides the chrome.
+    Disp(bool),
+    ShowPart(Part, bool),
+    ClearCache,
+    Diagnostics,
     /// A chip that is shown but does nothing here yet.
     Nothing,
 }
@@ -165,6 +267,7 @@ pub struct Context<'a> {
     /// Where the zebra chips land on the feed, so they can read in 0–255.
     pub zebra_steps: ZebraSteps,
     pub scopes: ScopeOptions,
+    pub setup: &'a SetupInfo,
 }
 
 /// A built sheet: what to draw, and what each chip means.
@@ -182,7 +285,7 @@ impl Built {
 }
 
 /// ISO index on the wire and the value it means. `0x00` is auto.
-const ISO_INDEX: [(u8, &str); 10] = [
+pub const ISO_INDEX: [(u8, &str); 10] = [
     (0x00, "Auto"),
     (0x03, "100"),
     (0x04, "200"),
@@ -196,7 +299,7 @@ const ISO_INDEX: [(u8, &str); 10] = [
 ];
 
 /// Shutter denominators offered when the body has not sent its own list.
-const SHUTTER_DEFAULT: [i32; 13] = [
+pub const SHUTTER_DEFAULT: [i32; 13] = [
     8000, 4000, 2000, 1000, 500, 250, 200, 120, 100, 60, 50, 30, 25,
 ];
 
@@ -795,7 +898,12 @@ fn settings(tab: usize, context: Context) -> Built {
     let rows = match tab {
         0 => camera_rows(context),
         1 => audio_rows(context),
-        _ => assist_rows(context),
+        2 => assist_rows(context),
+        3 => link_rows(context),
+        4 => controls_rows(context),
+        5 => display_rows(context),
+        6 => storage_rows(context),
+        _ => system_rows(context),
     };
     assemble("SETTINGS", &SETTINGS_TABS, tab, rows)
 }
@@ -958,6 +1066,97 @@ fn audio_rows(context: Context) -> Vec<RowBuilder> {
     vec![channel, vocal, wind, directional]
 }
 
+/// A value the operator reads but does not set.
+fn readout(title: &str, value: &str) -> RowBuilder {
+    RowBuilder::new(title).option(
+        if value.is_empty() { "—" } else { value },
+        false,
+        Pick::Nothing,
+    )
+}
+
+fn link_rows(context: Context) -> Vec<RowBuilder> {
+    let setup = context.setup;
+    vec![
+        readout("Transport", &setup.link),
+        readout("Phase", &setup.phase),
+        readout("Body", &setup.model),
+        readout("Firmware", &setup.firmware),
+        readout("Last recovery", &setup.recovery),
+        RowBuilder::new("Session").option("Reconnect", false, Pick::Reconnect),
+    ]
+}
+
+fn controls_rows(context: Context) -> Vec<RowBuilder> {
+    let prefs = context.prefs;
+    let mut sensitivity = RowBuilder::new("Joystick sensitivity");
+    for tick in 1..=5u8 {
+        sensitivity = sensitivity.option(
+            tick.to_string(),
+            prefs.stick_sensitivity == tick,
+            Pick::StickSensitivity(tick),
+        );
+    }
+    let ramp = RowBuilder::new("Gimbal ramp")
+        .option("Off", prefs.ramp == 0, Pick::Ramp(0))
+        .option("Soft", prefs.ramp == 1, Pick::Ramp(1))
+        .option("Medium", prefs.ramp == 2, Pick::Ramp(2));
+    let gamepad = RowBuilder::new("Game controller")
+        .option("Off", !prefs.gamepad, Pick::Gamepad(false))
+        .option("On", prefs.gamepad, Pick::Gamepad(true));
+    let connected = readout(
+        "Connected",
+        context.setup.gamepad.as_deref().unwrap_or("Not connected"),
+    );
+    vec![
+        sensitivity,
+        ramp,
+        gamepad,
+        connected,
+        RowBuilder::placeholder("Map", crate::pad::MAP_HELP),
+    ]
+}
+
+fn display_rows(context: Context) -> Vec<RowBuilder> {
+    let prefs = context.prefs;
+    let clean = !context.setup.chrome_visible;
+    let mut rows = vec![RowBuilder::new("DISP")
+        .option("1 · Live", !clean, Pick::Disp(false))
+        .option("2 · Clean", clean, Pick::Disp(true))];
+    for part in Part::ALL {
+        let on = prefs.shows(part);
+        rows.push(
+            RowBuilder::new(part.label())
+                .option("Hidden", !on, Pick::ShowPart(part, false))
+                .option("Shown", on, Pick::ShowPart(part, true)),
+        );
+    }
+    rows.push(RowBuilder::placeholder(
+        "Screen flip",
+        "A laptop is not mounted upside down; the phones' flip has no desktop meaning",
+    ));
+    rows
+}
+
+fn storage_rows(context: Context) -> Vec<RowBuilder> {
+    vec![
+        readout("Local media cache", &context.setup.cache),
+        RowBuilder::new("Cache").option("Clear", false, Pick::ClearCache),
+        RowBuilder::placeholder("LUT folder", &context.luts.folder),
+    ]
+}
+
+fn system_rows(context: Context) -> Vec<RowBuilder> {
+    vec![
+        readout("App version", env!("CARGO_PKG_VERSION")),
+        readout("Protocol", "OpenPocketViewCore through the desktop facade"),
+        readout("Renderer", &context.setup.renderer),
+        RowBuilder::new("Diagnostics").option("Write a report", false, Pick::Diagnostics),
+        RowBuilder::placeholder("Source", "github.com/fav-devs/OpenPocketCine"),
+        RowBuilder::placeholder("Licenses", "Apache 2.0 · THIRD-PARTY-NOTICES.md"),
+    ]
+}
+
 fn assist_rows(context: Context) -> Vec<RowBuilder> {
     let prefs = context.prefs;
     let toggles = context.toggles;
@@ -1051,7 +1250,52 @@ mod tests {
             assists: AssistOptions::default(),
             zebra_steps: ZebraSteps::default(),
             scopes: ScopeOptions::default(),
+            setup: SETUP.get_or_init(SetupInfo::default),
         }
+    }
+
+    static SETUP: std::sync::OnceLock<SetupInfo> = std::sync::OnceLock::new();
+
+    #[test]
+    fn the_setup_tabs_read_the_machine_and_offer_their_actions() {
+        let status = Status::default();
+        let titles = |tab: usize| -> Vec<String> {
+            build(SheetKind::Settings, tab, context(&status))
+                .sheet
+                .rows
+                .iter()
+                .map(|r| r.title.clone())
+                .collect()
+        };
+        assert_eq!(SETTINGS_TABS.len(), 8);
+        assert_eq!(
+            titles(3),
+            [
+                "Transport",
+                "Phase",
+                "Body",
+                "Firmware",
+                "Last recovery",
+                "Session"
+            ]
+        );
+        let controls = build(SheetKind::Settings, 4, context(&status));
+        assert_eq!(
+            controls.sheet.rows[0].selected,
+            Some(3),
+            "sensitivity 4 of 1…5"
+        );
+        assert_eq!(controls.pick(0, 1), Some(&Pick::StickSensitivity(2)));
+        let display = build(SheetKind::Settings, 5, context(&status));
+        assert_eq!(display.pick(0, 1), Some(&Pick::Disp(true)));
+        assert_eq!(
+            display.pick(1, 0),
+            Some(&Pick::ShowPart(Part::Exposure, false))
+        );
+        let storage = build(SheetKind::Settings, 6, context(&status));
+        assert_eq!(storage.pick(1, 0), Some(&Pick::ClearCache));
+        let system = build(SheetKind::Settings, 7, context(&status));
+        assert_eq!(system.pick(3, 0), Some(&Pick::Diagnostics));
     }
 
     static PROGRAM: std::sync::OnceLock<Program> = std::sync::OnceLock::new();

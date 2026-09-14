@@ -332,6 +332,28 @@ pub struct AssistChip {
     pub group: usize,
 }
 
+/// Which parts of the viewfinder chrome are drawn (the phones' DISP toggles).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChromeParts {
+    pub exposure: bool,
+    pub status: bool,
+    pub zoom: bool,
+    pub pad: bool,
+    pub modes: bool,
+}
+
+impl Default for ChromeParts {
+    fn default() -> Self {
+        Self {
+            exposure: true,
+            status: true,
+            zoom: true,
+            pad: true,
+            modes: true,
+        }
+    }
+}
+
 /// What a scope plate shows.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlateKind {
@@ -480,6 +502,8 @@ pub struct ChromeState<'a> {
     pub assist_bar: Option<Vec<AssistChip>>,
     /// The scope plates over the picture.
     pub plates: Vec<PlateState>,
+    /// Which parts of the chrome are drawn.
+    pub parts: ChromeParts,
     /// A programmed move's readout for the top bar, or empty.
     pub move_text: String,
     /// The open sheet, if any.
@@ -819,7 +843,10 @@ impl Chrome {
         let fit_x = f64::from(c.get_fit_x());
         let fit_w = f64::from(c.get_fit_width());
         let dial_x = fit_x + (fit_w - ZOOM_DIAL_W) / 2.0;
-        if y <= TOP_BAR_H + bar + ZOOM_DIAL_H && (dial_x..=dial_x + ZOOM_DIAL_W).contains(&x) {
+        if c.get_show_zoom()
+            && y <= TOP_BAR_H + bar + ZOOM_DIAL_H
+            && (dial_x..=dial_x + ZOOM_DIAL_W).contains(&x)
+        {
             return true;
         }
         // A plate is dragged, never drawn on.
@@ -963,6 +990,11 @@ impl Chrome {
             }
         }
         c.set_move_text(state.move_text.clone().into());
+        c.set_show_exposure(state.parts.exposure);
+        c.set_show_status(state.parts.status);
+        c.set_show_zoom(state.parts.zoom);
+        c.set_show_pad(state.parts.pad);
+        c.set_show_modes(state.parts.modes);
         let plates: Vec<PlateView> = state
             .plates
             .iter()

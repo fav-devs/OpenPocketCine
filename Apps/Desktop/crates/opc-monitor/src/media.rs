@@ -150,6 +150,24 @@ impl MediaDriver {
                     exit_acked: false,
                 });
             }
+            MediaAction::CacheSize => {
+                let bytes = self
+                    .cache
+                    .as_ref()
+                    .map_or(0, |cache| folder_size(cache.root()));
+                shell.set_cache_size(bytes);
+            }
+            MediaAction::ClearCache => {
+                if let Some(cache) = &self.cache {
+                    let root = cache.root().to_path_buf();
+                    if let Err(error) = std::fs::remove_dir_all(&root) {
+                        eprintln!("could not clear the cache: {error}");
+                    }
+                    let _ = std::fs::create_dir_all(&root);
+                }
+                shell.set_cache_size(0);
+                shell.say("MEDIA CACHE CLEARED");
+            }
             MediaAction::Thumb(file) => {
                 if let Some(worker) = &self.worker {
                     worker.ask(MediaJob::Thumb(file));
@@ -477,4 +495,26 @@ fn strip_frame(picture: &OwnedPicture) -> (u32, u32, Vec<u8>) {
         }
     }
     (width, height, rgba)
+}
+
+/// Every file under `root`, added up.
+fn folder_size(root: &std::path::Path) -> u64 {
+    let mut total = 0;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(folder) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                stack.push(entry.path());
+            } else if let Ok(meta) = entry.metadata() {
+                total += meta.len();
+            }
+        }
+    }
+    total
 }

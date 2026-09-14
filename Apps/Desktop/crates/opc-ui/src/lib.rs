@@ -15,7 +15,7 @@ pub mod hud;
 pub mod tracking;
 
 pub use canvas::{Canvas, Colour};
-pub use controls::{stick_command, Action, Controls, Key, RampFilter, Stick};
+pub use controls::{stick_command, Action, Controls, Key, RampFilter, Stick, STICK_CENTRE};
 pub use format::{next_frame_rate, next_resolution};
 pub use hud::{Countdown, Hud, Phase};
 pub use tracking::{Drag, Fit};

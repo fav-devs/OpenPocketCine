@@ -14,7 +14,7 @@ use opc_render::{write_png, FeedRenderer, Lut, Presented};
 
 use crate::media::MediaDriver;
 use opc_monitor::luts;
-use opc_monitor::{LutChoice, LutRequest};
+use opc_monitor::{LutChoice, LutRequest, PadButton};
 use opc_ui::{Key as UiKey, Phase};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
@@ -66,6 +66,12 @@ struct View {
     started: Instant,
     /// When the plates last read the picture.
     last_scope_at: f64,
+    /// A game controller, when the platform offers one.
+    pad: Option<gilrs::Gilrs>,
+    last_pad_at: f64,
+    /// Where the camera is, for a reconnect.
+    remote: Option<std::net::SocketAddr>,
+    model_id: Option<i32>,
     media: MediaDriver,
     /// A name for the cache folder: the body's model id, or "camera".
     camera_id: String,
@@ -95,6 +101,8 @@ impl View {
                         self.link.send(command);
                     }
                 }
+                Intent::Reconnect => self.reconnect(),
+                Intent::Diagnostics => self.write_diagnostics(),
             }
         }
         while let Some(request) = self.shell.take_lut_change() {
@@ -166,6 +174,42 @@ impl View {
         }
     }
 
+    /// Tears the datalink down and opens a fresh one, as the Link tab asks.
+    fn reconnect(&mut self) {
+        let (session_id, base_seq) = fresh_session();
+        self.link = Link::open(self.remote, session_id, base_seq, self.model_id);
+        self.latest = None;
+        self.shell.set_phase(Phase::Waiting);
+        self.shell.say("RECONNECTING");
+    }
+
+    /// Writes everything a bug report needs next to the LUT folder.
+    fn write_diagnostics(&mut self) {
+        let now = self.now();
+        let mut text = self.shell.diagnostics_text(now);
+        text.push_str(&format!(
+            "decoder {:?}\n",
+            self.decoder.as_ref().map(|d| d.codec())
+        ));
+        let folder = opc_monitor::prefs::path()
+            .parent()
+            .map_or_else(|| PathBuf::from("."), |p| p.to_path_buf());
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let path = folder.join(format!("diagnostics-{stamp}.txt"));
+        match std::fs::create_dir_all(&folder).and_then(|()| std::fs::write(&path, text)) {
+            Ok(()) => {
+                println!("Wrote {}", path.display());
+                self.shell.say("DIAGNOSTICS WRITTEN TO THE CACHE FOLDER");
+            }
+            Err(error) => {
+                eprintln!("could not write diagnostics: {error}");
+                self.shell.say("COULD NOT WRITE DIAGNOSTICS");
+            }
+        }
+    }
+
     /// Intents raised between frames rather than by a key or a tap: sends and media
     /// fetches. Nothing here can close the window.
     fn carry_out_quietly(&mut self, intents: Vec<Intent>, now: f64) {
@@ -178,6 +222,8 @@ impl View {
                         self.link.send(command);
                     }
                 }
+                Intent::Reconnect => self.reconnect(),
+                Intent::Diagnostics => self.write_diagnostics(),
                 Intent::Still | Intent::Quit | Intent::ToggleFullscreen => {}
             }
         }
@@ -214,6 +260,7 @@ impl View {
                 }
                 FromCamera::Recovering(recovery) => {
                     self.shell.set_phase(Phase::Recovering);
+                    self.shell.note_recovery(&format!("{recovery:?}"));
                     if matches!(recovery, Recovery::RebuildDecoder) {
                         self.rebuild_decoder();
                     }
@@ -283,6 +330,71 @@ impl View {
         self.sample_scopes();
     }
 
+    /// A connected game controller, on the phones' map. Polled once per frame.
+    fn poll_pad(&mut self, now: f64) {
+        let Some(pad) = self.pad.as_mut() else {
+            return;
+        };
+        let mut intents = Vec::new();
+        while let Some(gilrs::Event { id, event, .. }) = pad.next_event() {
+            match event {
+                gilrs::EventType::Connected => {
+                    let name = pad.gamepad(id).name().to_string();
+                    self.shell.set_gamepad(Some(name));
+                }
+                gilrs::EventType::Disconnected => self.shell.set_gamepad(None),
+                gilrs::EventType::ButtonPressed(button, _) => {
+                    let mapped = match button {
+                        gilrs::Button::South => Some(PadButton::A),
+                        gilrs::Button::East => Some(PadButton::B),
+                        gilrs::Button::West => Some(PadButton::X),
+                        gilrs::Button::North => Some(PadButton::Y),
+                        gilrs::Button::LeftTrigger => Some(PadButton::LeftShoulder),
+                        gilrs::Button::RightTrigger => Some(PadButton::RightShoulder),
+                        gilrs::Button::DPadUp => Some(PadButton::DpadUp),
+                        gilrs::Button::DPadDown => Some(PadButton::DpadDown),
+                        gilrs::Button::DPadLeft => Some(PadButton::DpadLeft),
+                        gilrs::Button::DPadRight => Some(PadButton::DpadRight),
+                        _ => None,
+                    };
+                    if let Some(button) = mapped {
+                        intents.extend(self.shell.controller_button(button, now));
+                    }
+                }
+                _ => {}
+            }
+        }
+        // The stick and the triggers are read as levels, not events, so a held throw
+        // keeps streaming at the frame rate.
+        if let Some((_, gamepad)) = pad.gamepads().next() {
+            let axis = |axis: gilrs::Axis| f64::from(gamepad.value(axis));
+            let (x, y) = (axis(gilrs::Axis::LeftStickX), axis(gilrs::Axis::LeftStickY));
+            intents.extend(self.shell.controller_stick(x, y, now));
+            let left = f64::from(
+                gamepad
+                    .button_data(gilrs::Button::LeftTrigger2)
+                    .map_or(0.0, |data| data.value()),
+            );
+            let right = f64::from(
+                gamepad
+                    .button_data(gilrs::Button::RightTrigger2)
+                    .map_or(0.0, |data| data.value()),
+            );
+            let dt = if self.last_pad_at.is_finite() {
+                (now - self.last_pad_at).clamp(0.0, 0.1)
+            } else {
+                0.0
+            };
+            intents.extend(self.shell.controller_zoom(left, right, dt, now));
+        }
+        self.last_pad_at = now;
+        for intent in intents {
+            if let Intent::Send(command) = intent {
+                self.link.send(command);
+            }
+        }
+    }
+
     /// Reads the picture for the plates at about 15 Hz while any scope is on.
     fn sample_scopes(&mut self) {
         if !self.shell.scopes_wanted() {
@@ -303,6 +415,7 @@ impl View {
         self.pump_camera();
         self.decode();
         let now = self.now();
+        self.poll_pad(now);
         let intents = self.shell.tick(now);
         self.carry_out_quietly(intents, now);
         for command in self.media.tick(&mut self.shell, now) {
@@ -476,6 +589,7 @@ impl ApplicationHandler for View {
                     let _ = renderer.set_lut(self.lut.as_ref());
                 }
                 println!("drawing on {}", renderer.device_name());
+                self.shell.set_renderer_name(renderer.device_name());
                 self.renderer = Some(renderer);
             }
             Err(error) => {
@@ -603,13 +717,22 @@ pub fn run(options: Options) -> Result<(), String> {
     let mut view = View {
         renderer: None,
         window: None,
-        shell: Shell::new().with_grade(graded).with_model(options.model_id),
+        shell: Shell::new()
+            .with_grade(graded)
+            .with_model(options.model_id)
+            .with_saved_prefs(),
         media: {
             let mut media = MediaDriver::default();
             media.set_body(options.model_id);
             media
         },
         last_scope_at: f64::NEG_INFINITY,
+        pad: gilrs::Gilrs::new()
+            .map_err(|error| eprintln!("no game controller support: {error}"))
+            .ok(),
+        last_pad_at: f64::NEG_INFINITY,
+        remote: options.remote,
+        model_id: options.model_id,
         camera_id: options
             .model_id
             .map(|id| format!("model-{id:04x}"))
@@ -626,6 +749,17 @@ pub fn run(options: Options) -> Result<(), String> {
         pointer_control: false,
         started: Instant::now(),
     };
+    view.shell.set_link_info(&format!(
+        "Wi-Fi datalink · {}",
+        options
+            .remote
+            .map_or_else(|| "camera default".to_string(), |addr| addr.to_string())
+    ));
+    if let Some(pad) = view.pad.as_ref() {
+        if let Some((_, gamepad)) = pad.gamepads().next() {
+            view.shell.set_gamepad(Some(gamepad.name().to_string()));
+        }
+    }
     {
         let folder = luts::custom_folder();
         let _ = std::fs::create_dir_all(&folder);
