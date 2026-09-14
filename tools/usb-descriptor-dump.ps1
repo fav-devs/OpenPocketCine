@@ -50,5 +50,5 @@ if ($tree) {
     Set-Content "$out\NOTE.txt"
 }
 
-Write-Host "wrote $out:"
+Write-Host "wrote ${out}:"
 Get-ChildItem $out | Select-Object -ExpandProperty Name

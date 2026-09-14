@@ -1,0 +1,42 @@
+
+PNPDeviceID : USB\VID_2CA3&PID_0020&MI_02\6&3958C552&0&0002
+Name        : USB Mass Storage Device
+Service     : USBSTOR
+Status      : OK
+
+PNPDeviceID : USB\VID_2CA3&PID_0020&MI_07\6&3958C552&0&0007
+Name        : BULK Interface
+Service     : 
+Status      : Error
+
+PNPDeviceID : USB\VID_2CA3&PID_0020&MI_03\6&3958C552&0&0003
+Name        : BULK Interface
+Service     : 
+Status      : Error
+
+PNPDeviceID : USB\VID_2CA3&PID_0020\123456789ABCDEF
+Name        : USB Composite Device
+Service     : usbccgp
+Status      : OK
+
+PNPDeviceID : USB\VID_2CA3&PID_0020&MI_04\6&3958C552&0&0004
+Name        : BULK Interface
+Service     : 
+Status      : Error
+
+PNPDeviceID : USB\VID_2CA3&PID_0020&MI_00\6&3958C552&0&0000
+Name        : Remote NDIS based Internet Sharing Device
+Service     : usbrndis6
+Status      : OK
+
+PNPDeviceID : USB\VID_2CA3&PID_0020&MI_05\6&3958C552&0&0005
+Name        : BULK Interface
+Service     : 
+Status      : Error
+
+PNPDeviceID : USB\VID_2CA3&PID_0020&MI_06\6&3958C552&0&0006
+Name        : BULK Interface
+Service     : 
+Status      : Error
+
+

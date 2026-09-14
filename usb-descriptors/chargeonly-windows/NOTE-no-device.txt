@@ -1,0 +1,1 @@
+No DJI device enumerated in charge-only mode (expected — camera draws power only, no data interfaces)

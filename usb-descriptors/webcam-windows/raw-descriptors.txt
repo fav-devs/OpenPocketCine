@@ -1,0 +1,45 @@
+=== InstanceId: USB\VID_2CA3&PID_0023&MI_02\6&1F53923&0&0002
+FriendlyName: OsmoPocket3  Class: MEDIA  Status: OK
+  DEVPKEY_Device_BusReportedDeviceDesc = OsmoPocket3
+  DEVPKEY_Device_HardwareIds = USB\VID_2CA3&PID_0023&REV_0504&MI_02 | USB\VID_2CA3&PID_0023&MI_02
+  DEVPKEY_Device_CompatibleIds = USB\COMPAT_VID_2ca3&Class_01&SubClass_00&Prot_00 | USB\COMPAT_VID_2ca3&Class_01&SubClass_00 | USB\COMPAT_VID_2ca3&Class_01 | USB\Class_01&SubClass_00&Prot_00 | USB\Class_01&SubClass_00 | USB\Class_01
+  DEVPKEY_Device_Service = usbaudio
+  DEVPKEY_Device_DriverDesc = USB Audio Device
+  DEVPKEY_Device_Parent = USB\VID_2CA3&PID_0023\123456789ABCDEF
+  DEVPKEY_Device_Children = SWD\MMDEVAPI\{0.0.1.00000000}.{0a184605-b782-4706-b481-d3ff5bf55b86} | SWD\MMDEVAPI\{0.0.0.00000000}.{812746d9-3cf9-4fc5-a0b7-41d29ac55536}
+  DEVPKEY_Device_LocationInfo = 0000.0014.0000.005.000.000.000.000.000
+  DEVPKEY_Device_Manufacturer = (Generic USB Audio)
+  DEVPKEY_Device_DevNodeStatus = 25174026
+  DEVPKEY_Device_Address = 7
+  DEVPKEY_Device_UINumber = 
+
+=== InstanceId: USB\VID_2CA3&PID_0023&MI_00\6&1F53923&0&0000
+FriendlyName: OsmoPocket3  Class: Camera  Status: OK
+  DEVPKEY_Device_BusReportedDeviceDesc = OsmoPocket3
+  DEVPKEY_Device_HardwareIds = USB\VID_2CA3&PID_0023&REV_0504&MI_00 | USB\VID_2CA3&PID_0023&MI_00
+  DEVPKEY_Device_CompatibleIds = USB\COMPAT_VID_2ca3&Class_0e&SubClass_03&Prot_00 | USB\COMPAT_VID_2ca3&Class_0e&SubClass_03 | USB\COMPAT_VID_2ca3&Class_0e | USB\Class_0e&SubClass_03&Prot_00 | USB\Class_0e&SubClass_03 | USB\Class_0e
+  DEVPKEY_Device_Service = usbvideo
+  DEVPKEY_Device_DriverDesc = USB Video Device
+  DEVPKEY_Device_Parent = USB\VID_2CA3&PID_0023\123456789ABCDEF
+  DEVPKEY_Device_Children = 
+  DEVPKEY_Device_LocationInfo = 0000.0014.0000.005.000.000.000.000.000
+  DEVPKEY_Device_Manufacturer = Microsoft
+  DEVPKEY_Device_DevNodeStatus = 25174026
+  DEVPKEY_Device_Address = 5
+  DEVPKEY_Device_UINumber = 
+
+=== InstanceId: USB\VID_2CA3&PID_0023\123456789ABCDEF
+FriendlyName: USB Composite Device  Class: USB  Status: OK
+  DEVPKEY_Device_BusReportedDeviceDesc = DJIPocket3
+  DEVPKEY_Device_HardwareIds = USB\VID_2CA3&PID_0023&REV_0504 | USB\VID_2CA3&PID_0023
+  DEVPKEY_Device_CompatibleIds = USB\COMPAT_VID_2CA3&DevClass_00&SubClass_00&Prot00 | USB\COMPAT_VID_2CA3&DevClass_00&SubClass_00 | USB\COMPAT_VID_2CA3&DevClass_00 | USB\DevClass_00&SubClass_00&Prot_00 | USB\DevClass_00&SubClass_00 | USB\DevClass_00 | USB\COMPOSITE
+  DEVPKEY_Device_Service = usbccgp
+  DEVPKEY_Device_DriverDesc = USB Composite Device
+  DEVPKEY_Device_Parent = USB\ROOT_HUB30\4&1506a15e&0&0
+  DEVPKEY_Device_Children = USB\VID_2CA3&PID_0023&MI_00\6&1f53923&0&0000 | USB\VID_2CA3&PID_0023&MI_02\6&1f53923&0&0002
+  DEVPKEY_Device_LocationInfo = Port_#0005.Hub_#0001
+  DEVPKEY_Device_Manufacturer = (Standard USB Host Controller)
+  DEVPKEY_Device_DevNodeStatus = 25190410
+  DEVPKEY_Device_Address = 5
+  DEVPKEY_Device_UINumber = 
+

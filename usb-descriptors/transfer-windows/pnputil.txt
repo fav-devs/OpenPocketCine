@@ -1,0 +1,1736 @@
+Microsoft PnP Utility
+
+Instance ID:                SCSI\Disk&Ven_NVMe&Prod_SPCC_M.2_PCIe_SS\5&339562ae&0&000000
+Device Description:         SPCC M.2 PCIe SSD
+Class Name:                 DiskDrive
+Class GUID:                 {4d36e967-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard disk drives)
+Status:                     Started
+Driver Name:                disk.inf
+
+Instance ID:                ACPI\PNP0100\4&108ba7b9&0
+Device Description:         System timer
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                PCI\VEN_8086&DEV_A379&SUBSYS_A3791849&REV_10\3&11583659&0&90
+Device Description:         Intel(R) Thermal Subsystem - A379
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          INTEL
+Status:                     Stopped
+Driver Name:                oem20.inf
+
+Instance ID:                ROOT\DISPLAY\0000
+Device Description:         SudoMaker Virtual Display Adapter
+Class Name:                 Display
+Class GUID:                 {4d36e968-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          SudoMaker
+Status:                     Started
+Driver Name:                oem35.inf
+
+Instance ID:                ROOT\DISPLAY\0001
+Device Description:         Meta Virtual Monitor
+Class Name:                 Display
+Class GUID:                 {4d36e968-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Meta Inc.
+Status:                     Started
+Driver Name:                oem53.inf
+
+Instance ID:                HID\VID_1532&PID_0098&MI_01&Col03\9&a06285e&0&0002
+Device Description:         HID-compliant system controller
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                PCI\VEN_10EC&DEV_5765&SUBSYS_576510EC&REV_01\00000001004CE00000
+Device Description:         Standard NVM Express Controller
+Class Name:                 SCSIAdapter
+Class GUID:                 {4d36e97b-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Standard NVM Express Controller
+Status:                     Started
+Driver Name:                stornvme.inf
+
+Instance ID:                ACPI\PNP0C02\0
+Device Description:         Motherboard resources
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                ACPI\PNP0C02\1
+Device Description:         Motherboard resources
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                ACPI\PNP0C02\2
+Device Description:         Motherboard resources
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                ACPI\PNP0C02\5
+Device Description:         Motherboard resources
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                USB\VID_2CA3&PID_0020&MI_02\6&3958c552&0&0002
+Device Description:         USB Mass Storage Device
+Class Name:                 USB
+Class GUID:                 {36fc9e60-c465-11cf-8056-444553540000}
+Manufacturer Name:          Compatible USB storage device
+Status:                     Started
+Driver Name:                usbstor.inf
+
+Instance ID:                SW\{96E080C7-143C-11D1-B40F-00A0C9223196}\{3C0D501A-140B-11D1-B40F-00A0C9223196}
+Device Description:         Microsoft Streaming Service Proxy
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                ksfilter.inf
+
+Instance ID:                USB\VID_2CA3&PID_0020&MI_07\6&3958c552&0&0007
+Device Description:         BULK Interface
+Class Name:                 Unknown
+Class GUID:                 Unknown
+Manufacturer Name:          Unknown
+Status:                     Problem
+Problem Code:               28 (0x1C) [CM_PROB_FAILED_INSTALL]
+Problem Status:             0xC0000490
+
+Instance ID:                HID\VID_1532&PID_0098&MI_01&Col02\9&a06285e&0&0001
+Device Description:         HID-compliant consumer control device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                hidserv.inf
+
+Instance ID:                HID\VID_27C0&PID_0859&MI_02\8&ef2e9a7&0&0000
+Device Description:         HID-compliant mouse
+Class Name:                 Mouse
+Class GUID:                 {4d36e96f-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                msmouse.inf
+
+Instance ID:                SWD\COMPUTER\MFG_To_Be_Filled_By_O.E.M.&FAM_To_Be_Filled_By_O.E.M.&PROD_To_Be_Filled_By_O.E.M.&SKU_To_Be_Filled_By_O.E.M.
+Device Description:         To Be Filled By O.E.M. To Be Filled By O.E.M.
+Class Name:                 Computer
+Class GUID:                 {4d36e966-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                compdev.inf
+Extension Driver Names:     VocaEffectPack-Extension.inf
+
+Instance ID:                HID\VID_1532&PID_0098&MI_01&Col01\9&a06285e&0&0000
+Device Description:         HID Keyboard Device
+Class Name:                 Keyboard
+Class GUID:                 {4d36e96b-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard keyboards)
+Status:                     Started
+Driver Name:                keyboard.inf
+
+Instance ID:                ACPI\ACPI000C\2&daba3ff&0
+Device Description:         ACPI Processor Aggregator
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                acpipagr.inf
+
+Instance ID:                PCI\VEN_8086&DEV_1901&SUBSYS_19011849&REV_07\3&11583659&0&08
+Device Description:         Intel(R) Xeon(R) E3 - 1200/1500 v5/6th Gen Intel(R) Core(TM) PCIe Controller (x16) - 1901
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          INTEL
+Status:                     Started
+Driver Name:                oem19.inf
+
+Instance ID:                SWD\DRIVERENUM\AMDWIN&7&11ca139e&0
+Device Description:         AMD-Windows Support Components
+Class Name:                 SoftwareComponent
+Class GUID:                 {5c4c3332-344d-483c-8739-259e934c9cc8}
+Manufacturer Name:          Advanced Micro Devices, Inc.
+Status:                     Started
+Driver Name:                oem10.inf
+
+Instance ID:                SWD\MMDEVAPI\{0.0.0.00000000}.{cb0770b9-785e-499f-9c18-11220457cb64}
+Device Description:         Virtual Speakers (Virtual Speakers for AudioRelay)
+Class Name:                 AudioEndpoint
+Class GUID:                 {c166523c-fe0c-4a94-a586-f1a80cfbbf3e}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                audioendpoint.inf
+
+Instance ID:                SWD\PRINTENUM\PrintQueues
+Device Description:         Root Print Queue
+Class Name:                 PrintQueue
+Class GUID:                 {1ed2bbf9-11f0-4084-b21f-ad83a8e6dcdc}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                printqueue.inf
+
+Instance ID:                SWD\WPDBUSENUM\_??_USBSTOR#Disk&Ven_Linux&Prod_File-Stor_Gadget&Rev_0504#7&1aaf8519&0&123456789ABCDEF&0#{53f56307-b6bf-11d0-94f2-00a0c91efb8b}
+Device Description:         SD_Card
+Class Name:                 WPD
+Class GUID:                 {eec5ad98-8080-425f-922a-dabf3de3f69a}
+Manufacturer Name:          Linux   
+Status:                     Started
+Driver Name:                wpdfs.inf
+
+Instance ID:                PCI\VEN_8086&DEV_A324&SUBSYS_A3241849&REV_10\3&11583659&0&FD
+Device Description:         Intel(R) SPI (flash) Controller - A324
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          INTEL
+Status:                     Stopped
+Driver Name:                oem21.inf
+
+Instance ID:                HID\VID_0C45&PID_7603&MI_01&Col04\7&30a54486&0&0003
+Device Description:         HID Keyboard Device
+Class Name:                 Keyboard
+Class GUID:                 {4d36e96b-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard keyboards)
+Status:                     Started
+Driver Name:                keyboard.inf
+
+Instance ID:                SWD\MMDEVAPI\{0.0.1.00000000}.{1840bec0-dc8f-442a-a3a7-b243d6130ec1}
+Device Description:         Headset Microphone (Oculus Virtual Audio Device)
+Class Name:                 AudioEndpoint
+Class GUID:                 {c166523c-fe0c-4a94-a586-f1a80cfbbf3e}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                audioendpoint.inf
+
+Instance ID:                ROOT\volmgr\0000
+Device Description:         Volume Manager
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                volmgr.inf
+
+Instance ID:                SWD\PRINTENUM\{06A0F4BD-F0A2-484E-9B6A-98D6196ED5BD}
+Device Description:         RustDesk Printer
+Class Name:                 PrintQueue
+Class GUID:                 {1ed2bbf9-11f0-4084-b21f-ad83a8e6dcdc}
+Manufacturer Name:          RustDesk
+Status:                     Started
+Driver Name:                printqueue.inf
+
+Instance ID:                HID\VID_352F&PID_0100&MI_03\9&39c804&0&0000
+Device Description:         HID-compliant consumer control device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                hidserv.inf
+
+Instance ID:                BTHLEDevice\{0000fea0-0000-1000-8000-00805f9b34fb}_14c14e9687da\8&1a1b2d1&0&000c
+Device Description:         Bluetooth LE Generic Attribute Service
+Class Name:                 Bluetooth
+Class GUID:                 {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                bthleenum.inf
+
+Instance ID:                BTHENUM\{0000110e-0000-1000-8000-00805f9b34fb}_LOCALMFG&0002\7&505db3b&0&14C14E9687DA_C00000000
+Device Description:         Den Display Avrcp Transport
+Class Name:                 Bluetooth
+Class GUID:                 {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                microsoft_bluetooth_avrcptransport.inf
+
+Instance ID:                PCI\VEN_8086&DEV_A352&SUBSYS_A3521849&REV_10\3&11583659&0&B8
+Device Description:         Standard SATA AHCI Controller
+Class Name:                 HDC
+Class GUID:                 {4d36e96a-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Standard SATA AHCI Controller
+Status:                     Started
+Driver Name:                mshdc.inf
+
+Instance ID:                STORAGE\Volume\{7f0209a5-5faa-11f1-90d1-806e6f6e6963}#0000000007500000
+Device Description:         Volume
+Class Name:                 Volume
+Class GUID:                 {71a27cdd-812a-11d0-bec7-08002be2092f}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                volume.inf
+
+Instance ID:                SCSI\Disk&Ven_Patriot&Prod_Burst_Elite_240G\4&813e391&0&040000
+Device Description:         Patriot Burst Elite 240GB
+Class Name:                 DiskDrive
+Class GUID:                 {4d36e967-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard disk drives)
+Status:                     Started
+Driver Name:                disk.inf
+
+Instance ID:                SWD\MSRRAS\MS_PPPOEMINIPORT
+Device Description:         WAN Miniport (PPPOE)
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                netrasa.inf
+
+Instance ID:                ROOT\VMBus\0000
+Device Description:         Microsoft Hyper-V Virtual Machine Bus Provider
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                wvmbusr.inf
+
+Instance ID:                PCI\VEN_8086&DEV_A348&SUBSYS_68931849&REV_10\3&11583659&0&FB
+Device Description:         High Definition Audio Controller
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                hdaudbus.inf
+
+Instance ID:                ROOT\BasicDisplay\0000
+Device Description:         Microsoft Basic Display Driver
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard display types)
+Status:                     Started
+Driver Name:                basicdisplay.inf
+
+Instance ID:                ACPI\PNP0C0E\2&daba3ff&0
+Device Description:         ACPI Sleep Button
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                machine.inf
+
+Instance ID:                SWD\MMDEVAPI\{0.0.0.00000000}.{dd35a952-dd6a-4d12-a2a3-d2e138a2fb71}
+Device Description:         Speakers (Steam Streaming Speakers)
+Class Name:                 AudioEndpoint
+Class GUID:                 {c166523c-fe0c-4a94-a586-f1a80cfbbf3e}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                audioendpoint.inf
+
+Instance ID:                ROOT\hvservice\0000
+Device Description:         Microsoft Hypervisor Service
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                hvservice.inf
+
+Instance ID:                SWD\RADIO\{D2471701-E674-49FF-BEB7-9051BE858C3C}
+Device Description:         Wi-Fi
+Class Name:                 SoftwareDevice
+Class GUID:                 {62f9c741-b25a-46ce-b54c-9bccce08b6f2}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                c_swdevice.inf
+
+Instance ID:                SWD\DRIVERENUM\{96bedf2c-18cb-4a15-b821-5e95ed0fea61}#VocaEffectPack&1&37fb5493&0
+Device Description:         Voice Clarity
+Class Name:                 AudioProcessingObject
+Class GUID:                 {5989fce8-9cd0-467d-8a6a-5419e31529d4}
+Manufacturer Name:          Microsoft Corporation
+Status:                     Started
+Driver Name:                oem45.inf
+
+Instance ID:                ROOT\VMS_VSMP\0000
+Device Description:         Hyper-V Virtual Switch Extension Adapter
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                wvms_mp_windows.inf
+
+Instance ID:                ROOT\NET\0000
+Device Description:         VirtualBox Host-Only Ethernet Adapter
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Oracle Corporation
+Status:                     Started
+Driver Name:                oem29.inf
+
+Instance ID:                PCI\VEN_1002&DEV_1479&SUBSYS_14791002&REV_00\5&47a1af9&0&0000E4
+Device Description:         PCI Express Downstream Switch Port
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                pci.inf
+
+Instance ID:                BTH\MS_BTHPAN\6&5b110cc&0&2
+Device Description:         Bluetooth Device (Personal Area Network)
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                bthpan.inf
+
+Instance ID:                SWD\MSRRAS\{5e259276-bc7e-40e3-b93b-8f89b5f3abc0}
+Device Description:         Microsoft RRAS Root Enumerator
+Class Name:                 SoftwareDevice
+Class GUID:                 {62f9c741-b25a-46ce-b54c-9bccce08b6f2}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                c_swdevice.inf
+
+Instance ID:                BTHENUM\{0000110c-0000-1000-8000-00805f9b34fb}_LOCALMFG&0002\7&505db3b&0&14C14E9687DA_C00000000
+Device Description:         Den Display Avrcp Transport
+Class Name:                 Bluetooth
+Class GUID:                 {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                microsoft_bluetooth_avrcptransport.inf
+
+Instance ID:                PCI\VEN_8086&DEV_A305&SUBSYS_A3051849&REV_10\3&11583659&0&F8
+Device Description:         Intel(R) 300 Series Chipset Family LPC Controller (Z390) - A305
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          INTEL
+Status:                     Started
+Driver Name:                oem21.inf
+
+Instance ID:                SWD\MSRRAS\MS_PPTPMINIPORT
+Device Description:         WAN Miniport (PPTP)
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                netrasa.inf
+
+Instance ID:                USB\VID_2CA3&PID_0020&MI_03\6&3958c552&0&0003
+Device Description:         BULK Interface
+Class Name:                 Unknown
+Class GUID:                 Unknown
+Manufacturer Name:          Unknown
+Status:                     Problem
+Problem Code:               28 (0x1C) [CM_PROB_FAILED_INSTALL]
+Problem Status:             0xC0000490
+
+Instance ID:                USB\VID_2CA3&PID_0020\123456789ABCDEF
+Device Description:         USB Composite Device
+Class Name:                 USB
+Class GUID:                 {36fc9e60-c465-11cf-8056-444553540000}
+Manufacturer Name:          (Standard USB Host Controller)
+Status:                     Started
+Driver Name:                usb.inf
+
+Instance ID:                HDAUDIO\FUNC_01&VEN_10DE&DEV_009F&SUBSYS_1462397D&REV_1001\5&3a157cbd&0&0001
+Device Description:         NVIDIA High Definition Audio
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          NVIDIA
+Status:                     Started
+Driver Name:                oem32.inf
+
+Instance ID:                STORAGE\Volume\_??_USBSTOR#Disk&Ven_Linux&Prod_File-Stor_Gadget&Rev_0504#7&1aaf8519&0&123456789ABCDEF&1#{53f56307-b6bf-11d0-94f2-00a0c91efb8b}
+Device Description:         Volume
+Class Name:                 Volume
+Class GUID:                 {71a27cdd-812a-11d0-bec7-08002be2092f}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                volume.inf
+
+Instance ID:                ROOT\CAMERA\0000
+Device Description:         Camo
+Class Name:                 Camera
+Class GUID:                 {ca3e7ab9-b4c3-4ae6-8251-579ef933890f}
+Manufacturer Name:          Reincubate
+Status:                     Started
+Driver Name:                oem33.inf
+
+Instance ID:                USB\VID_1532&PID_0098&MI_00\8&2de0223d&0&0000
+Device Description:         USB Input Device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                ROOT\VID\0000
+Device Description:         Microsoft Hyper-V Virtualization Infrastructure Driver
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                wvid.inf
+
+Instance ID:                ROOT\{E070661C-AC3F-4AAE-AA3F-7D4E8DED5142}\0000
+Device Description:         Camo
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Reincubate
+Status:                     Started
+Driver Name:                oem43.inf
+
+Instance ID:                ACPI\PNP0103\0
+Device Description:         High precision event timer
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                SWD\MMDEVAPI\{0.0.0.00000000}.{6d03ff55-04e6-4698-9a24-c356c97651c2}
+Device Description:         Optix MAG27CQ (NVIDIA High Definition Audio)
+Class Name:                 AudioEndpoint
+Class GUID:                 {c166523c-fe0c-4a94-a586-f1a80cfbbf3e}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                audioendpoint.inf
+
+Instance ID:                USB\VID_352F&PID_0100&MI_00\8&1f0e3de1&0&0000
+Device Description:         PD400X Podcast Microphone
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Generic USB Audio)
+Status:                     Started
+Driver Name:                wdma_usb.inf
+
+Instance ID:                SWD\MSRRAS\MS_AGILEVPNMINIPORT
+Device Description:         WAN Miniport (IKEv2)
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                netavpna.inf
+
+Instance ID:                ROOT\CompositeBus\0000
+Device Description:         Composite Bus Enumerator
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                compositebus.inf
+
+Instance ID:                ROOT\vdrvroot\0000
+Device Description:         Microsoft Virtual Drive Enumerator
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                vdrvroot.inf
+
+Instance ID:                PCI\VEN_10DE&DEV_2503&SUBSYS_397D1462&REV_A1\4&25438c51&0&0008
+Device Description:         NVIDIA GeForce RTX 3060
+Class Name:                 Display
+Class GUID:                 {4d36e968-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          NVIDIA
+Status:                     Started
+Driver Name:                oem31.inf
+
+Instance ID:                BTHENUM\{0000111f-0000-1000-8000-00805f9b34fb}_LOCALMFG&0002\7&505db3b&0&14C14E9687DA_C00000000
+Device Description:         Den Display Hands-Free HF
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                microsoft_bluetooth_hfp_hf.inf
+
+Instance ID:                SWD\DRIVERENUM\AMDUWP&7&11ca139e&0
+Device Description:         Generic software component
+Class Name:                 SoftwareComponent
+Class GUID:                 {5c4c3332-344d-483c-8739-259e934c9cc8}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                c_swcomponent.inf
+
+Instance ID:                HID\VID_0C45&PID_7603&MI_01&Col05\7&30a54486&0&0004
+Device Description:         HID Keyboard Device
+Class Name:                 Keyboard
+Class GUID:                 {4d36e96b-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard keyboards)
+Status:                     Started
+Driver Name:                keyboard.inf
+
+Instance ID:                ROOT\spaceport\0000
+Device Description:         Microsoft Storage Spaces Controller
+Class Name:                 SCSIAdapter
+Class GUID:                 {4d36e97b-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                spaceport.inf
+
+Instance ID:                STORAGE\Volume\{7f0209a5-5faa-11f1-90d1-806e6f6e6963}#000000E8AEF00000
+Device Description:         Volume
+Class Name:                 Volume
+Class GUID:                 {71a27cdd-812a-11d0-bec7-08002be2092f}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                volume.inf
+
+Instance ID:                PCI\VEN_8086&DEV_15BC&SUBSYS_15BC1849&REV_10\3&11583659&0&FE
+Device Description:         Intel(R) Ethernet Connection (7) I219-V
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Intel
+Status:                     Started
+Driver Name:                oem16.inf
+
+Instance ID:                PCI\VEN_8086&DEV_A330&SUBSYS_A3301849&REV_F0\3&11583659&0&E8
+Device Description:         Intel(R) PCI Express Root Port #9 - A330
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          INTEL
+Status:                     Started
+Driver Name:                oem21.inf
+
+Instance ID:                PCI\VEN_1002&DEV_1478&SUBSYS_00000000&REV_C4\4&3acc68f6&0&00E4
+Device Description:         PCI Express Upstream Switch Port
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                pci.inf
+
+Instance ID:                SWD\MMDEVAPI\{0.0.0.00000000}.{bd20e5bf-7c89-4420-a126-207a96314e50}
+Device Description:         Headphones (Oculus Virtual Audio Device)
+Class Name:                 AudioEndpoint
+Class GUID:                 {c166523c-fe0c-4a94-a586-f1a80cfbbf3e}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                audioendpoint.inf
+
+Instance ID:                ROOT\KDNIC\0000
+Device Description:         Microsoft Kernel Debug Network Adapter
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                kdnic.inf
+
+Instance ID:                BTHENUM\{0000110a-0000-1000-8000-00805f9b34fb}_LOCALMFG&0002\7&505db3b&0&14C14E9687DA_C00000000
+Device Description:         Den Display A2DP SNK
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                microsoft_bluetooth_a2dp_snk.inf
+
+Instance ID:                USB\VID_0C45&PID_7603&MI_01\6&f80d539&0&0001
+Device Description:         USB Input Device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                STORAGE\VolumeSnapshot\HarddiskVolumeSnapshot1
+Device Description:         Generic volume shadow copy
+Class Name:                 VolumeSnapshot
+Class GUID:                 {533c5b84-ec70-11d2-9505-00c04f79deaf}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                volsnap.inf
+
+Instance ID:                STORAGE\VolumeSnapshot\HarddiskVolumeSnapshot2
+Device Description:         Generic volume shadow copy
+Class Name:                 VolumeSnapshot
+Class GUID:                 {533c5b84-ec70-11d2-9505-00c04f79deaf}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                volsnap.inf
+
+Instance ID:                USB\VID_0BDA&PID_8153\001000001
+Device Description:         Realtek USB GbE Family Controller
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Realtek
+Status:                     Started
+Driver Name:                oem17.inf
+
+Instance ID:                USB\VID_0C45&PID_7603&MI_00\6&f80d539&0&0000
+Device Description:         USB Input Device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                ACPI\PNP0C02\PCHRESV
+Device Description:         Motherboard resources
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                ROOT\VKRNLINTVSP\0000
+Device Description:         Microsoft Hyper-V NT Kernel Integration VSP
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                wvkrnlintvsp.inf
+
+Instance ID:                PCI\VEN_8086&DEV_24F3&SUBSYS_00108086&REV_3A\1C1BB5FFFF268B8A00
+Device Description:         Intel(R) Dual Band Wireless-AC 8260
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Intel Corporation
+Status:                     Started
+Driver Name:                oem23.inf
+
+Instance ID:                USB\VID_0C45&PID_7603\5&17411534&0&2
+Device Description:         USB Composite Device
+Class Name:                 USB
+Class GUID:                 {36fc9e60-c465-11cf-8056-444553540000}
+Manufacturer Name:          (Standard USB Host Controller)
+Status:                     Started
+Driver Name:                usb.inf
+
+Instance ID:                SWD\DRIVERENUM\OEM_WMI_component&4&32f8be4f&0
+Device Description:         Intel(R) Management Engine WMI Provider
+Class Name:                 SoftwareComponent
+Class GUID:                 {5c4c3332-344d-483c-8739-259e934c9cc8}
+Manufacturer Name:          Intel
+Status:                     Started
+Driver Name:                oem13.inf
+
+Instance ID:                SWD\Wintun\{37217669-42DA-4657-A55B-0D995D328250}
+Device Description:         Tailscale Tunnel
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          WireGuard LLC
+Status:                     Started
+Driver Name:                oem38.inf
+
+Instance ID:                SWD\DRIVERENUM\OEM_DAL_component&4&32f8be4f&0
+Device Description:         Intel(R) Dynamic Application Loader Host Interface
+Class Name:                 SoftwareComponent
+Class GUID:                 {5c4c3332-344d-483c-8739-259e934c9cc8}
+Manufacturer Name:          Intel
+Status:                     Started
+Driver Name:                oem7.inf
+
+Instance ID:                SWD\MMDEVAPI\{0.0.0.00000000}.{e05cc231-7086-45ef-82d3-08e2e675e475}
+Device Description:         LG FULL HD (NVIDIA High Definition Audio)
+Class Name:                 AudioEndpoint
+Class GUID:                 {c166523c-fe0c-4a94-a586-f1a80cfbbf3e}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                audioendpoint.inf
+
+Instance ID:                USB\VID_27C0&PID_0859&MI_00\7&14bf8c3d&0&0000
+Device Description:         USB Input Device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                USB\VID_2CA3&PID_0020&MI_04\6&3958c552&0&0004
+Device Description:         BULK Interface
+Class Name:                 Unknown
+Class GUID:                 Unknown
+Manufacturer Name:          Unknown
+Status:                     Problem
+Problem Code:               28 (0x1C) [CM_PROB_FAILED_INSTALL]
+Problem Status:             0xC0000490
+
+Instance ID:                USB\VID_1532&PID_0098&MI_01\8&2de0223d&0&0001
+Device Description:         USB Input Device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                ROOT\UMBUS\0000
+Device Description:         UMBus Root Bus Enumerator
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                umbus.inf
+
+Instance ID:                USB\VID_27C0&PID_0859\9LQ0172005164
+Device Description:         USB Composite Device
+Class Name:                 USB
+Class GUID:                 {36fc9e60-c465-11cf-8056-444553540000}
+Manufacturer Name:          (Standard USB Host Controller)
+Status:                     Started
+Driver Name:                usb.inf
+
+Instance ID:                ACPI\PNP0000\4&108ba7b9&0
+Device Description:         Programmable interrupt controller
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                ACPI\PNP0C14\SampleDev
+Device Description:         Microsoft Windows Management Interface for ACPI
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                wmiacpi.inf
+
+Instance ID:                BTHENUM\Dev_14C14E9687DA\7&505db3b&0&BluetoothDevice_14C14E9687DA
+Device Description:         Den Display
+Class Name:                 Bluetooth
+Class GUID:                 {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                bth.inf
+
+Instance ID:                SWD\RADIO\{3DB5895D-CC28-44B3-AD3D-6F01A782B8D2}
+Device Description:         Microsoft Radio Device Enumeration Bus
+Class Name:                 SoftwareDevice
+Class GUID:                 {62f9c741-b25a-46ce-b54c-9bccce08b6f2}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                c_swdevice.inf
+
+Instance ID:                HID\VID_0C45&PID_7603&MI_01&Col01\7&30a54486&0&0000
+Device Description:         HID-compliant consumer control device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                hidserv.inf
+
+Instance ID:                DISPLAY\XYK0003\5&36892268&0&UID4352
+Device Description:         Generic Monitor (Display)
+Class Name:                 Monitor
+Class GUID:                 {4d36e96e-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard monitor types)
+Status:                     Started
+Driver Name:                monitor.inf
+
+Instance ID:                SWD\MSDAS\{ce958e9a-424f-4c88-86f4-11314821e75a}
+Device Description:         Microsoft Device Association Root Enumerator
+Class Name:                 SoftwareDevice
+Class GUID:                 {62f9c741-b25a-46ce-b54c-9bccce08b6f2}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                c_swdevice.inf
+
+Instance ID:                HID\VID_0C45&PID_7603&MI_01&Col06\7&30a54486&0&0005
+Device Description:         HID Keyboard Device
+Class Name:                 Keyboard
+Class GUID:                 {4d36e96b-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard keyboards)
+Status:                     Started
+Driver Name:                keyboard.inf
+
+Instance ID:                ROOT\ACPI_HAL\0000
+Device Description:         ACPI x64-based PC
+Class Name:                 Computer
+Class GUID:                 {4d36e966-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard computers)
+Status:                     Started
+Driver Name:                hal.inf
+
+Instance ID:                BTH\MS_BTHBRB\6&5b110cc&0&1
+Device Description:         Microsoft Bluetooth Enumerator
+Class Name:                 Bluetooth
+Class GUID:                 {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                bth.inf
+
+Instance ID:                SWD\MMDEVAPI\{0.0.0.00000000}.{c87d30bd-285f-4e4b-8d2c-d5efaca9b50d}
+Device Description:         Display (NVIDIA High Definition Audio)
+Class Name:                 AudioEndpoint
+Class GUID:                 {c166523c-fe0c-4a94-a586-f1a80cfbbf3e}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                audioendpoint.inf
+
+Instance ID:                SWD\MSRRAS\MS_NDISWANBH
+Device Description:         WAN Miniport (Network Monitor)
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                netrasa.inf
+
+Instance ID:                SWD\MSRRAS\MS_NDISWANIP
+Device Description:         WAN Miniport (IP)
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                netrasa.inf
+
+Instance ID:                PCI\VEN_1002&DEV_731F&SUBSYS_05831043&REV_C4\6&c6a70e9&0&000000E4
+Device Description:         AMD Radeon RX 5700
+Class Name:                 Display
+Class GUID:                 {4d36e968-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Advanced Micro Devices, Inc.
+Status:                     Started
+Driver Name:                oem8.inf
+
+Instance ID:                ACPI\PNP0C14\TestDev
+Device Description:         Microsoft Windows Management Interface for ACPI
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                wmiacpi.inf
+
+Instance ID:                ACPI\PNP0A08\0
+Device Description:         PCI Express Root Complex
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                pci.inf
+
+Instance ID:                ACPI\INT3F0D\4&108ba7b9&0
+Device Description:         Motherboard resources
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                HID\VID_2DC8&PID_3109\6&1889c71b&1&0000
+Device Description:         HID-compliant vendor-defined device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                ACPI\PNP0C02\3&11583659&0
+Device Description:         Motherboard resources
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                SWD\RADIO\Bluetooth_1c1bb5268b8e
+Device Description:         Bluetooth
+Class Name:                 SoftwareDevice
+Class GUID:                 {62f9c741-b25a-46ce-b54c-9bccce08b6f2}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                c_swdevice.inf
+
+Instance ID:                ROOT\VPCIVSP\0000
+Device Description:         Microsoft Hyper-V PCI Server
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                wvpcivsp.inf
+
+Instance ID:                DISPLAY\GSM5B55\5&36892268&0&UID4356
+Device Description:         Generic Monitor (LG FULL HD)
+Class Name:                 Monitor
+Class GUID:                 {4d36e96e-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard monitor types)
+Status:                     Started
+Driver Name:                monitor.inf
+
+Instance ID:                SWD\MMDEVAPI\{0.0.1.00000000}.{d12a80ea-5f06-450b-b25a-232f835400ff}
+Device Description:         Microphone (Maono AI Microphone)
+Class Name:                 AudioEndpoint
+Class GUID:                 {c166523c-fe0c-4a94-a586-f1a80cfbbf3e}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                audioendpoint.inf
+
+Instance ID:                STORAGE\Volume\{7f0209a4-5faa-11f1-90d1-806e6f6e6963}#000000000C805000
+Device Description:         Volume
+Class Name:                 Volume
+Class GUID:                 {71a27cdd-812a-11d0-bec7-08002be2092f}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                volume.inf
+
+Instance ID:                ACPI\PNP0C0C\2&daba3ff&0
+Device Description:         ACPI Power Button
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                machine.inf
+
+Instance ID:                ACPI_HAL\PNP0C08\0
+Device Description:         Microsoft ACPI-Compliant System
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                acpi.inf
+
+Instance ID:                HTREE\ROOT\0
+Device Description:         Unknown
+Class Name:                 Unknown
+Class GUID:                 Unknown
+Manufacturer Name:          Unknown
+Status:                     Started
+
+Instance ID:                ROOT\BasicRender\0000
+Device Description:         Microsoft Basic Render Driver
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                basicrender.inf
+
+Instance ID:                HID\VID_1532&PID_0098&MI_00\9&2ddd6620&0&0000
+Device Description:         HID-compliant mouse
+Class Name:                 Mouse
+Class GUID:                 {4d36e96f-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                msmouse.inf
+
+Instance ID:                BTH\MS_BTHLE\6&5b110cc&0&3
+Device Description:         Microsoft Bluetooth LE Enumerator
+Class Name:                 Bluetooth
+Class GUID:                 {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                bthleenum.inf
+
+Instance ID:                PCI\VEN_8086&DEV_A323&SUBSYS_A3231849&REV_10\3&11583659&0&FC
+Device Description:         Intel(R) SMBus - A323
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          INTEL
+Status:                     Stopped
+Driver Name:                oem21.inf
+
+Instance ID:                SWD\MSRRAS\MS_SSTPMINIPORT
+Device Description:         WAN Miniport (SSTP)
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                netsstpa.inf
+
+Instance ID:                {5d624f94-8850-40c3-a3fa-a4fd2080baf3}\vwifimp_wfd\5&36f7cff5&0&11
+Device Description:         Microsoft Wi-Fi Direct Virtual Adapter
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                netvwifimp.inf
+
+Instance ID:                {5d624f94-8850-40c3-a3fa-a4fd2080baf3}\vwifimp_wfd\5&36f7cff5&0&12
+Device Description:         Microsoft Wi-Fi Direct Virtual Adapter #2
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                netvwifimp.inf
+
+Instance ID:                BTHHFENUM\BthHFPAudio\8&24f7273a&1&97
+Device Description:         Den Display Hands-Free HF Audio
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                microsoft_bluetooth_hfp.inf
+
+Instance ID:                BTHLE\Dev_14c14e9687da\7&6616ce2&0&14c14e9687da
+Device Description:         Den Display
+Class Name:                 Bluetooth
+Class GUID:                 {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                bthleenum.inf
+
+Instance ID:                ACPI_HAL\UEFI\0
+Device Description:         Microsoft UEFI-Compliant System
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                uefi.inf
+
+Instance ID:                STORAGE\Volume\_??_USBSTOR#Disk&Ven_Linux&Prod_File-Stor_Gadget&Rev_0504#7&1aaf8519&0&123456789ABCDEF&0#{53f56307-b6bf-11d0-94f2-00a0c91efb8b}
+Device Description:         Volume
+Class Name:                 Volume
+Class GUID:                 {71a27cdd-812a-11d0-bec7-08002be2092f}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                volume.inf
+
+Instance ID:                UEFI\RES_{0acc309e-2709-4ecf-aeec-0c8fbff19a4c}\0
+Device Description:         System Firmware
+Class Name:                 Firmware
+Class GUID:                 {f2e7dd72-6468-4e36-b6f1-6488f42c1b52}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                c_firmware.inf
+
+Instance ID:                USB\VID_1532&PID_0098\7&14fde25d&0&1
+Device Description:         USB Composite Device
+Class Name:                 USB
+Class GUID:                 {36fc9e60-c465-11cf-8056-444553540000}
+Manufacturer Name:          (Standard USB Host Controller)
+Status:                     Started
+Driver Name:                usb.inf
+
+Instance ID:                HID\VID_27C0&PID_0859&MI_00&Col01\8&38bb91dd&0&0000
+Device Description:         HID-compliant touch screen
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                USB\VID_352F&PID_0100\214b206000000178
+Device Description:         USB Composite Device
+Class Name:                 USB
+Class GUID:                 {36fc9e60-c465-11cf-8056-444553540000}
+Manufacturer Name:          (Standard USB Host Controller)
+Status:                     Started
+Driver Name:                usb.inf
+
+Instance ID:                USB\VID_2CA3&PID_0020&MI_00\6&3958c552&0&0000
+Device Description:         Remote NDIS based Internet Sharing Device
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                wceisvista.inf
+
+Instance ID:                PCI\VEN_8086&DEV_3EC2&SUBSYS_3EC21849&REV_07\3&11583659&0&00
+Device Description:         Intel(R) Host Bridge/DRAM Registers - 3EC2
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          INTEL
+Status:                     Started
+Driver Name:                oem22.inf
+
+Instance ID:                USB\VID_27C0&PID_0859&MI_01\7&14bf8c3d&0&0001
+Device Description:         USB Input Device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                ACPI\FixedButton\2&daba3ff&0
+Device Description:         ACPI Fixed Feature Button
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                machine.inf
+
+Instance ID:                USB\VID_2CA3&PID_0020&MI_05\6&3958c552&0&0005
+Device Description:         BULK Interface
+Class Name:                 Unknown
+Class GUID:                 Unknown
+Manufacturer Name:          Unknown
+Status:                     Problem
+Problem Code:               28 (0x1C) [CM_PROB_FAILED_INSTALL]
+Problem Status:             0xC0000490
+
+Instance ID:                USB\VID_1532&PID_0098&MI_02\8&2de0223d&0&0002
+Device Description:         Razer DeathAdder Essential
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          Razer Inc
+Status:                     Started
+Driver Name:                oem15.inf
+
+Instance ID:                ACPI\ACPI000E\2&daba3ff&0
+Device Description:         ACPI Wake Alarm
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                acpitime.inf
+
+Instance ID:                HID\VID_0C45&PID_7603&MI_01&Col02\7&30a54486&0&0001
+Device Description:         HID-compliant system controller
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                USB\VID_05E3&PID_0610\5&17411534&0&8
+Device Description:         Generic USB Hub
+Class Name:                 USB
+Class GUID:                 {36fc9e60-c465-11cf-8056-444553540000}
+Manufacturer Name:          (Standard USB HUBs)
+Status:                     Started
+Driver Name:                usbhub3.inf
+
+Instance ID:                ROOT\SteamStreamingSpeakers\0000
+Device Description:         Steam Streaming Speakers
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Valve Corporation Audio DDK
+Status:                     Started
+Driver Name:                oem39.inf
+
+Instance ID:                PCI\VEN_10DE&DEV_228E&SUBSYS_397D1462&REV_A1\4&25438c51&0&0108
+Device Description:         High Definition Audio Controller
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                hdaudbus.inf
+
+Instance ID:                ACPI\INT33A1\1
+Device Description:         Intel(R) Power Engine Plug-in
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Intel Corporation
+Status:                     Started
+Driver Name:                intelpep.inf
+
+Instance ID:                SWD\WPDBUSENUM\_??_USBSTOR#Disk&Ven_Linux&Prod_File-Stor_Gadget&Rev_0504#7&1aaf8519&0&123456789ABCDEF&1#{53f56307-b6bf-11d0-94f2-00a0c91efb8b}
+Device Description:         E:\
+Class Name:                 WPD
+Class GUID:                 {eec5ad98-8080-425f-922a-dabf3de3f69a}
+Manufacturer Name:          Linux   
+Status:                     Started
+Driver Name:                wpdfs.inf
+
+Instance ID:                ROOT\storvsp\0000
+Device Description:         Microsoft Hyper-V Virtual Disk Server
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                wstorvsp.inf
+
+Instance ID:                ACPI\PNP0C02\IoTraps
+Device Description:         Motherboard resources
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                BTHLEDevice\{00001801-0000-1000-8000-00805f9b34fb}_14c14e9687da\8&1a1b2d1&0&0001
+Device Description:         Generic Attribute Profile
+Class Name:                 Bluetooth
+Class GUID:                 {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                bthleenum.inf
+
+Instance ID:                ROOT\UNNAMED_DEVICE\0000
+Device Description:         NVIDIA Virtual Audio Device (Wave Extensible) (WDM)
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          NVIDIA
+Status:                     Started
+Driver Name:                oem30.inf
+
+Instance ID:                SWD\MMDEVAPI\{0.0.1.00000000}.{9d420399-0af5-418c-ac97-b19948a5f004}
+Device Description:         Microphone (PD400X Podcast Microphone)
+Class Name:                 AudioEndpoint
+Class GUID:                 {c166523c-fe0c-4a94-a586-f1a80cfbbf3e}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                audioendpoint.inf
+
+Instance ID:                SWD\MMDEVAPI\MicrosoftGSWavetableSynth
+Device Description:         Microsoft GS Wavetable Synth
+Class Name:                 SoftwareDevice
+Class GUID:                 {62f9c741-b25a-46ce-b54c-9bccce08b6f2}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                c_swdevice.inf
+
+Instance ID:                SWD\MMDEVAPI\{0.0.1.00000000}.{4e71b77a-3028-4087-b72a-f8d389d43cef}
+Device Description:         Microphone (Camo)
+Class Name:                 AudioEndpoint
+Class GUID:                 {c166523c-fe0c-4a94-a586-f1a80cfbbf3e}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                audioendpoint.inf
+
+Instance ID:                DISPLAY\MSI1462\5&36892268&0&UID4354
+Device Description:         Generic Monitor (Optix MAG27CQ)
+Class Name:                 Monitor
+Class GUID:                 {4d36e96e-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard monitor types)
+Status:                     Started
+Driver Name:                monitor.inf
+
+Instance ID:                ACPI\PNP0C04\4&108ba7b9&0
+Device Description:         Numeric data processor
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                STORAGE\Volume\{7f0209a5-5faa-11f1-90d1-806e6f6e6963}#0000000001100000
+Device Description:         Volume
+Class Name:                 Volume
+Class GUID:                 {71a27cdd-812a-11d0-bec7-08002be2092f}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                volume.inf
+
+Instance ID:                BTHENUM\{0000110b-0000-1000-8000-00805f9b34fb}_LOCALMFG&0002\7&505db3b&0&14C14E9687DA_C00000000
+Device Description:         Den Display
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                microsoft_bluetooth_a2dp_src.inf
+
+Instance ID:                ACPI\GenuineIntel_-_Intel64_Family_6_Model_158_-_Intel(R)_Core(TM)_i5-9400F_CPU_@_2.90GHz\_1
+Device Description:         Intel(R) Core(TM) i5-9400F CPU @ 2.90GHz
+Class Name:                 Processor
+Class GUID:                 {50127dc3-0f36-415e-a6cc-4cb3be910b65}
+Manufacturer Name:          Intel
+Status:                     Started
+Driver Name:                cpu.inf
+
+Instance ID:                ACPI\GenuineIntel_-_Intel64_Family_6_Model_158_-_Intel(R)_Core(TM)_i5-9400F_CPU_@_2.90GHz\_2
+Device Description:         Intel(R) Core(TM) i5-9400F CPU @ 2.90GHz
+Class Name:                 Processor
+Class GUID:                 {50127dc3-0f36-415e-a6cc-4cb3be910b65}
+Manufacturer Name:          Intel
+Status:                     Started
+Driver Name:                cpu.inf
+
+Instance ID:                ACPI\GenuineIntel_-_Intel64_Family_6_Model_158_-_Intel(R)_Core(TM)_i5-9400F_CPU_@_2.90GHz\_3
+Device Description:         Intel(R) Core(TM) i5-9400F CPU @ 2.90GHz
+Class Name:                 Processor
+Class GUID:                 {50127dc3-0f36-415e-a6cc-4cb3be910b65}
+Manufacturer Name:          Intel
+Status:                     Started
+Driver Name:                cpu.inf
+
+Instance ID:                ACPI\GenuineIntel_-_Intel64_Family_6_Model_158_-_Intel(R)_Core(TM)_i5-9400F_CPU_@_2.90GHz\_4
+Device Description:         Intel(R) Core(TM) i5-9400F CPU @ 2.90GHz
+Class Name:                 Processor
+Class GUID:                 {50127dc3-0f36-415e-a6cc-4cb3be910b65}
+Manufacturer Name:          Intel
+Status:                     Started
+Driver Name:                cpu.inf
+
+Instance ID:                ACPI\GenuineIntel_-_Intel64_Family_6_Model_158_-_Intel(R)_Core(TM)_i5-9400F_CPU_@_2.90GHz\_5
+Device Description:         Intel(R) Core(TM) i5-9400F CPU @ 2.90GHz
+Class Name:                 Processor
+Class GUID:                 {50127dc3-0f36-415e-a6cc-4cb3be910b65}
+Manufacturer Name:          Intel
+Status:                     Started
+Driver Name:                cpu.inf
+
+Instance ID:                ACPI\GenuineIntel_-_Intel64_Family_6_Model_158_-_Intel(R)_Core(TM)_i5-9400F_CPU_@_2.90GHz\_6
+Device Description:         Intel(R) Core(TM) i5-9400F CPU @ 2.90GHz
+Class Name:                 Processor
+Class GUID:                 {50127dc3-0f36-415e-a6cc-4cb3be910b65}
+Manufacturer Name:          Intel
+Status:                     Started
+Driver Name:                cpu.inf
+
+Instance ID:                PCI\VEN_8086&DEV_A360&SUBSYS_A3601849&REV_10\3&11583659&0&B0
+Device Description:         Intel(R) Management Engine Interface #1
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Intel
+Status:                     Started
+Driver Name:                oem2.inf
+
+Instance ID:                ROOT\AMDLOG\0000
+Device Description:         AMD Crash Defender
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Advanced Micro Devices, Inc.
+Status:                     Started
+Driver Name:                oem12.inf
+
+Instance ID:                ROOT\NdisVirtualBus\0000
+Device Description:         NDIS Virtual Network Adapter Enumerator
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                ndisvirtualbus.inf
+
+Instance ID:                HID\VID_1532&PID_0098&MI_02\9&21c9b4a3&0&0000
+Device Description:         HID Keyboard Device
+Class Name:                 Keyboard
+Class GUID:                 {4d36e96b-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard keyboards)
+Status:                     Started
+Driver Name:                keyboard.inf
+
+Instance ID:                HID\VID_27C0&PID_0859&MI_00&Col02\8&38bb91dd&0&0001
+Device Description:         Microsoft Input Configuration Device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                mtconfig.inf
+
+Instance ID:                USB\VID_27C0&PID_0859&MI_02\7&14bf8c3d&0&0002
+Device Description:         USB Input Device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                USB\VID_2DC8&PID_3109\E417D812C385
+Device Description:         USB Input Device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                USB\VID_2CA3&PID_0020&MI_06\6&3958c552&0&0006
+Device Description:         BULK Interface
+Class Name:                 Unknown
+Class GUID:                 Unknown
+Manufacturer Name:          Unknown
+Status:                     Problem
+Problem Code:               28 (0x1C) [CM_PROB_FAILED_INSTALL]
+Problem Status:             0xC0000490
+
+Instance ID:                {8e7bd593-6e6c-4c52-86a6-77175494dd8e}\MsVhdHba\1&3030e83&0&01
+Device Description:         Microsoft VHD Loopback Controller
+Class Name:                 SCSIAdapter
+Class GUID:                 {4d36e97b-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                vhdmp.inf
+
+Instance ID:                USB\VID_1A40&PID_0101\6&3719297&0&4
+Device Description:         Generic USB Hub
+Class Name:                 USB
+Class GUID:                 {36fc9e60-c465-11cf-8056-444553540000}
+Manufacturer Name:          (Standard USB HUBs)
+Status:                     Started
+Driver Name:                usbhub3.inf
+
+Instance ID:                USB\VID_1A40&PID_0801\5&17411534&0&3
+Device Description:         Generic USB Hub
+Class Name:                 USB
+Class GUID:                 {36fc9e60-c465-11cf-8056-444553540000}
+Manufacturer Name:          (Standard USB HUBs)
+Status:                     Started
+Driver Name:                usbhub3.inf
+
+Instance ID:                BTH\MS_RFCOMM\6&5b110cc&0&0
+Device Description:         Bluetooth Device (RFCOMM Protocol TDI)
+Class Name:                 Bluetooth
+Class GUID:                 {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                tdibth.inf
+
+Instance ID:                SWD\DRIVERENUM\AMDOCL&7&11ca139e&0
+Device Description:         AMD-OpenCL User Mode Driver
+Class Name:                 SoftwareComponent
+Class GUID:                 {5c4c3332-344d-483c-8739-259e934c9cc8}
+Manufacturer Name:          Advanced Micro Devices, Inc.
+Status:                     Started
+Driver Name:                oem9.inf
+
+Instance ID:                HDAUDIO\FUNC_01&VEN_1002&DEV_AA01&SUBSYS_00AA0100&REV_1007\7&1bba1e7c&0&0001
+Device Description:         AMD High Definition Audio Device
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Advanced Micro Devices
+Status:                     Started
+Driver Name:                oem18.inf
+
+Instance ID:                USB\VID_352F&PID_0100&MI_03\8&1f0e3de1&0&0003
+Device Description:         USB Input Device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                HID\VID_0C45&PID_7603&MI_01&Col03\7&30a54486&0&0002
+Device Description:         HID-compliant vendor-defined device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                HID\VID_27C0&PID_0859&MI_01\8&14e4541b&0&0000
+Device Description:         HID-compliant vendor-defined device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                HID\VID_0C45&PID_7603&MI_00\7&1d752848&0&0000
+Device Description:         HID Keyboard Device
+Class Name:                 Keyboard
+Class GUID:                 {4d36e96b-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard keyboards)
+Status:                     Started
+Driver Name:                keyboard.inf
+
+Instance ID:                SWD\DRIVERENUM\OEM_ICLS_component&4&32f8be4f&0
+Device Description:         Intel(R) iCLS Client
+Class Name:                 SoftwareComponent
+Class GUID:                 {5c4c3332-344d-483c-8739-259e934c9cc8}
+Manufacturer Name:          Intel
+Status:                     Started
+Driver Name:                oem14.inf
+
+Instance ID:                USB\ROOT_HUB30\4&1506a15e&0&0
+Device Description:         USB Root Hub (USB 3.0)
+Class Name:                 USB
+Class GUID:                 {36fc9e60-c465-11cf-8056-444553540000}
+Manufacturer Name:          (Standard USB HUBs)
+Status:                     Started
+Driver Name:                usbhub3.inf
+
+Instance ID:                SWD\MMDEVAPI\{0.0.1.00000000}.{d8d52cc7-8f60-4bb4-8f3c-ab1eeb4a930c}
+Device Description:         Virtual Mic (Virtual Mic for AudioRelay)
+Class Name:                 AudioEndpoint
+Class GUID:                 {c166523c-fe0c-4a94-a586-f1a80cfbbf3e}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                audioendpoint.inf
+
+Instance ID:                PCI\VEN_8086&DEV_A36D&SUBSYS_A36D1849&REV_10\3&11583659&0&A0
+Device Description:         Intel(R) USB 3.1 eXtensible Host Controller - 1.10 (Microsoft)
+Class Name:                 USB
+Class GUID:                 {36fc9e60-c465-11cf-8056-444553540000}
+Manufacturer Name:          Generic USB xHCI Host Controller
+Status:                     Started
+Driver Name:                usbxhci.inf
+
+Instance ID:                PCI\VEN_8086&DEV_A33A&SUBSYS_A33A1849&REV_F0\3&11583659&0&E0
+Device Description:         Intel(R) PCI Express Root Port #3 - A33A
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          INTEL
+Status:                     Started
+Driver Name:                oem21.inf
+
+Instance ID:                SWD\PRINTENUM\{2B16FE0B-CDEA-44A2-838E-173B6E0FB577}
+Device Description:         Microsoft Print to PDF
+Class Name:                 PrintQueue
+Class GUID:                 {1ed2bbf9-11f0-4084-b21f-ad83a8e6dcdc}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                printqueue.inf
+
+Instance ID:                ROOT\mssmbios\0000
+Device Description:         Microsoft System Management BIOS Driver
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                mssmbios.inf
+
+Instance ID:                PCI\VEN_8086&DEV_A36F&SUBSYS_A36F1849&REV_10\3&11583659&0&A2
+Device Description:         PCI standard RAM Controller
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Stopped
+Driver Name:                machine.inf
+
+Instance ID:                PCI\VEN_8086&DEV_A33C&SUBSYS_A33C1849&REV_F0\3&11583659&0&E4
+Device Description:         Intel(R) PCI Express Root Port #5 - A33C
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          INTEL
+Status:                     Started
+Driver Name:                oem21.inf
+
+Instance ID:                ACPI\PNP0C14\TBFP
+Device Description:         Microsoft Windows Management Interface for ACPI
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                wmiacpi.inf
+
+Instance ID:                STORAGE\Volume\{7f0209a5-5faa-11f1-90d1-806e6f6e6963}#0000000000100000
+Device Description:         Volume
+Class Name:                 Volume
+Class GUID:                 {71a27cdd-812a-11d0-bec7-08002be2092f}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                volume.inf
+
+Instance ID:                USBSTOR\Disk&Ven_Linux&Prod_File-Stor_Gadget&Rev_0504\7&1aaf8519&0&123456789ABCDEF&0
+Device Description:         Linux File-Stor Gadget USB Device
+Class Name:                 DiskDrive
+Class GUID:                 {4d36e967-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard disk drives)
+Status:                     Started
+Driver Name:                disk.inf
+
+Instance ID:                USBSTOR\Disk&Ven_Linux&Prod_File-Stor_Gadget&Rev_0504\7&1aaf8519&0&123456789ABCDEF&1
+Device Description:         Linux File-Stor Gadget USB Device
+Class Name:                 DiskDrive
+Class GUID:                 {4d36e967-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard disk drives)
+Status:                     Started
+Driver Name:                disk.inf
+
+Instance ID:                PCI\VEN_1002&DEV_AB38&SUBSYS_AB381002&REV_00\6&c6a70e9&0&010000E4
+Device Description:         High Definition Audio Bus
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          AMD
+Status:                     Started
+Driver Name:                oem11.inf
+
+Instance ID:                ROOT\SYSTEM\0000
+Device Description:         Plug and Play Software Device Enumerator
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                swenum.inf
+
+Instance ID:                ROOT\SYSTEM\0001
+Device Description:         Nefarius Virtual Gamepad Emulation Bus
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Nefarius Software Solutions e.U.
+Status:                     Started
+Driver Name:                oem37.inf
+
+Instance ID:                STORAGE\Volume\{7f0209a4-5faa-11f1-90d1-806e6f6e6963}#0000000000005000
+Device Description:         Volume
+Class Name:                 Volume
+Class GUID:                 {71a27cdd-812a-11d0-bec7-08002be2092f}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                volume.inf
+
+Instance ID:                ROOT\RDPBUS\0000
+Device Description:         Remote Desktop Device Redirector Bus
+Class Name:                 System
+Class GUID:                 {4d36e97d-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                rdpbus.inf
+
+Instance ID:                SWD\MSRRAS\MS_NDISWANIPV6
+Device Description:         WAN Miniport (IPv6)
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                netrasa.inf
+
+Instance ID:                USB\VID_8087&PID_0A2B\5&17411534&0&9
+Device Description:         Intel(R) Wireless Bluetooth(R)
+Class Name:                 Bluetooth
+Class GUID:                 {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Manufacturer Name:          Intel Corporation
+Status:                     Started
+Driver Name:                oem24.inf
+
+Instance ID:                HID\VID_1532&PID_0098&MI_01&Col05\9&a06285e&0&0004
+Device Description:         HID-compliant device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+Instance ID:                BTHLEDevice\{00001800-0000-1000-8000-00805f9b34fb}_14c14e9687da\8&1a1b2d1&0&0007
+Device Description:         Generic Access Profile
+Class Name:                 Bluetooth
+Class GUID:                 {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                bthleenum.inf
+
+Instance ID:                ROOT\MEDIA\0000
+Device Description:         Maono AI Microphone
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Shenzhen Maono Technology Co., Ltd.
+Status:                     Started
+Driver Name:                oem42.inf
+
+Instance ID:                ROOT\MEDIA\0001
+Device Description:         Virtual Mic for AudioRelay
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Asapha Halifa
+Status:                     Started
+Driver Name:                oem3.inf
+
+Instance ID:                ROOT\MEDIA\0002
+Device Description:         Virtual Speakers for AudioRelay
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Asapha Halifa
+Status:                     Started
+Driver Name:                oem44.inf
+
+Instance ID:                ROOT\MEDIA\0003
+Device Description:         Oculus Virtual Audio Device
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Oculus
+Status:                     Started
+Driver Name:                oem50.inf
+
+Instance ID:                SWD\MMDEVAPI\{0.0.0.00000000}.{311d8205-7bf8-4ef4-a9aa-96c0c7a118c9}
+Device Description:         Speakers (PD400X Podcast Microphone)
+Class Name:                 AudioEndpoint
+Class GUID:                 {c166523c-fe0c-4a94-a586-f1a80cfbbf3e}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                audioendpoint.inf
+
+Instance ID:                HDAUDIO\FUNC_01&VEN_10EC&DEV_0892&SUBSYS_18496893&REV_1003\4&5e23cfb&0&0001
+Device Description:         High Definition Audio Device
+Class Name:                 MEDIA
+Class GUID:                 {4d36e96c-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                hdaudio.inf
+
+Instance ID:                SWD\MSRRAS\MS_L2TPMINIPORT
+Device Description:         WAN Miniport (L2TP)
+Class Name:                 Net
+Class GUID:                 {4d36e972-e325-11ce-bfc1-08002be10318}
+Manufacturer Name:          Microsoft
+Status:                     Started
+Driver Name:                netrasa.inf
+
+Instance ID:                HID\VID_1532&PID_0098&MI_01&Col04\9&a06285e&0&0003
+Device Description:         HID-compliant device
+Class Name:                 HIDClass
+Class GUID:                 {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Manufacturer Name:          (Standard system devices)
+Status:                     Started
+Driver Name:                input.inf
+
+

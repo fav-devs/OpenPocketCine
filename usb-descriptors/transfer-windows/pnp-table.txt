@@ -1,0 +1,13 @@
+
+InstanceId                                    Class FriendlyName                              Status
+----------                                    ----- ------------                              ------
+USB\VID_2CA3&PID_0020&MI_02\6&3958C552&0&0002 USB   USB Mass Storage Device                   OK
+USB\VID_2CA3&PID_0020&MI_07\6&3958C552&0&0007       BULK Interface                            Error
+USB\VID_2CA3&PID_0020&MI_03\6&3958C552&0&0003       BULK Interface                            Error
+USB\VID_2CA3&PID_0020\123456789ABCDEF         USB   USB Composite Device                      OK
+USB\VID_2CA3&PID_0020&MI_04\6&3958C552&0&0004       BULK Interface                            Error
+USB\VID_2CA3&PID_0020&MI_00\6&3958C552&0&0000 Net   Remote NDIS based Internet Sharing Device OK
+USB\VID_2CA3&PID_0020&MI_05\6&3958C552&0&0005       BULK Interface                            Error
+USB\VID_2CA3&PID_0020&MI_06\6&3958C552&0&0006       BULK Interface                            Error
+
+

@@ -1,0 +1,96 @@
+=== USB\VID_2CA3&PID_0020&MI_02\6&3958C552&0&0002
+  name: USB Mass Storage Device
+  class: USB  status: OK
+  DEVPKEY_Device_BusReportedDeviceDesc = Mass Storage
+  DEVPKEY_Device_HardwareIds = USB\VID_2CA3&PID_0020&REV_0504&MI_02 | USB\VID_2CA3&PID_0020&MI_02
+  DEVPKEY_Device_CompatibleIds = USB\COMPAT_VID_2ca3&Class_08&SubClass_06&Prot_50 | USB\COMPAT_VID_2ca3&Class_08&SubClass_06 | USB\COMPAT_VID_2ca3&Class_08 | USB\Class_08&SubClass_06&Prot_50 | USB\Class_08&SubClass_06 | USB\Class_08
+  DEVPKEY_Device_Service = USBSTOR
+  DEVPKEY_Device_DriverDesc = USB Mass Storage Device
+  DEVPKEY_Device_Parent = USB\VID_2CA3&PID_0020\123456789ABCDEF
+  DEVPKEY_Device_Children = USBSTOR\Disk&Ven_Linux&Prod_File-Stor_Gadget&Rev_0504\7&1aaf8519&0&123456789ABCDEF&0 | USBSTOR\Disk&Ven_Linux&Prod_File-Stor_Gadget&Rev_0504\7&1aaf8519&0&123456789ABCDEF&1
+  DEVPKEY_Device_LocationInfo = 0000.0014.0000.005.000.000.000.000.000
+  DEVPKEY_Device_Manufacturer = Compatible USB storage device
+=== USB\VID_2CA3&PID_0020&MI_07\6&3958C552&0&0007
+  name: BULK Interface
+  class:   status: Error
+  DEVPKEY_Device_BusReportedDeviceDesc = BULK Interface
+  DEVPKEY_Device_HardwareIds = USB\VID_2CA3&PID_0020&REV_0504&MI_07 | USB\VID_2CA3&PID_0020&MI_07
+  DEVPKEY_Device_CompatibleIds = USB\COMPAT_VID_2ca3&Class_ff&SubClass_43&Prot_01 | USB\COMPAT_VID_2ca3&Class_ff&SubClass_43 | USB\COMPAT_VID_2ca3&Class_ff | USB\Class_ff&SubClass_43&Prot_01 | USB\Class_ff&SubClass_43 | USB\Class_ff
+  DEVPKEY_Device_Service = 
+  DEVPKEY_Device_DriverDesc = 
+  DEVPKEY_Device_Parent = USB\VID_2CA3&PID_0020\123456789ABCDEF
+  DEVPKEY_Device_Children = 
+  DEVPKEY_Device_LocationInfo = 0000.0014.0000.005.000.000.000.000.000
+  DEVPKEY_Device_Manufacturer = 
+=== USB\VID_2CA3&PID_0020&MI_03\6&3958C552&0&0003
+  name: BULK Interface
+  class:   status: Error
+  DEVPKEY_Device_BusReportedDeviceDesc = BULK Interface
+  DEVPKEY_Device_HardwareIds = USB\VID_2CA3&PID_0020&REV_0504&MI_03 | USB\VID_2CA3&PID_0020&MI_03
+  DEVPKEY_Device_CompatibleIds = USB\COMPAT_VID_2ca3&Class_ff&SubClass_43&Prot_01 | USB\COMPAT_VID_2ca3&Class_ff&SubClass_43 | USB\COMPAT_VID_2ca3&Class_ff | USB\Class_ff&SubClass_43&Prot_01 | USB\Class_ff&SubClass_43 | USB\Class_ff
+  DEVPKEY_Device_Service = 
+  DEVPKEY_Device_DriverDesc = 
+  DEVPKEY_Device_Parent = USB\VID_2CA3&PID_0020\123456789ABCDEF
+  DEVPKEY_Device_Children = 
+  DEVPKEY_Device_LocationInfo = 0000.0014.0000.005.000.000.000.000.000
+  DEVPKEY_Device_Manufacturer = 
+=== USB\VID_2CA3&PID_0020\123456789ABCDEF
+  name: USB Composite Device
+  class: USB  status: OK
+  DEVPKEY_Device_BusReportedDeviceDesc = DJIPocket3
+  DEVPKEY_Device_HardwareIds = USB\VID_2CA3&PID_0020&REV_0504 | USB\VID_2CA3&PID_0020
+  DEVPKEY_Device_CompatibleIds = USB\COMPAT_VID_2CA3&DevClass_00&SubClass_00&Prot00 | USB\COMPAT_VID_2CA3&DevClass_00&SubClass_00 | USB\COMPAT_VID_2CA3&DevClass_00 | USB\DevClass_00&SubClass_00&Prot_00 | USB\DevClass_00&SubClass_00 | USB\DevClass_00 | USB\COMPOSITE
+  DEVPKEY_Device_Service = usbccgp
+  DEVPKEY_Device_DriverDesc = USB Composite Device
+  DEVPKEY_Device_Parent = USB\ROOT_HUB30\4&1506a15e&0&0
+  DEVPKEY_Device_Children = USB\VID_2CA3&PID_0020&MI_00\6&3958c552&0&0000 | USB\VID_2CA3&PID_0020&MI_02\6&3958c552&0&0002 | USB\VID_2CA3&PID_0020&MI_03\6&3958c552&0&0003 | USB\VID_2CA3&PID_0020&MI_04\6&3958c552&0&0004 | USB\VID_2CA3&PID_0020&MI_05\6&3958c552&0&0005 | USB\VID_2CA3&PID_0020&MI_06\6&3958c552&0&0006 | USB\VID_2CA3&PID_0020&MI_07\6&3958c552&0&0007
+  DEVPKEY_Device_LocationInfo = Port_#0005.Hub_#0001
+  DEVPKEY_Device_Manufacturer = (Standard USB Host Controller)
+=== USB\VID_2CA3&PID_0020&MI_04\6&3958C552&0&0004
+  name: BULK Interface
+  class:   status: Error
+  DEVPKEY_Device_BusReportedDeviceDesc = BULK Interface
+  DEVPKEY_Device_HardwareIds = USB\VID_2CA3&PID_0020&REV_0504&MI_04 | USB\VID_2CA3&PID_0020&MI_04
+  DEVPKEY_Device_CompatibleIds = USB\COMPAT_VID_2ca3&Class_ff&SubClass_43&Prot_01 | USB\COMPAT_VID_2ca3&Class_ff&SubClass_43 | USB\COMPAT_VID_2ca3&Class_ff | USB\Class_ff&SubClass_43&Prot_01 | USB\Class_ff&SubClass_43 | USB\Class_ff
+  DEVPKEY_Device_Service = 
+  DEVPKEY_Device_DriverDesc = 
+  DEVPKEY_Device_Parent = USB\VID_2CA3&PID_0020\123456789ABCDEF
+  DEVPKEY_Device_Children = 
+  DEVPKEY_Device_LocationInfo = 0000.0014.0000.005.000.000.000.000.000
+  DEVPKEY_Device_Manufacturer = 
+=== USB\VID_2CA3&PID_0020&MI_00\6&3958C552&0&0000
+  name: Remote NDIS based Internet Sharing Device
+  class: Net  status: OK
+  DEVPKEY_Device_BusReportedDeviceDesc = RNDIS
+  DEVPKEY_Device_HardwareIds = USB\VID_2CA3&PID_0020&REV_0504&MI_00 | USB\VID_2CA3&PID_0020&MI_00
+  DEVPKEY_Device_CompatibleIds = USB\COMPAT_VID_2ca3&Class_e0&SubClass_01&Prot_03 | USB\COMPAT_VID_2ca3&Class_e0&SubClass_01 | USB\COMPAT_VID_2ca3&Class_e0 | USB\Class_e0&SubClass_01&Prot_03 | USB\Class_e0&SubClass_01 | USB\Class_e0
+  DEVPKEY_Device_Service = usbrndis6
+  DEVPKEY_Device_DriverDesc = Remote NDIS based Internet Sharing Device
+  DEVPKEY_Device_Parent = USB\VID_2CA3&PID_0020\123456789ABCDEF
+  DEVPKEY_Device_Children = 
+  DEVPKEY_Device_LocationInfo = 0000.0014.0000.005.000.000.000.000.000
+  DEVPKEY_Device_Manufacturer = Microsoft
+=== USB\VID_2CA3&PID_0020&MI_05\6&3958C552&0&0005
+  name: BULK Interface
+  class:   status: Error
+  DEVPKEY_Device_BusReportedDeviceDesc = BULK Interface
+  DEVPKEY_Device_HardwareIds = USB\VID_2CA3&PID_0020&REV_0504&MI_05 | USB\VID_2CA3&PID_0020&MI_05
+  DEVPKEY_Device_CompatibleIds = USB\COMPAT_VID_2ca3&Class_ff&SubClass_43&Prot_01 | USB\COMPAT_VID_2ca3&Class_ff&SubClass_43 | USB\COMPAT_VID_2ca3&Class_ff | USB\Class_ff&SubClass_43&Prot_01 | USB\Class_ff&SubClass_43 | USB\Class_ff
+  DEVPKEY_Device_Service = 
+  DEVPKEY_Device_DriverDesc = 
+  DEVPKEY_Device_Parent = USB\VID_2CA3&PID_0020\123456789ABCDEF
+  DEVPKEY_Device_Children = 
+  DEVPKEY_Device_LocationInfo = 0000.0014.0000.005.000.000.000.000.000
+  DEVPKEY_Device_Manufacturer = 
+=== USB\VID_2CA3&PID_0020&MI_06\6&3958C552&0&0006
+  name: BULK Interface
+  class:   status: Error
+  DEVPKEY_Device_BusReportedDeviceDesc = BULK Interface
+  DEVPKEY_Device_HardwareIds = USB\VID_2CA3&PID_0020&REV_0504&MI_06 | USB\VID_2CA3&PID_0020&MI_06
+  DEVPKEY_Device_CompatibleIds = USB\COMPAT_VID_2ca3&Class_ff&SubClass_43&Prot_01 | USB\COMPAT_VID_2ca3&Class_ff&SubClass_43 | USB\COMPAT_VID_2ca3&Class_ff | USB\Class_ff&SubClass_43&Prot_01 | USB\Class_ff&SubClass_43 | USB\Class_ff
+  DEVPKEY_Device_Service = 
+  DEVPKEY_Device_DriverDesc = 
+  DEVPKEY_Device_Parent = USB\VID_2CA3&PID_0020\123456789ABCDEF
+  DEVPKEY_Device_Children = 
+  DEVPKEY_Device_LocationInfo = 0000.0014.0000.005.000.000.000.000.000
+  DEVPKEY_Device_Manufacturer = 

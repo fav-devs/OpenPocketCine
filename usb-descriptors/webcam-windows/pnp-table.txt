@@ -1,0 +1,8 @@
+
+InstanceId                                   Class  FriendlyName         Status
+----------                                   -----  ------------         ------
+USB\VID_2CA3&PID_0023&MI_02\6&1F53923&0&0002 MEDIA  OsmoPocket3          OK
+USB\VID_2CA3&PID_0023&MI_00\6&1F53923&0&0000 Camera OsmoPocket3          OK
+USB\VID_2CA3&PID_0023\123456789ABCDEF        USB    USB Composite Device OK
+
+

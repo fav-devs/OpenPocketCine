@@ -1,0 +1,17 @@
+
+PNPDeviceID : USB\VID_2CA3&PID_0023&MI_02\6&1F53923&0&0002
+Name        : OsmoPocket3
+Service     : usbaudio
+Status      : OK
+
+PNPDeviceID : USB\VID_2CA3&PID_0023&MI_00\6&1F53923&0&0000
+Name        : OsmoPocket3
+Service     : usbvideo
+Status      : OK
+
+PNPDeviceID : USB\VID_2CA3&PID_0023\123456789ABCDEF
+Name        : USB Composite Device
+Service     : usbccgp
+Status      : OK
+
+
