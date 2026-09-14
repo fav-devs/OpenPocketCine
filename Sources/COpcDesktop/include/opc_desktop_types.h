@@ -219,6 +219,10 @@ typedef struct {
 #define OPC_CAM_TAP_FOCUS_POINT 75
 #define OPC_CAM_TAP_FOCUS_HINT 76
 #define OPC_CAM_TAP_FOCUS_COMMIT 77
+/* Audio DSP: GET 0x02/0xA0; wind / directional patch @2 of the GET blob and SET 0x9F. */
+#define OPC_CAM_AUDIO_DSP_GET 78
+#define OPC_CAM_AUDIO_WIND 79
+#define OPC_CAM_AUDIO_DIRECTIONAL 80
 
 /* False-colour scales for opc_false_color_cube / opc_false_color_legend. */
 #define OPC_FALSE_COLOR_STOPS 0
@@ -383,6 +387,13 @@ typedef struct {
     int32_t available_format_resolution[OPC_STATUS_LIST_CAP];
     int32_t available_format_frame_rate[OPC_STATUS_LIST_CAP];
     int32_t available_color[OPC_STATUS_LIST_CAP];
+    /// Audio DSP `@2` as the core reads it: wind (`0x18` off / `0x1A` on) and
+    /// directional (`0xDA` all / `0x3A` front / `0xBA` front+back), -1 unknown. The
+    /// blob itself is the 26 bytes a `0x02/0x9F` SET must carry back patched.
+    int32_t wind_nr;
+    int32_t directional_audio;
+    int32_t audio_dsp_blob_count;
+    int32_t audio_dsp_blob[OPC_STATUS_LIST_CAP];
 } OpcCameraStatus;
 
 #endif

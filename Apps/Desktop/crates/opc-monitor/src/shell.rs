@@ -872,6 +872,9 @@ impl Shell {
         } else {
             Some(kind)
         };
+        if self.sheet == Some(SheetKind::Settings) && self.sheet_tab == 1 {
+            self.ask_audio_dsp();
+        }
         self.chrome_stale = true;
     }
 
@@ -983,6 +986,10 @@ impl Shell {
             Pick::GuideMask(on) => {
                 self.assists.guides.mask = on;
                 Vec::new()
+            }
+            Pick::Wind(on) => self.audio_dsp_write(|blob| Command::AudioWind { on, blob }),
+            Pick::Directional(mode) => {
+                self.audio_dsp_write(|blob| Command::AudioDirectional { mode, blob })
             }
             Pick::Timecode(on) => {
                 self.prefs.timecode = on;
@@ -1415,6 +1422,29 @@ impl Shell {
         self.tracking.is_some()
     }
 
+    /// A wind or directional write: the body's own blob patched and sent back, then
+    /// read again so the chips show what took. Without the blob, only the read goes.
+    fn audio_dsp_write(
+        &mut self,
+        make: impl FnOnce([u8; opc_camera::AUDIO_DSP_BLOB]) -> Command,
+    ) -> Vec<Intent> {
+        match self.hud.status.audio_dsp_blob {
+            Some(blob) => vec![Intent::Send(make(blob)), Intent::Send(Command::AudioDspGet)],
+            None => {
+                self.set_notice("READING THE AUDIO DSP FIRST");
+                vec![Intent::Send(Command::AudioDspGet)]
+            }
+        }
+    }
+
+    /// The Audio tab needs the DSP blob before wind and directional can be set.
+    fn ask_audio_dsp(&mut self) {
+        if self.hud.status.audio_dsp_blob.is_none() && self.hud.phase == Phase::Live {
+            self.chrome_pending_intents
+                .push(Intent::Send(Command::AudioDspGet));
+        }
+    }
+
     /// A finger touched, moved, or left the screen.
     ///
     /// A touchscreen does not synthesise mouse clicks once the window is registered for
@@ -1566,6 +1596,9 @@ impl Shell {
                 ChromeIntent::SheetClose => self.close_sheet(),
                 ChromeIntent::SheetTab(tab) => {
                     self.sheet_tab = tab;
+                    if self.sheet == Some(SheetKind::Settings) && tab == 1 {
+                        self.ask_audio_dsp();
+                    }
                     self.chrome_stale = true;
                 }
                 ChromeIntent::SheetPick { row, option } => {

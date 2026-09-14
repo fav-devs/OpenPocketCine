@@ -25,7 +25,8 @@ All notable changes to this project are documented here. The format is based on
   and the zoom ruler carries the body's own stops with the D-Log2 hop. A
   click on the picture is Mimo's tap-to-focus burst, a drag is a tracking
   box polled until the body locks or lets go, and the Camera tab has the
-  focus-track mode. Unqualified on a physical body.
+  focus-track mode. Wind noise reduction and directional audio read the
+  body's DSP blob and send it back patched. Unqualified on a physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

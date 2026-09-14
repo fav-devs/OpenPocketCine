@@ -129,6 +129,9 @@ pub enum Pick {
     /// Toggle one frame; several may be on.
     GuideAspect(GuideAspect),
     GuideMask(bool),
+    /// Wind noise reduction and directional audio: the body's DSP blob, patched.
+    Wind(bool),
+    Directional(u8),
     /// A chip that is shown but does nothing here yet.
     Nothing,
 }
@@ -689,7 +692,7 @@ fn settings(tab: usize, context: Context) -> Built {
     let tab = tab.min(SETTINGS_TABS.len() - 1);
     let rows = match tab {
         0 => camera_rows(context),
-        1 => audio_rows(context.prefs),
+        1 => audio_rows(context),
         _ => assist_rows(context),
     };
     assemble("SETTINGS", &SETTINGS_TABS, tab, rows)
@@ -808,7 +811,12 @@ fn camera_rows(context: Context) -> Vec<RowBuilder> {
     ]
 }
 
-fn audio_rows(prefs: Prefs) -> Vec<RowBuilder> {
+/// Directional audio `@2` on the wire and the phones' labels.
+const DIRECTIONAL_AUDIO: [(u8, &str); 3] = [(0xDA, "All"), (0x3A, "Front"), (0xBA, "Front+back")];
+
+fn audio_rows(context: Context) -> Vec<RowBuilder> {
+    let prefs = context.prefs;
+    let status = context.status;
     let channel = RowBuilder::new("Channel")
         .option(
             "Stereo",
@@ -828,17 +836,23 @@ fn audio_rows(prefs: Prefs) -> Vec<RowBuilder> {
     let vocal = RowBuilder::new("Vocal boost")
         .option("Off", prefs.vocal_boost == 0x00, Pick::VocalBoost(0x00))
         .option("On", prefs.vocal_boost == 0x01, Pick::VocalBoost(0x01));
-    // Wind and directional audio share one DSP blob the body must be read for first;
-    // the desktop cannot read it yet, so these are shown for parity and greyed.
+    // Wind and directional audio share one DSP blob (`@2`) the body is read for
+    // first; a write carries that blob back patched. Until the GET has answered the
+    // rows are greyed, and the shell asks for it when this tab opens.
+    let have_blob = status.audio_dsp_blob.is_some();
+    let wind_on = status.wind_nr == Some(0x1A);
     let wind = RowBuilder::new("Wind noise reduction")
-        .option("Off", false, Pick::Nothing)
-        .option("On", false, Pick::Nothing)
-        .enabled(false);
-    let directional = RowBuilder::new("Directional audio")
-        .option("All", false, Pick::Nothing)
-        .option("Front", false, Pick::Nothing)
-        .option("Front + back", false, Pick::Nothing)
-        .enabled(false);
+        .option("Off", have_blob && !wind_on, Pick::Wind(false))
+        .option("On", wind_on, Pick::Wind(true))
+        .enabled(have_blob);
+    let mut directional = RowBuilder::new("Directional audio").enabled(have_blob);
+    for (code, label) in DIRECTIONAL_AUDIO {
+        directional = directional.option(
+            label,
+            status.directional_audio == Some(code),
+            Pick::Directional(code),
+        );
+    }
     vec![channel, vocal, wind, directional]
 }
 
@@ -938,6 +952,34 @@ mod tests {
     }
 
     static PROGRAM: std::sync::OnceLock<Program> = std::sync::OnceLock::new();
+
+    #[test]
+    fn wind_and_directional_wait_for_the_dsp_blob_and_then_patch_it() {
+        let mut status = Status::default();
+        let built = build(SheetKind::Settings, 1, context(&status));
+        let titles: Vec<&str> = built.sheet.rows.iter().map(|r| r.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            [
+                "Channel",
+                "Vocal boost",
+                "Wind noise reduction",
+                "Directional audio"
+            ]
+        );
+        assert!(!built.sheet.rows[2].enabled, "no blob yet");
+        assert!(!built.sheet.rows[3].enabled);
+
+        status.audio_dsp_blob = Some([7; 26]);
+        status.wind_nr = Some(0x1A);
+        status.directional_audio = Some(0x3A);
+        let built = build(SheetKind::Settings, 1, context(&status));
+        assert!(built.sheet.rows[2].enabled);
+        assert_eq!(built.sheet.rows[2].selected, Some(1), "wind on");
+        assert_eq!(built.sheet.rows[3].selected, Some(1), "front");
+        assert_eq!(built.pick(2, 0), Some(&Pick::Wind(false)));
+        assert_eq!(built.pick(3, 2), Some(&Pick::Directional(0xBA)));
+    }
 
     #[test]
     fn the_moves_sheet_offers_points_legs_and_a_take() {

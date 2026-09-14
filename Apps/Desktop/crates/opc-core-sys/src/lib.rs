@@ -258,6 +258,10 @@ pub const OPC_CAM_TAP_FOCUS_PREPARE: i32 = 74;
 pub const OPC_CAM_TAP_FOCUS_POINT: i32 = 75;
 pub const OPC_CAM_TAP_FOCUS_HINT: i32 = 76;
 pub const OPC_CAM_TAP_FOCUS_COMMIT: i32 = 77;
+/// Audio DSP: GET the blob; wind and directional patch `@2` of it and SET it back.
+pub const OPC_CAM_AUDIO_DSP_GET: i32 = 78;
+pub const OPC_CAM_AUDIO_WIND: i32 = 79;
+pub const OPC_CAM_AUDIO_DIRECTIONAL: i32 = 80;
 /// A `0x02/0xA5` tracking poll reply, as `opc_tracking_poll` reads it.
 pub const OPC_TRACKING_UNKNOWN: i32 = -1;
 pub const OPC_TRACKING_IDLE: i32 = 0;
@@ -338,6 +342,10 @@ pub struct OpcCameraStatus {
     pub available_format_resolution: [i32; OPC_STATUS_LIST_CAP],
     pub available_format_frame_rate: [i32; OPC_STATUS_LIST_CAP],
     pub available_color: [i32; OPC_STATUS_LIST_CAP],
+    pub wind_nr: i32,
+    pub directional_audio: i32,
+    pub audio_dsp_blob_count: i32,
+    pub audio_dsp_blob: [i32; OPC_STATUS_LIST_CAP],
 }
 
 impl Default for OpcCameraStatus {
@@ -830,7 +838,8 @@ mod layout {
     #[test]
     fn the_status_record_matches_the_header_file() {
         assert_eq!(OPC_STATUS_LIST_CAP, 32);
-        assert_eq!(size_of::<OpcCameraStatus>(), 784);
+        assert_eq!(size_of::<OpcCameraStatus>(), 924);
+        assert_eq!(offset_of!(OpcCameraStatus, wind_nr), 784);
         assert_eq!(offset_of!(OpcCameraStatus, gimbal_yaw_tenth), 128);
         assert_eq!(offset_of!(OpcCameraStatus, available_shutter), 144);
         assert_eq!(

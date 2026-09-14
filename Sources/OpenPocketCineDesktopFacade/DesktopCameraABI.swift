@@ -27,6 +27,13 @@ private struct Arguments {
     func byte(_ index: Int) -> UInt8 { UInt8(clamping: int(index)) }
     func real(_ index: Int) -> Double { index < reals.count ? reals[index] : 0 }
     func float(_ index: Int) -> Float { Float(real(index)) }
+
+    /// The 26-byte audio DSP blob from `start`, or nil when it is not all there.
+    func dspBlob(from start: Int) -> [UInt8]? {
+        let end = start + AudioDspBlob.size
+        guard ints.count >= end else { return nil }
+        return ints[start..<end].map { UInt8(clamping: $0) }
+    }
 }
 
 /// Builds one command as an encoded DUML frame.
@@ -216,6 +223,18 @@ private func cameraFrame(kind: Int32, seq: UInt16, arguments: Arguments) -> Duml
         return Commands.tapFocusLiveHint(seq: seq)
     case OPC_CAM_TAP_FOCUS_COMMIT:
         return Commands.tapFocusCommit(arguments.float(0), arguments.float(1), seq: seq)
+    case OPC_CAM_AUDIO_DSP_GET:
+        return Commands.audioDspGet(seq: seq)
+    case OPC_CAM_AUDIO_WIND:
+        // ints: [on, blob…]. The blob is the body's own GET reply; only `@2` changes.
+        guard let blob = arguments.dspBlob(from: 1) else { return nil }
+        let wind: WindNoiseReduction = arguments.int(0) != 0 ? .on : .off
+        return Commands.audioDspSet(AudioDspBlob.patchWind(blob, wind), seq: seq)
+    case OPC_CAM_AUDIO_DIRECTIONAL:
+        guard let blob = arguments.dspBlob(from: 1),
+            let mode = DirectionalAudio(rawValue: arguments.byte(0))
+        else { return nil }
+        return Commands.audioDspSet(AudioDspBlob.patchDirectional(blob, mode), seq: seq)
 
     default:
         return nil

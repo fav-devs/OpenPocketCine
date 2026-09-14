@@ -55,9 +55,12 @@ Three sheets open over the picture and close on `Esc`, the `×`, or a tap outsid
 - **Settings** (`⋮`, or `Tab`) — three tabs. **Camera:** focus mode, focus-track mode (Default / Product Showcase / Subject Lock / Registered Priority), white balance
   presets, colour profile (from the body's own list), field of view, gimbal mode,
   speed and **ramp** (Off / Soft / Medium, the phones' first-order ease on the stick,
-  applied to the arrow keys and the on-screen pad alike). **Audio:** channel and vocal
-  boost; wind and directional audio are shown greyed because they live in a DSP blob
-  the desktop cannot read yet. **Assist:** thirds grid, overexposure alert (zebra),
+  applied to the arrow keys and the on-screen pad alike). **Audio:** channel, vocal
+  boost, wind noise reduction and directional audio (All / Front / Front+back). The
+  last two live in one DSP blob (`@2` of the `0x02/0xA0` GET reply): the tab reads
+  the blob when it opens, the rows stay greyed until it has answered, and a pick
+  sends the body's own 26 bytes back with `@2` patched (`0x02/0x9F`) followed by a
+  fresh read, so the chips show what took rather than what was asked. **Assist:** thirds grid, overexposure alert (zebra),
   focus peaking, the **LUT** row (Off, the core's official Rec.709 cubes, then every
   `.cube` the operator dropped into the LUT folder the row names), mirror, the timecode
   in the top bar, and the `T` countdown length (3, 5 or 10 s).

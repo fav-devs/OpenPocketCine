@@ -78,6 +78,19 @@ pub enum Command {
         x: f32,
         y: f32,
     },
+    /// `0x02/0xA0`: read the audio DSP blob. Wind and directional need it first.
+    AudioDspGet,
+    /// `0x02/0x9F`: the body's own blob with `@2` patched for wind noise reduction.
+    AudioWind {
+        on: bool,
+        blob: [u8; crate::status::AUDIO_DSP_BLOB],
+    },
+    /// `0x02/0x9F`: the blob with `@2` patched for directional audio (`0xDA` all,
+    /// `0x3A` front, `0xBA` front+back).
+    AudioDirectional {
+        mode: u8,
+        blob: [u8; crate::status::AUDIO_DSP_BLOB],
+    },
 
     // Exposure and look.
     SetIsoIndex(u8),
@@ -235,6 +248,21 @@ impl Command {
                 vec![f64::from(x), f64::from(y)],
             ),
             Self::TapFocusHint => (sys::OPC_CAM_TAP_FOCUS_HINT, vec![], vec![]),
+            Self::AudioDspGet => (sys::OPC_CAM_AUDIO_DSP_GET, vec![], vec![]),
+            Self::AudioWind { on, blob } => (
+                sys::OPC_CAM_AUDIO_WIND,
+                std::iter::once(i32::from(on))
+                    .chain(blob.iter().map(|byte| i32::from(*byte)))
+                    .collect(),
+                vec![],
+            ),
+            Self::AudioDirectional { mode, blob } => (
+                sys::OPC_CAM_AUDIO_DIRECTIONAL,
+                std::iter::once(i32::from(mode))
+                    .chain(blob.iter().map(|byte| i32::from(*byte)))
+                    .collect(),
+                vec![],
+            ),
             Self::TapFocusCommit { x, y } => (
                 sys::OPC_CAM_TAP_FOCUS_COMMIT,
                 vec![],

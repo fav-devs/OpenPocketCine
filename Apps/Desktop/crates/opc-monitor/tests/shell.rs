@@ -179,6 +179,62 @@ fn a_click_focuses_where_it_landed_and_leaves_tracking_alone() {
 }
 
 #[test]
+fn wind_noise_reduction_carries_the_bodys_own_blob_back_patched() {
+    use opc_monitor::sheets::Pick;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    // Before the GET has answered, a pick can only ask for the blob.
+    assert_eq!(
+        sent(&shell.pick_for_test(Pick::Wind(true))),
+        [Command::AudioDspGet]
+    );
+    assert_eq!(shell.notice(0.1), "READING THE AUDIO DSP FIRST");
+    let blob = [3u8; 26];
+    shell.set_status(Status {
+        audio_dsp_blob: Some(blob),
+        wind_nr: Some(0x18),
+        ..Status::default()
+    });
+    assert_eq!(
+        sent(&shell.pick_for_test(Pick::Wind(true))),
+        [Command::AudioWind { on: true, blob }, Command::AudioDspGet],
+        "the write, then a read so the chips show what took"
+    );
+    assert_eq!(
+        sent(&shell.pick_for_test(Pick::Directional(0xBA))),
+        [
+            Command::AudioDirectional { mode: 0xBA, blob },
+            Command::AudioDspGet
+        ]
+    );
+}
+
+#[test]
+fn opening_the_audio_tab_reads_the_dsp_blob_once() {
+    use opc_monitor::sheets::SheetKind;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    shell.toggle_sheet(SheetKind::Settings);
+    assert!(
+        shell.tick(0.0).is_empty(),
+        "the camera tab asks for nothing"
+    );
+    shell.chrome(0.0);
+    // The AUDIO tab, second of three, centred in the sheet header at 1280 wide.
+    let (x, y) = (640.0, 56.0 + 16.0 + 30.0);
+    shell.control_down(x, y, 0.0);
+    shell.control_up(x, y, 0.0);
+    assert_eq!(sent(&shell.tick(0.1)), [Command::AudioDspGet]);
+    shell.set_status(Status {
+        audio_dsp_blob: Some([0; 26]),
+        ..Status::default()
+    });
+    shell.toggle_sheet(SheetKind::Settings);
+    shell.toggle_sheet(SheetKind::Settings);
+    assert!(shell.tick(0.2).is_empty(), "already read");
+}
+
+#[test]
 fn a_click_on_a_mirrored_picture_focuses_on_the_same_thing() {
     let mut shell = framed();
     shell.press(Key::Char('m'), 0.0);
