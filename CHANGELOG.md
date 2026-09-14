@@ -39,7 +39,10 @@ All notable changes to this project are documented here. The format is based on
   delete and folds bursts under their first frame; the player gains the
   conform chip (the core's `ConformPreview` targets and speed) and Auto LUT
   from the original's `moov` tail through `ClipColorProfile` and
-  `OfficialDJILUT.auto`. Unqualified on a physical body.
+  `OfficialDJILUT.auto`. The System tab gains a virtual camera: the graded
+  picture, clean or as shown, into a `v4l2loopback` device on Linux or a
+  loopback MJPEG stream OBS's Virtual Camera carries anywhere (`opc-vcam`).
+  Unqualified on a physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

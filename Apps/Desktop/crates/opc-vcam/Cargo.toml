@@ -1,0 +1,16 @@
+[package]
+name = "opc-vcam"
+description = "The viewfinder as a camera for other apps: a v4l2loopback device on Linux, and a loopback MJPEG stream OBS turns into a virtual camera anywhere."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+jpeg-encoder = "0.7"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[lints]
+workspace = true

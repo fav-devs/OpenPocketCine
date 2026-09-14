@@ -1530,3 +1530,42 @@ fn select_mode_deletes_the_checked_tiles_with_one_command_each() {
     assert!(shell.library().files.is_empty());
     assert!(!shell.library().selecting);
 }
+
+// ── Virtual camera ───────────────────────────────────────────────────────────
+
+#[test]
+fn the_system_tab_picks_the_virtual_camera_and_what_it_carries() {
+    use opc_monitor::sheets::Pick;
+    use opc_vcam::Backend;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    assert_eq!(shell.vcam_backend(), None, "off until asked");
+    assert!(shell.pick_for_test(Pick::Vcam(1)).is_empty());
+    assert_eq!(shell.vcam_backend(), Some(Backend::Device));
+    shell.pick_for_test(Pick::Vcam(2));
+    assert_eq!(
+        shell.vcam_backend(),
+        Some(Backend::Stream {
+            port: opc_vcam::DEFAULT_PORT
+        })
+    );
+    assert_eq!(shell.prefs().vcam, 2);
+
+    // Clean drops the diagnostic assists but keeps the look; As shown keeps them.
+    shell.press(Key::Char('z'), 0.0);
+    assert!(shell.grade_options().zebra.is_some());
+    assert!(shell.vcam_grade_options().zebra.is_none());
+    shell.pick_for_test(Pick::VcamClean(false));
+    assert!(shell.vcam_grade_options().zebra.is_some());
+
+    shell.set_vcam_status("Stream · http://127.0.0.1:8890/stream · 30 frames");
+    assert!(shell.setup().vcam.contains("30 frames"));
+    shell.pick_for_test(Pick::Vcam(9));
+    assert_eq!(
+        shell.vcam_backend(),
+        Some(Backend::Stream {
+            port: opc_vcam::DEFAULT_PORT
+        }),
+        "an unknown mode clamps to the stream, never off by surprise"
+    );
+}

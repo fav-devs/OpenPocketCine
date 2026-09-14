@@ -27,6 +27,7 @@ bottom says what the body is set to, and the keyboard drives it.
 | Sheets | `Tab` settings, `E` exposure, the format chip | `opc-monitor/sheets.rs` |
 | SET mailbox | Latest-wins per opcode, 300 ms retransmit, 2 s settle, FORMAT pin | `opc-camera/mailbox.rs`, the core's `CameraSetMailbox` |
 | Library | `G`, then the grid; Select mode with a batch delete; bursts folded under their first frame with Expand / Fold; `Space` and `Esc` in the player; the conform chip cycles the core's `ConformPreview` targets; Auto LUT from the original's `moov` tail | `opc-monitor/library.rs`, `media.rs`, `luts.rs`, `opc-media` |
+| Virtual camera | System tab: Off / Camera device (`v4l2loopback`, Linux) / Stream (loopback MJPEG for OBS's Virtual Camera anywhere); Clean or As shown | `opc-vcam`, `view.rs` |
 
 The chrome is a Slint Mimo replica with every button live (`opc-chrome`); the media
 library and player are `opc-media` (paging, HTTP, cache) driven by `opc-monitor/media.rs`.
@@ -183,6 +184,10 @@ thing that was drawn around rather than near it.
    held the laptop, because where the controls should sit is not guessable.
 3. **Scopes over playback.** The plates sample the live picture only; the player's
    frames go through the same renderer, so it is a sampling-hook change, not a port.
+4. **A native camera on macOS and Windows.** The stream through OBS works on both;
+   appearing as a camera without OBS needs a signed CoreMediaIO camera extension
+   (a Swift target inside a signed app bundle) on macOS and a signed Media Foundation
+   or DirectShow driver on Windows — packaging work, not a port.
 
 ## Building it
 

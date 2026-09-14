@@ -490,6 +490,21 @@ impl FeedRenderer {
         self.overlay_opacity = opacity.clamp(0.0, 1.0);
     }
 
+    /// [`render`](Self::render) without the chrome: the picture alone, for a camera
+    /// another app reads.
+    pub fn render_picture(
+        &mut self,
+        picture: &Picture<'_>,
+        display: (u32, u32),
+        options: GradeOptions,
+    ) -> Result<Rgba, RenderError> {
+        let opacity = self.overlay_opacity;
+        self.overlay_opacity = 0.0;
+        let result = self.render(picture, display, options);
+        self.overlay_opacity = opacity;
+        result
+    }
+
     /// Converts, grades, and stretches one picture into an image.
     pub fn render(
         &mut self,

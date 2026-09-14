@@ -11,6 +11,7 @@ use opc_camera::Recovery;
 use opc_chrome::Screen;
 use opc_decode::{Codec, Decoder, OwnedPicture};
 use opc_render::{write_png, FeedRenderer, Lut, Presented};
+use opc_vcam::VirtualCamera;
 
 use crate::media::MediaDriver;
 use opc_monitor::luts;
@@ -75,6 +76,11 @@ struct View {
     media: MediaDriver,
     /// A name for the cache folder: the body's model id, or "camera".
     camera_id: String,
+    /// The viewfinder as a camera for other apps, while the operator has it on.
+    vcam: Option<VirtualCamera>,
+    /// When the camera last took a frame, and when its readout was last refreshed.
+    last_vcam_at: f64,
+    last_vcam_status_at: f64,
 }
 
 impl View {
@@ -411,11 +417,65 @@ impl View {
         }
     }
 
+    /// Starts, stops or swaps the virtual camera to match the setting, and keeps the
+    /// System tab's readout current about once a second.
+    fn reconcile_vcam(&mut self, now: f64) {
+        let wanted = self.shell.vcam_backend();
+        let running = self.vcam.as_ref().map(VirtualCamera::backend);
+        if running != wanted.as_ref() {
+            if let Some(camera) = self.vcam.take() {
+                camera.stop();
+            }
+            self.vcam = wanted.map(VirtualCamera::start);
+            self.last_vcam_status_at = f64::NEG_INFINITY;
+        }
+        if now - self.last_vcam_status_at < 1.0 {
+            return;
+        }
+        self.last_vcam_status_at = now;
+        let line = self
+            .vcam
+            .as_ref()
+            .map_or_else(|| "Off".to_string(), |camera| camera.status().line());
+        self.shell.set_vcam_status(&line);
+    }
+
+    /// Hands the picture to the virtual camera at up to 30 frames a second: the feed
+    /// on the viewfinder, the clip or the still in the player, nothing under the
+    /// library. The chrome is never in it.
+    fn feed_vcam(&mut self, picture: &opc_decode::Picture<'_>, now: f64) {
+        let Some(camera) = self.vcam.as_ref() else {
+            return;
+        };
+        if now - self.last_vcam_at < 1.0 / 30.0 {
+            return;
+        }
+        if self.shell.screen() == Screen::Library {
+            return;
+        }
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        let options = self.shell.vcam_grade_options();
+        match renderer.render_picture(picture, (opc_vcam::WIDTH, opc_vcam::HEIGHT), options) {
+            Ok(image) => {
+                camera.offer(opc_vcam::Frame {
+                    width: image.width,
+                    height: image.height,
+                    rgba: image.pixels,
+                });
+                self.last_vcam_at = now;
+            }
+            Err(error) => eprintln!("virtual camera frame failed: {error}"),
+        }
+    }
+
     fn draw(&mut self) {
         self.pump_camera();
         self.decode();
         let now = self.now();
         self.poll_pad(now);
+        self.reconcile_vcam(now);
         let intents = self.shell.tick(now);
         self.carry_out_quietly(intents, now);
         for command in self.media.tick(&mut self.shell, now) {
@@ -474,6 +534,7 @@ impl View {
             Ok(Presented::Rebuilt) => {}
             Err(error) => eprintln!("present failed: {error}"),
         }
+        self.feed_vcam(&picture, now);
     }
 }
 
@@ -748,6 +809,9 @@ pub fn run(options: Options) -> Result<(), String> {
         pointer: (0.0, 0.0),
         pointer_control: false,
         started: Instant::now(),
+        vcam: None,
+        last_vcam_at: f64::NEG_INFINITY,
+        last_vcam_status_at: f64::NEG_INFINITY,
     };
     view.shell.set_link_info(&format!(
         "Wi-Fi datalink · {}",

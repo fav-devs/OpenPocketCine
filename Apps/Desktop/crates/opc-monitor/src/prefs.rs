@@ -42,6 +42,9 @@ impl Prefs {
         line("show_zoom", self.show_zoom.to_string());
         line("show_pad", self.show_pad.to_string());
         line("show_modes", self.show_modes.to_string());
+        line("vcam", self.vcam.to_string());
+        line("vcam_clean", self.vcam_clean.to_string());
+        line("vcam_port", self.vcam_port.to_string());
         out
     }
 
@@ -77,6 +80,15 @@ impl Prefs {
                 "show_zoom" => prefs.show_zoom = value.parse().unwrap_or(true),
                 "show_pad" => prefs.show_pad = value.parse().unwrap_or(true),
                 "show_modes" => prefs.show_modes = value.parse().unwrap_or(true),
+                "vcam" => prefs.vcam = value.parse().ok().filter(|v| *v <= 2).unwrap_or(0),
+                "vcam_clean" => prefs.vcam_clean = value.parse().unwrap_or(true),
+                "vcam_port" => {
+                    prefs.vcam_port = value
+                        .parse()
+                        .ok()
+                        .filter(|port| *port != 0)
+                        .unwrap_or(opc_vcam::DEFAULT_PORT)
+                }
                 _ => {}
             }
         }
@@ -110,14 +122,20 @@ mod tests {
             countdown_seconds: 10,
             stick_sensitivity: 2,
             show_pad: false,
+            vcam: 2,
+            vcam_clean: false,
+            vcam_port: 9000,
             ..Prefs::default()
         };
         prefs.timecode = true;
         let back = Prefs::from_lines(&prefs.to_lines());
         assert_eq!(back, prefs);
         // A file from before the setup tabs: what it does not say stays default.
-        let older = Prefs::from_lines("ramp=1\nnonsense\nstick_sensitivity=9\n");
+        let older =
+            Prefs::from_lines("ramp=1\nnonsense\nstick_sensitivity=9\nvcam=7\nvcam_port=0\n");
         assert_eq!(older.ramp, 1);
+        assert_eq!(older.vcam, 0, "an unknown camera mode is off");
+        assert_eq!(older.vcam_port, opc_vcam::DEFAULT_PORT, "port 0 is no port");
         assert_eq!(older.stick_sensitivity, 5, "clamped to the phones' range");
         assert!(older.show_zoom);
         assert_eq!(older.countdown_seconds, Prefs::default().countdown_seconds);

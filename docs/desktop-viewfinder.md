@@ -213,6 +213,39 @@ cargo run -p opc-chrome --example snapshot -- <dir>
 
 writes PNGs of the finding, live, recording, failed and wide-window states.
 
+## The viewfinder as a camera
+
+The System tab's **Virtual camera** row hands the graded picture to other apps, so a
+call, a stream or a recorder can take the Pocket as its webcam. It is 1280 × 720,
+letterboxed as the window is, without the chrome, at up to 30 frames a second; the
+**Camera picture** row sends it **Clean** (the LUT stays, zebra / peaking / false colour
+come off) or **As shown**. The feed goes out on the viewfinder and in the player; the
+library sends nothing. The **Camera output** readout says where the frames are going,
+or why they are not.
+
+- **Camera device** (Linux) writes to a `v4l2loopback` device, found by asking every
+  `/dev/video*` for its driver; every app that opens a webcam sees it. Load the module
+  once:
+
+  ```sh
+  sudo modprobe v4l2loopback exclusive_caps=1 card_label=OpenPocketCine
+  ```
+
+  The device takes packed YUYV (BT.601), set with the kernel's own `VIDIOC_S_FMT`; the
+  struct layouts and ioctl numbers are pinned by tests against `<linux/videodev2.h>`.
+  On Windows and macOS this option reports that there is no driver-free way to register
+  a camera from a plain executable and points at the stream.
+- **Stream** serves MJPEG over HTTP on `127.0.0.1` (port 8890 in the settings file,
+  `vcam_port`): `/stream` is a `multipart/x-mixed-replace` body that never ends,
+  `/frame.jpg` the latest frame, `/` a page that shows it. Nothing leaves the machine.
+  In OBS add a **Media Source**, untick Local File, set the input to the URL the
+  System tab shows and the input format to `mjpeg`, then **Start Virtual Camera** —
+  OBS's camera is what Zoom, Teams, Meet and the rest pick up on every platform. VLC,
+  ffmpeg and a browser read the stream directly.
+
+Frames are handed to a worker thread through a latest-wins slot, so a slow consumer
+never holds the window back. The setting persists with the rest.
+
 ## Keys
 
 | | | | |

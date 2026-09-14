@@ -1001,6 +1001,42 @@ impl Shell {
         self.setup.renderer = name.to_string();
     }
 
+    /// What the virtual camera is doing, from the window, for the System tab.
+    pub fn set_vcam_status(&mut self, line: &str) {
+        if self.setup.vcam != line {
+            self.setup.vcam = line.to_string();
+            self.chrome_stale = true;
+        }
+    }
+
+    /// The virtual camera the operator asked for, or `None` while it is off.
+    pub fn vcam_backend(&self) -> Option<opc_vcam::Backend> {
+        match self.prefs.vcam {
+            1 => Some(opc_vcam::Backend::Device),
+            2 => Some(opc_vcam::Backend::Stream {
+                port: self.prefs.vcam_port,
+            }),
+            _ => None,
+        }
+    }
+
+    /// The grade the virtual camera carries: the picture as shown, or without the
+    /// diagnostic assists when the operator asked for it clean. The LUT is the look and
+    /// stays either way.
+    pub fn vcam_grade_options(&self) -> GradeOptions {
+        let options = self.grade_options();
+        if self.prefs.vcam_clean {
+            GradeOptions {
+                zebra: None,
+                peaking: None,
+                false_color: false,
+                ..options
+            }
+        } else {
+            options
+        }
+    }
+
     /// What the watchdog last did, for the Link tab.
     pub fn note_recovery(&mut self, what: &str) {
         self.setup.recovery = what.to_string();
@@ -1621,6 +1657,14 @@ impl Shell {
             }
             Pick::ClearCache => vec![Intent::Media(MediaAction::ClearCache)],
             Pick::Diagnostics => vec![Intent::Diagnostics],
+            Pick::Vcam(mode) => {
+                self.prefs.vcam = mode.min(2);
+                Vec::new()
+            }
+            Pick::VcamClean(clean) => {
+                self.prefs.vcam_clean = clean;
+                Vec::new()
+            }
             Pick::Wind(on) => self.audio_dsp_write(|blob| Command::AudioWind { on, blob }),
             Pick::Directional(mode) => {
                 self.audio_dsp_write(|blob| Command::AudioDirectional { mode, blob })

@@ -72,6 +72,13 @@ pub struct Prefs {
     pub show_zoom: bool,
     pub show_pad: bool,
     pub show_modes: bool,
+    /// The viewfinder as a camera for other apps: 0 off, 1 a camera device, 2 the
+    /// loopback MJPEG stream.
+    pub vcam: u8,
+    /// Send the picture without zebra, peaking or false colour on it.
+    pub vcam_clean: bool,
+    /// The stream's port on 127.0.0.1.
+    pub vcam_port: u16,
 }
 
 /// A part of the chrome the Display tab can hide.
@@ -143,6 +150,8 @@ pub struct SetupInfo {
     pub renderer: String,
     /// DISP 1 (chrome shown) or DISP 2 (clean).
     pub chrome_visible: bool,
+    /// What the virtual camera is doing: "Off", where it writes, or why it cannot.
+    pub vcam: String,
 }
 
 impl Prefs {
@@ -173,6 +182,9 @@ impl Default for Prefs {
             show_zoom: true,
             show_pad: true,
             show_modes: true,
+            vcam: 0,
+            vcam_clean: true,
+            vcam_port: opc_vcam::DEFAULT_PORT,
         }
     }
 }
@@ -248,6 +260,10 @@ pub enum Pick {
     ShowPart(Part, bool),
     ClearCache,
     Diagnostics,
+    /// The virtual camera: 0 off, 1 device, 2 stream.
+    Vcam(u8),
+    /// The camera carries the clean picture (true) or the assists too.
+    VcamClean(bool),
     /// A chip that is shown but does nothing here yet.
     Nothing,
 }
@@ -1180,10 +1196,31 @@ fn storage_rows(context: Context) -> Vec<RowBuilder> {
 }
 
 fn system_rows(context: Context) -> Vec<RowBuilder> {
+    let prefs = context.prefs;
+    let stream = format!(
+        "http://127.0.0.1:{}/stream · OBS: Media Source, Local File off, format mjpeg, then Start Virtual Camera",
+        prefs.vcam_port
+    );
     vec![
         readout("App version", env!("CARGO_PKG_VERSION")),
         readout("Protocol", "OpenPocketViewCore through the desktop facade"),
         readout("Renderer", &context.setup.renderer),
+        RowBuilder::new("Virtual camera")
+            .option("Off", prefs.vcam == 0, Pick::Vcam(0))
+            .option("Camera device", prefs.vcam == 1, Pick::Vcam(1))
+            .option("Stream", prefs.vcam == 2, Pick::Vcam(2)),
+        RowBuilder::new("Camera picture")
+            .option("As shown", !prefs.vcam_clean, Pick::VcamClean(false))
+            .option("Clean", prefs.vcam_clean, Pick::VcamClean(true)),
+        readout(
+            "Camera output",
+            if context.setup.vcam.is_empty() {
+                "Off"
+            } else {
+                &context.setup.vcam
+            },
+        ),
+        RowBuilder::placeholder("Stream", &stream),
         RowBuilder::new("Diagnostics").option("Write a report", false, Pick::Diagnostics),
         RowBuilder::placeholder("Source", "github.com/fav-devs/OpenPocketCine"),
         RowBuilder::placeholder("Licenses", "Apache 2.0 · THIRD-PARTY-NOTICES.md"),
@@ -1329,7 +1366,15 @@ mod tests {
         let storage = build(SheetKind::Settings, 6, context(&status));
         assert_eq!(storage.pick(1, 0), Some(&Pick::ClearCache));
         let system = build(SheetKind::Settings, 7, context(&status));
-        assert_eq!(system.pick(3, 0), Some(&Pick::Diagnostics));
+        assert_eq!(system.pick(3, 2), Some(&Pick::Vcam(2)));
+        assert_eq!(system.pick(4, 0), Some(&Pick::VcamClean(false)));
+        assert_eq!(
+            system.sheet.rows[3].selected,
+            Some(0),
+            "the camera is off by default"
+        );
+        assert_eq!(system.sheet.rows[4].selected, Some(1), "and clean when on");
+        assert_eq!(system.pick(7, 0), Some(&Pick::Diagnostics));
     }
 
     static PROGRAM: std::sync::OnceLock<Program> = std::sync::OnceLock::new();
