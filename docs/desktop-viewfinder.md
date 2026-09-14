@@ -39,6 +39,23 @@ over the picture:
 - **Middle** — only a phase message (`WAITING FOR LIVE VIEW`, `APPROVE ON THE CAMERA`,
   `RECOVERING FEED`), the take countdown, or a failure.
 
+Three sheets open over the picture and close on `Esc`, the `×`, or a tap outside:
+
+- **Format** (the format chip) — the resolutions and frame rates the body listed, and
+  nothing else. Picking a size keeps the rate when that size offers it.
+- **Exposure** (`AUTO`/`M` chip, or `E`) — `Auto`/`Manual`, then ISO and shutter for
+  manual, ISO max and EV for auto. The rows the mode does not use are drawn greyed, the
+  way Mimo shows them.
+- **Settings** (`⋮`, or `Tab`) — three tabs. **Camera:** focus mode, white balance
+  presets, colour profile (from the body's own list), field of view, gimbal mode and
+  speed. **Audio:** channel and vocal boost; wind and directional audio are shown greyed
+  because they live in a DSP blob the desktop cannot read yet. **Assist:** thirds grid,
+  overexposure alert (zebra), focus peaking, LUT, mirror, and the timecode in the top bar.
+
+A chip lights up when the camera confirms the value, not when it is tapped; a setting
+the body never reports (audio channel, field of view, gimbal speed) is kept as last
+commanded.
+
 Every button carries its key hint in small type, so a keyboard operator learns the
 bindings from the screen. When the window is wider than the picture, the two plates park
 in the black gutters and leave the shot clean.
@@ -65,7 +82,8 @@ writes PNGs of the finding, live, recording, failed and wide-window states.
 | `0` | back to wide | `Esc` | close |
 | Drag | track what you drew around | `X` | stop tracking |
 | `[` / `]` | step resolution / frame rate | `H` | hide the chrome |
-| `F11` | fullscreen (button) | | |
+| `Tab` | settings | `E` | exposure sheet |
+| `F11` | fullscreen (button) | `Esc` | close a sheet first |
 | `Z` | zebra | `P` | peaking |
 | `L` | colour cube | `M` | mirror |
 
@@ -79,8 +97,7 @@ the thing that makes it move, and it rests the moment the key comes up.
 The bars are a desktop operator surface, not scaled-up phone chrome. The record button,
 `STILL`, flip, `CTR` and the mode strip carry the existing typed commands. The gimbal
 follow chip and `FOLLOW` button send the same SET frames as the mobile gimbal sheet
-(`Follow` → `Tilt locked` → `FPV`). The format chip steps the body's own format list
-until the picker sheet exists. The joystick is a **hold** control: pressing or moving it
+(`Follow` → `Tilt locked` → `FPV`). The format chip opens the format sheet. The joystick is a **hold** control: pressing or moving it
 sends the matching stick axes and release, cancellation, focus loss, and window close
 send a centred stick immediately. Controls are at least 44 px, and they are greyed and
 disabled while the link is recovering or failed.

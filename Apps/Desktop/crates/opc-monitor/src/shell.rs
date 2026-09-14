@@ -10,6 +10,8 @@ use std::time::Instant;
 
 use opc_camera::{Command, Status};
 use opc_chrome::{Chrome, ChromeIntent, ChromeState};
+
+use crate::sheets::{self, Pick, Prefs, SheetKind};
 use opc_render::{letterbox, GradeOptions, Peaking, PeakingSense, Rgba, Zebra};
 use opc_ui::{
     next_frame_rate, next_resolution, Action, Controls, Countdown, Drag, Fit, Hud, Key, Phase,
@@ -184,6 +186,12 @@ pub struct Shell {
     gimbal_mode: GimbalMode,
     /// The on-screen joystick is being held, so a cancelled gesture must rest the stick.
     pad_held: bool,
+    /// The sheet over the picture, if one is open, and which settings tab it shows.
+    sheet: Option<SheetKind>,
+    sheet_tab: usize,
+    prefs: Prefs,
+    /// The body's model id for commands that encode per model, or -1 when unknown.
+    model_id: i32,
 }
 
 impl Default for Shell {
@@ -219,6 +227,10 @@ impl Shell {
             chrome_stale: true,
             gimbal_mode: GimbalMode::Follow,
             pad_held: false,
+            sheet: None,
+            sheet_tab: 0,
+            prefs: Prefs::default(),
+            model_id: -1,
             drawn_second: None,
         }
     }
@@ -226,6 +238,11 @@ impl Shell {
     /// Starts with the cube already on, for `--lut`.
     pub fn with_grade(mut self, graded: bool) -> Self {
         self.toggles.grade = graded;
+        self
+    }
+
+    pub fn with_model(mut self, model_id: Option<i32>) -> Self {
+        self.set_model(model_id);
         self
     }
 
@@ -281,6 +298,88 @@ impl Shell {
         }
     }
 
+    /// The body's model id, when the link knows it. Colour modes encode per model.
+    pub fn set_model(&mut self, model_id: Option<i32>) {
+        self.model_id = model_id.unwrap_or(-1);
+    }
+
+    /// Which sheet is open, if any.
+    pub fn sheet(&self) -> Option<SheetKind> {
+        self.sheet
+    }
+
+    /// Opens a sheet, or closes it when it is the one already open.
+    pub fn toggle_sheet(&mut self, kind: SheetKind) {
+        self.sheet = if self.sheet == Some(kind) {
+            None
+        } else {
+            Some(kind)
+        };
+        self.chrome_stale = true;
+    }
+
+    pub fn close_sheet(&mut self) {
+        if self.sheet.take().is_some() {
+            self.chrome_stale = true;
+        }
+    }
+
+    /// The desktop-side settings, as the sheets show them.
+    pub fn prefs(&self) -> Prefs {
+        self.prefs
+    }
+
+    fn sheet_context(&self) -> sheets::Context<'_> {
+        sheets::Context {
+            status: &self.hud.status,
+            prefs: self.prefs,
+            toggles: self.toggles,
+            gimbal_mode: self.gimbal_mode,
+            model_id: self.model_id,
+        }
+    }
+
+    /// Carries out a chip tap on the open sheet.
+    fn apply_pick(&mut self, pick: Pick) -> Vec<Intent> {
+        self.chrome_stale = true;
+        match pick {
+            Pick::Send(commands) => commands.into_iter().map(Intent::Send).collect(),
+            Pick::Zebra => self.act(Action::ToggleZebra, 0.0),
+            Pick::Peaking => self.act(Action::TogglePeaking, 0.0),
+            Pick::Grade => self.act(Action::ToggleGrade, 0.0),
+            Pick::Mirror => self.act(Action::ToggleMirror, 0.0),
+            Pick::Grid(on) => {
+                self.prefs.grid = on;
+                Vec::new()
+            }
+            Pick::Timecode(on) => {
+                self.prefs.timecode = on;
+                Vec::new()
+            }
+            Pick::GimbalMode(mode) => {
+                self.gimbal_mode = mode;
+                mode.commands().into_iter().map(Intent::Send).collect()
+            }
+            Pick::AudioChannel(channel) => {
+                self.prefs.audio_channel = channel;
+                vec![Intent::Send(Command::SetAudioChannel(channel))]
+            }
+            Pick::VocalBoost(boost) => {
+                self.prefs.vocal_boost = boost;
+                vec![Intent::Send(Command::SetVocalBoost(boost))]
+            }
+            Pick::Fov(fov) => {
+                self.prefs.fov = fov;
+                vec![Intent::Send(Command::SetFov(fov))]
+            }
+            Pick::GimbalSpeed(speed) => {
+                self.prefs.gimbal_speed = speed;
+                vec![Intent::Send(Command::GimbalSpeed(speed))]
+            }
+            Pick::Nothing => Vec::new(),
+        }
+    }
+
     pub fn set_source(&mut self, width: u32, height: u32) {
         if self.source != Some((width, height)) {
             self.source = Some((width, height));
@@ -327,6 +426,10 @@ impl Shell {
 
     /// A key went down.
     pub fn press(&mut self, key: Key, now: f64) -> Vec<Intent> {
+        if key == Key::Escape && self.sheet.is_some() {
+            self.close_sheet();
+            return Vec::new();
+        }
         if self.stick.set(key, true) {
             self.stick_sent_at = now;
             return vec![Intent::Send(self.stick.command())];
@@ -384,6 +487,14 @@ impl Shell {
             }
             Action::ToggleChrome => {
                 self.chrome_visible = !self.chrome_visible;
+                Vec::new()
+            }
+            Action::ToggleSettings => {
+                self.toggle_sheet(SheetKind::Settings);
+                Vec::new()
+            }
+            Action::ToggleExposure => {
+                self.toggle_sheet(SheetKind::Exposure);
                 Vec::new()
             }
             Action::ClearTracking => {
@@ -529,7 +640,8 @@ impl Shell {
         let Some(cr) = self.chrome_renderer.as_ref() else {
             return fired;
         };
-        for intent in cr.drain_intents() {
+        let intents = cr.drain_intents();
+        for intent in intents {
             match intent {
                 ChromeIntent::RecordToggle => {
                     fired.push(Intent::Send(if self.hud.status.is_recording {
@@ -584,27 +696,28 @@ impl Shell {
                         fired.push(Intent::Send(Command::SetShootingMode(code)));
                     }
                 }
-                // The format chip steps the format until the picker sheet exists.
-                ChromeIntent::OpenFormat => {
-                    let status = &self.hud.status;
-                    let current = status.video_resolution.zip(status.video_frame_rate);
-                    if let Some((resolution, frame_rate)) =
-                        next_resolution(&status.available_formats, current)
-                    {
-                        fired.push(Intent::Send(Command::SetVideoFormat {
-                            resolution,
-                            frame_rate,
-                        }));
+                ChromeIntent::OpenFormat => self.toggle_sheet(SheetKind::Format),
+                ChromeIntent::OpenExposure => self.toggle_sheet(SheetKind::Exposure),
+                ChromeIntent::OpenMenu => self.toggle_sheet(SheetKind::Settings),
+                ChromeIntent::SheetClose => self.close_sheet(),
+                ChromeIntent::SheetTab(tab) => {
+                    self.sheet_tab = tab;
+                    self.chrome_stale = true;
+                }
+                ChromeIntent::SheetPick { row, option } => {
+                    let pick = self.sheet.and_then(|kind| {
+                        sheets::build(kind, self.sheet_tab, self.sheet_context())
+                            .pick(row, option)
+                            .cloned()
+                    });
+                    if let Some(pick) = pick {
+                        fired.extend(self.apply_pick(pick));
                     }
                 }
                 ChromeIntent::Exit => fired.push(Intent::Quit),
                 ChromeIntent::FullscreenToggle => fired.push(Intent::ToggleFullscreen),
-                // Surfaces that do not exist on the desktop yet: the settings panel,
-                // the exposure sheet, the gallery, and the orientation switch.
-                ChromeIntent::OpenMenu
-                | ChromeIntent::OpenExposure
-                | ChromeIntent::OpenGallery
-                | ChromeIntent::OrientationToggle => {}
+                // Surfaces that do not exist on the desktop yet.
+                ChromeIntent::OpenGallery | ChromeIntent::OrientationToggle => {}
             }
         }
         fired
@@ -626,6 +739,10 @@ impl Shell {
     pub fn is_control(&self, x: f64, y: f64) -> bool {
         if !self.chrome_visible {
             return false;
+        }
+        // An open sheet owns the window: the scrim around it is a close button.
+        if self.sheet.is_some() {
+            return true;
         }
         if let Some(cr) = &self.chrome_renderer {
             cr.is_over_control(x, y, self.window.0, self.window.1)
@@ -733,6 +850,15 @@ impl Shell {
             }
 
             let controls_enabled = self.controls_enabled();
+            let sheet = self
+                .sheet
+                .map(|kind| sheets::build(kind, self.sheet_tab, self.sheet_context()).sheet);
+            let timecode = if self.prefs.timecode {
+                self.hud.status.timecode.clone().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let grid_on = self.prefs.grid;
             let mut canvas = if let Some(cr) = self.chrome_renderer.as_mut() {
                 let status = &self.hud.status;
                 let link_state = self.hud.connection_chip();
@@ -780,6 +906,9 @@ impl Shell {
                     ),
                     countdown: second,
                     fps_shown: self.hud.fps,
+                    timecode,
+                    grid_on,
+                    sheet,
                 };
                 cr.render(&state, self.window.0, self.window.1)
             } else {

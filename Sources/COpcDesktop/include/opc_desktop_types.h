@@ -199,6 +199,11 @@ typedef struct {
 #define OPC_CAM_ENTER_PLAYBACK 63
 #define OPC_CAM_EXIT_PLAYBACK 64
 
+// Settings the desktop sheets write. Bytes are the core's own enum raw values.
+#define OPC_CAM_SET_EXPO_MODE 65
+#define OPC_CAM_SET_AUDIO_CHANNEL 66
+#define OPC_CAM_SET_VOCAL_BOOST 67
+
 // `DumlTransport.PktType`.
 #define OPC_PKT_HANDSHAKE 0x00
 #define OPC_PKT_TELEMETRY 0x01

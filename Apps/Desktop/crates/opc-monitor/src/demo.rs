@@ -215,6 +215,7 @@ fn translate(key: &Key) -> Option<UiKey> {
     match key.as_ref() {
         Key::Named(NamedKey::Space) => Some(UiKey::Space),
         Key::Named(NamedKey::Escape) => Some(UiKey::Escape),
+        Key::Named(NamedKey::Tab) => Some(UiKey::Tab),
         Key::Named(NamedKey::ArrowLeft) => Some(UiKey::Left),
         Key::Named(NamedKey::ArrowRight) => Some(UiKey::Right),
         Key::Named(NamedKey::ArrowUp) => Some(UiKey::Up),

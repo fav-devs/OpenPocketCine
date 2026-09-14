@@ -14,7 +14,7 @@ use slint::platform::{
     software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType},
     Platform, PlatformError, PointerEventButton, WindowEvent,
 };
-use slint::{LogicalPosition, PhysicalSize};
+use slint::{LogicalPosition, ModelRc, PhysicalSize, SharedString, VecModel};
 
 use opc_ui::canvas::Canvas;
 use opc_ui::hud::Phase;
@@ -24,7 +24,7 @@ mod generated {
     #![allow(missing_debug_implementations)]
     slint::include_modules!();
 }
-use generated::HudOverlay;
+use generated::{HudOverlay, SheetRow};
 use slint::ComponentHandle;
 
 // ── Custom RGBA pixel ────────────────────────────────────────────────────────
@@ -157,6 +157,35 @@ pub enum ChromeIntent {
     FullscreenToggle,
     /// A mode tapped in the strip, by index into [`MODES`].
     ModeSelected(usize),
+    /// A chip tapped in the open sheet: which row, which option.
+    SheetPick {
+        row: usize,
+        option: usize,
+    },
+    /// A tab tapped in the open sheet.
+    SheetTab(usize),
+    /// The sheet's close button, or a tap on the scrim around it.
+    SheetClose,
+}
+
+/// One row of a sheet: a title and the chips beside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SheetRowState {
+    pub title: String,
+    pub options: Vec<String>,
+    /// Which chip is lit, if any.
+    pub selected: Option<usize>,
+    /// A row the operator cannot use right now is drawn but greyed.
+    pub enabled: bool,
+}
+
+/// A sheet over the picture: the format picker, the exposure sheet or the settings.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SheetState {
+    pub title: String,
+    pub tabs: Vec<String>,
+    pub tab: usize,
+    pub rows: Vec<SheetRowState>,
 }
 
 /// The mode strip, in Mimo's order. Indices are what [`ChromeIntent::ModeSelected`] carries.
@@ -210,6 +239,12 @@ pub struct ChromeState<'a> {
     pub countdown: Option<u32>,
     /// Frames reaching the screen per second; zero hides the readout.
     pub fps_shown: u32,
+    /// The body's timecode, when the operator wants it in the top bar.
+    pub timecode: String,
+    /// Rule-of-thirds lines over the picture.
+    pub grid_on: bool,
+    /// The open sheet, if any.
+    pub sheet: Option<SheetState>,
 }
 
 // Layout metrics mirrored from `hud.slint`; `is_over_control` uses them for hit zones.
@@ -311,6 +346,26 @@ impl Chrome {
                 }
             });
         }
+        {
+            let q = intents.clone();
+            component.on_sheet_picked(move |row, option| {
+                if row >= 0 && option >= 0 {
+                    q.borrow_mut().push(ChromeIntent::SheetPick {
+                        row: row as usize,
+                        option: option as usize,
+                    });
+                }
+            });
+        }
+        {
+            let q = intents.clone();
+            component.on_sheet_tab_picked(move |i| {
+                if i >= 0 {
+                    q.borrow_mut().push(ChromeIntent::SheetTab(i as usize));
+                }
+            });
+        }
+        simple!(on_sheet_closed, ChromeIntent::SheetClose);
 
         Ok(Chrome {
             window,
@@ -366,6 +421,10 @@ impl Chrome {
     /// rather than starting a tracking-box drag.
     pub fn is_over_control(&self, x: f64, y: f64, w: u32, h: u32) -> bool {
         let (w, h) = (w as f64, h as f64);
+        // An open sheet owns the whole window: the scrim around it is a close button.
+        if self.component.get_sheet_open() {
+            return true;
+        }
         // Top bar and bottom bar (with the mode strip) hold every button.
         if y <= TOP_BAR_H || y >= h - BOTTOM_BAR_H {
             return true;
@@ -451,6 +510,42 @@ impl Chrome {
             }
             .into(),
         );
+        c.set_timecode(state.timecode.clone().into());
+        c.set_grid_on(state.grid_on);
+
+        let strings = |items: &[String]| -> ModelRc<SharedString> {
+            ModelRc::new(VecModel::from(
+                items
+                    .iter()
+                    .map(|item| SharedString::from(item.as_str()))
+                    .collect::<Vec<_>>(),
+            ))
+        };
+        match &state.sheet {
+            Some(sheet) => {
+                c.set_sheet_title(sheet.title.clone().into());
+                c.set_sheet_tabs(strings(&sheet.tabs));
+                c.set_sheet_tab(sheet.tab as i32);
+                let rows: Vec<SheetRow> = sheet
+                    .rows
+                    .iter()
+                    .map(|row| SheetRow {
+                        title: row.title.clone().into(),
+                        options: strings(&row.options),
+                        selected: row.selected.map_or(-1, |i| i as i32),
+                        enabled: row.enabled,
+                    })
+                    .collect();
+                c.set_sheet_rows(ModelRc::new(VecModel::from(rows)));
+                c.set_sheet_open(true);
+            }
+            None => {
+                if c.get_sheet_open() {
+                    c.set_sheet_open(false);
+                    c.set_sheet_rows(ModelRc::new(VecModel::from(Vec::<SheetRow>::new())));
+                }
+            }
+        }
 
         let (msg, failed) = match state.phase {
             Phase::Live => (String::new(), false),

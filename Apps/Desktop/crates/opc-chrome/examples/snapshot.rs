@@ -2,7 +2,7 @@
 //! `cargo run -p opc-chrome --example snapshot -- <out-dir>`
 use std::time::Instant;
 
-use opc_chrome::{Chrome, ChromeState};
+use opc_chrome::{Chrome, ChromeState, SheetRowState, SheetState};
 use opc_ui::hud::Phase;
 
 fn write_png(path: &std::path::Path, w: u32, h: u32, rgba: &[u8]) {
@@ -30,6 +30,8 @@ fn main() {
             (1280, 720),
         ),
         ("wide", Phase::Live, false, (1600, 720)),
+        ("sheet", Phase::Live, false, (1280, 720)),
+        ("settings", Phase::Live, false, (1280, 720)),
     ];
 
     for (name, phase, rec, (w, h)) in shots {
@@ -61,6 +63,78 @@ fn main() {
             fit,
             countdown: (name == "live").then_some(3),
             fps_shown: 30,
+            timecode: "01:02:03:04".into(),
+            grid_on: name == "sheet",
+            sheet: (name == "sheet" || name == "settings").then(|| {
+                let row = |title: &str, options: &[&str], selected: Option<usize>, enabled| {
+                    SheetRowState {
+                        title: title.into(),
+                        options: options.iter().map(|o| o.to_string()).collect(),
+                        selected,
+                        enabled,
+                    }
+                };
+                if name == "settings" {
+                    return SheetState {
+                        title: "SETTINGS".into(),
+                        tabs: vec!["CAMERA".into(), "AUDIO".into(), "ASSIST".into()],
+                        tab: 0,
+                        rows: vec![
+                            row("Focus", &["Single", "Continuous"], Some(1), true),
+                            row(
+                                "White balance",
+                                &["Auto", "2800K", "3200K", "4000K", "4500K", "5000K", "5600K"],
+                                Some(6),
+                                true,
+                            ),
+                            row("Color", &["Normal", "D-Log", "D-Log2"], Some(0), true),
+                            row("Field of view", &["Wide", "Natural"], Some(0), true),
+                            row(
+                                "Gimbal mode",
+                                &["Follow", "Tilt locked", "FPV"],
+                                Some(0),
+                                true,
+                            ),
+                            row("Gimbal speed", &["Slow", "Default", "Fast"], Some(1), true),
+                        ],
+                    };
+                }
+                SheetState {
+                    title: "EXPOSURE".into(),
+                    tabs: vec![],
+                    tab: 0,
+                    rows: vec![
+                        row("Mode", &["Auto", "Manual"], Some(1), true),
+                        row(
+                            "ISO",
+                            &["100", "200", "400", "800", "1600", "3200", "6400"],
+                            Some(2),
+                            true,
+                        ),
+                        row(
+                            "ISO max",
+                            &["100–800", "100–1600", "100–3200"],
+                            Some(1),
+                            false,
+                        ),
+                        row(
+                            "Shutter",
+                            &[
+                                "1/8000", "1/4000", "1/2000", "1/1000", "1/500", "1/250", "1/200",
+                                "1/120", "1/100", "1/60", "1/50", "1/30", "1/25",
+                            ],
+                            Some(9),
+                            true,
+                        ),
+                        row(
+                            "EV",
+                            &["-1.0", "-0.7", "-0.3", "0.0", "+0.3", "+0.7", "+1.0"],
+                            Some(2),
+                            false,
+                        ),
+                    ],
+                }
+            }),
         };
         // Render twice so state changes settle (ReusedBuffer redraws dirty regions).
         let _ = chrome.render(&state, w, h);

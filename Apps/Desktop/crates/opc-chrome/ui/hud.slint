@@ -149,6 +149,7 @@ component TopBar {
     in property <string> link-state;
     in property <bool>   is-recording;
     in property <string> rec-elapsed;
+    in property <string> timecode;
     in property <bool>   enabled;
 
     callback menu-tapped();
@@ -225,6 +226,16 @@ component TopBar {
                     letter-spacing: 1px;
                     vertical-alignment: center;
                 }
+            }
+
+            if root.timecode != "": Text {
+                text: root.timecode;
+                color: Pal.ink-dim;
+                font-family: Pal.font;
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: 1px;
+                vertical-alignment: center;
             }
 
             if root.is-recording: Rectangle {
@@ -783,6 +794,158 @@ component PhasePanel {
     }
 }
 
+// ── Sheets ────────────────────────────────────────────────────────────────────
+// One panel serves the format picker, the exposure sheet and the settings tabs:
+// rows of a title and a strip of chips. The shell decides what each pick means.
+
+export struct SheetRow {
+    title: string,
+    options: [string],
+    selected: int,
+    enabled: bool,
+}
+
+component Chip {
+    in property <string> text;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    callback tapped();
+
+    width: max(56px, t.preferred-width + 24px);
+    height: 36px;
+
+    Rectangle {
+        border-radius: 8px;
+        background: root.selected ? Pal.accent : (ta.has-hover ? #ffffff1f : #ffffff14);
+        border-width: 1px;
+        border-color: root.selected ? Pal.accent : #ffffff2e;
+    }
+    t := Text {
+        text: root.text;
+        color: root.selected ? #000000 : (root.enabled ? Pal.ink : Pal.ink-faint);
+        font-family: Pal.font;
+        font-size: 13px;
+        font-weight: root.selected ? 700 : 600;
+        x: (parent.width - self.preferred-width) / 2;
+        y: (parent.height - self.preferred-height) / 2;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.tapped(); }
+    }
+}
+
+component SheetPanel {
+    in property <string> title;
+    in property <[string]> tabs;
+    in property <int> tab;
+    in property <[SheetRow]> rows;
+    callback picked(int, int);
+    callback tab-picked(int);
+    callback close();
+
+    property <length> row-h: 56px;
+    property <length> head-h: 60px;
+    height: root.head-h + root.rows.length * root.row-h + 16px;
+
+    Rectangle {
+        background: #121212f5;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: #ffffff1f;
+    }
+
+    // Header: title, tabs, close.
+    Text {
+        text: root.title;
+        color: Pal.ink;
+        font-family: Pal.font;
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        x: 20px;
+        y: (root.head-h - self.preferred-height) / 2;
+    }
+    Rectangle {
+        width: tab-row.preferred-width;
+        height: root.head-h;
+        x: (parent.width - self.width) / 2;
+        y: 0;
+        tab-row := HorizontalLayout {
+            x: 0;
+            y: 0;
+            height: root.head-h;
+            spacing: 4px;
+            alignment: center;
+            for name[i] in root.tabs: Rectangle {
+                width: tt.preferred-width + 28px;
+                height: 32px;
+                y: (root.head-h - self.height) / 2;
+                border-radius: 8px;
+                background: i == root.tab ? #ffffff1f : transparent;
+                tt := Text {
+                    text: name;
+                    color: i == root.tab ? Pal.ink : Pal.ink-dim;
+                    font-family: Pal.font;
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: 1px;
+                    x: (parent.width - self.preferred-width) / 2;
+                    y: (parent.height - self.preferred-height) / 2;
+                }
+                TouchArea { clicked => { root.tab-picked(i); } }
+            }
+        }
+    }
+    IconButton {
+        x: parent.width - self.width - 6px;
+        y: (root.head-h - self.height) / 2;
+        width: 48px; height: 48px;
+        icon: @image-url("../assets/icons/x.svg");
+        icon-size: 20px;
+        tapped => { root.close(); }
+    }
+    Rectangle { x: 16px; y: root.head-h; width: parent.width - 32px; height: 1px; background: #ffffff14; }
+
+    // Rows.
+    for row[i] in root.rows: Rectangle {
+        x: 16px;
+        y: root.head-h + 8px + i * root.row-h;
+        width: parent.width - 32px;
+        height: root.row-h;
+        opacity: row.enabled ? 1.0 : 0.4;
+
+        Text {
+            text: row.title;
+            color: Pal.ink-dim;
+            font-family: Pal.font;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            x: 4px;
+            y: (parent.height - self.preferred-height) / 2;
+            width: 150px;
+        }
+        Flickable {
+            x: 160px;
+            y: (parent.height - self.height) / 2;
+            width: parent.width - 160px;
+            height: 36px;
+            viewport-width: chips.preferred-width;
+            chips := HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                for opt[j] in row.options: Chip {
+                    text: opt;
+                    selected: j == row.selected;
+                    enabled: row.enabled;
+                    tapped => { root.picked(i, j); }
+                }
+            }
+        }
+    }
+}
+
 // ── Root overlay ──────────────────────────────────────────────────────────────
 
 export component HudOverlay inherits Window {
@@ -812,6 +975,17 @@ export component HudOverlay inherits Window {
     /// Seconds left on the take countdown; empty when none is running.
     in property <string> countdown: "";
     in property <string> fps-text: "";
+    /// The body's timecode, shown in the top bar when the operator asks for it.
+    in property <string> timecode: "";
+    /// Rule-of-thirds lines over the picture.
+    in property <bool> grid-on: false;
+
+    // The open sheet, if any: its title, tabs and rows come from the shell.
+    in property <bool> sheet-open: false;
+    in property <string> sheet-title: "";
+    in property <[string]> sheet-tabs: [];
+    in property <int> sheet-tab: 0;
+    in property <[SheetRow]> sheet-rows: [];
 
     // Zoom.
     in-out property <float> zoom-value: 1.0;
@@ -847,6 +1021,9 @@ export component HudOverlay inherits Window {
     callback follow-cycle-tapped();
     callback fullscreen-tapped();
     callback mode-selected-changed(int);
+    callback sheet-picked(int, int);
+    callback sheet-tab-picked(int);
+    callback sheet-closed();
 
     background: transparent;
 
@@ -858,8 +1035,17 @@ export component HudOverlay inherits Window {
     property <length> left-gutter: root.fit-x;
     property <length> right-gutter: root.width - root.fit-x - root.fit-width;
 
+    if root.grid-on: Rectangle {
+        x: root.fit-x; y: root.fit-y; width: root.fit-width; height: root.fit-height;
+        Rectangle { x: parent.width / 3; width: 1px; height: parent.height; background: #ffffff59; }
+        Rectangle { x: parent.width * 2 / 3; width: 1px; height: parent.height; background: #ffffff59; }
+        Rectangle { y: parent.height / 3; height: 1px; width: parent.width; background: #ffffff59; }
+        Rectangle { y: parent.height * 2 / 3; height: 1px; width: parent.width; background: #ffffff59; }
+    }
+
     TopBar {
         x: 0; y: 0; width: parent.width;
+        timecode: root.timecode;
         follow-label: root.follow-label;
         format-label: root.format-label;
         expo-label: root.expo-label;
@@ -937,5 +1123,23 @@ export component HudOverlay inherits Window {
         y: (parent.height - self.height) / 2;
         message: root.phase-message;
         failed: root.phase-failed;
+    }
+
+    if root.sheet-open: Rectangle {
+        // A scrim: a tap outside the panel closes it, and nothing under it is a control.
+        background: #00000059;
+        TouchArea { clicked => { root.sheet-closed(); } }
+        SheetPanel {
+            width: min(920px, root.width - 48px);
+            x: (parent.width - self.width) / 2;
+            y: root.top-h + 16px;
+            title: root.sheet-title;
+            tabs: root.sheet-tabs;
+            tab: root.sheet-tab;
+            rows: root.sheet-rows;
+            picked(i, j) => { root.sheet-picked(i, j); }
+            tab-picked(i) => { root.sheet-tab-picked(i); }
+            close => { root.sheet-closed(); }
+        }
     }
 }

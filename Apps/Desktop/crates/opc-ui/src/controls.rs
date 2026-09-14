@@ -12,6 +12,7 @@ use opc_camera::Command;
 pub enum Key {
     Space,
     Escape,
+    Tab,
     Left,
     Right,
     Up,
@@ -40,6 +41,9 @@ pub enum Action {
     CycleFrameRate,
     /// Hide the chrome entirely, for a clean look at the shot.
     ToggleChrome,
+    /// Open or close the settings panel and the exposure sheet.
+    ToggleSettings,
+    ToggleExposure,
     /// Grab the current frame.
     Still,
     Quit,
@@ -88,6 +92,7 @@ impl Controls {
         Some(match key {
             Key::Space => Action::Send(Command::RecordStart),
             Key::Escape => Action::Quit,
+            Key::Tab => Action::ToggleSettings,
 
             // The arrows are the gimbal stick, and a stick has to see every direction
             // at once — two keys held is a diagonal, not the second key winning. The
@@ -119,6 +124,7 @@ impl Controls {
                 'p' => Action::TogglePeaking,
                 'l' => Action::ToggleGrade,
                 'm' => Action::ToggleMirror,
+                'e' => Action::ToggleExposure,
                 's' => Action::Still,
                 _ => return None,
             },

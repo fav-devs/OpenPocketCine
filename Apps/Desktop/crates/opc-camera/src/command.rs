@@ -89,6 +89,12 @@ pub enum Command {
         frame_rate: u8,
     },
     SetFov(u8),
+    /// `0x01` auto, `0x04` manual. No GET; `cam_expo_param` echoes it.
+    SetExpoMode(u8),
+    /// `0x01` mono, `0x02` stereo, `0x03` spatial.
+    SetAudioChannel(u8),
+    /// `0x00` off, `0x01` on.
+    SetVocalBoost(u8),
 
     // Reads.
     ParamGet(u16),
@@ -218,6 +224,19 @@ impl Command {
             Self::GetWifiPassword => (sys::OPC_CAM_GET_WIFI_PASSWORD, vec![], vec![]),
             Self::EnterPlayback => (sys::OPC_CAM_ENTER_PLAYBACK, vec![], vec![]),
             Self::ExitPlayback => (sys::OPC_CAM_EXIT_PLAYBACK, vec![], vec![]),
+            Self::SetExpoMode(mode) => {
+                (sys::OPC_CAM_SET_EXPO_MODE, ints(&[i32::from(mode)]), vec![])
+            }
+            Self::SetAudioChannel(channel) => (
+                sys::OPC_CAM_SET_AUDIO_CHANNEL,
+                ints(&[i32::from(channel)]),
+                vec![],
+            ),
+            Self::SetVocalBoost(boost) => (
+                sys::OPC_CAM_SET_VOCAL_BOOST,
+                ints(&[i32::from(boost)]),
+                vec![],
+            ),
         }
     }
 

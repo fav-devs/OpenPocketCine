@@ -235,6 +235,7 @@ fn translate(key: &Key) -> Option<UiKey> {
     match key.as_ref() {
         Key::Named(NamedKey::Space) => Some(UiKey::Space),
         Key::Named(NamedKey::Escape) => Some(UiKey::Escape),
+        Key::Named(NamedKey::Tab) => Some(UiKey::Tab),
         Key::Named(NamedKey::ArrowLeft) => Some(UiKey::Left),
         Key::Named(NamedKey::ArrowRight) => Some(UiKey::Right),
         Key::Named(NamedKey::ArrowUp) => Some(UiKey::Up),
@@ -462,7 +463,7 @@ pub fn run(options: Options) -> Result<(), String> {
     let mut view = View {
         renderer: None,
         window: None,
-        shell: Shell::new().with_grade(graded),
+        shell: Shell::new().with_grade(graded).with_model(options.model_id),
         link,
         decoder: None,
         pending: Vec::new(),

@@ -661,3 +661,70 @@ fn every_primary_control_hit_target_survives_resize() {
         );
     }
 }
+
+// ── Sheets ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn tab_opens_the_settings_and_escape_closes_them_before_it_quits() {
+    let mut shell = framed();
+    assert!(shell.press(Key::Tab, 0.0).is_empty());
+    assert_eq!(
+        shell.sheet(),
+        Some(opc_monitor::sheets::SheetKind::Settings)
+    );
+    assert!(
+        shell.press(Key::Escape, 0.0).is_empty(),
+        "escape with a sheet open closes the sheet, not the window"
+    );
+    assert_eq!(shell.sheet(), None);
+    assert_eq!(shell.press(Key::Escape, 0.0), [Intent::Quit]);
+}
+
+#[test]
+fn e_opens_the_exposure_sheet_and_a_second_press_closes_it() {
+    let mut shell = framed();
+    shell.press(Key::Char('e'), 0.0);
+    assert_eq!(
+        shell.sheet(),
+        Some(opc_monitor::sheets::SheetKind::Exposure)
+    );
+    shell.press(Key::Char('e'), 0.0);
+    assert_eq!(shell.sheet(), None);
+}
+
+#[test]
+fn an_open_sheet_owns_the_whole_window() {
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    shell.press(Key::Tab, 0.0);
+    // The window draws the frame before any tap can land on it.
+    shell.chrome(0.0);
+    // The middle of the picture would start a tracking box; under a sheet it cannot.
+    assert!(shell.is_control(640.0, 500.0));
+    shell.control_down(640.0, 500.0, 0.0).expect("scrim");
+    shell.control_up(640.0, 500.0, 0.0);
+    assert_eq!(shell.sheet(), None, "a tap on the scrim closes the sheet");
+}
+
+#[test]
+fn a_chip_on_the_exposure_sheet_sends_the_typed_command() {
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    shell.press(Key::Char('e'), 0.0);
+    // The first chip of the first row ("Mode" → "Auto") at this 1280 × 720 layout:
+    // the panel starts 16 px under the 56 px top bar, its header is 60 px, rows are
+    // 56 px, and chips start 160 px in from the row's 16 px inset.
+    shell.chrome(0.0);
+    let (x, y) = (200.0 + 16.0 + 160.0 + 20.0, 56.0 + 16.0 + 60.0 + 8.0 + 28.0);
+    assert!(shell.is_control(x, y));
+    shell.control_down(x, y, 0.0).expect("chip");
+    assert_eq!(
+        sent(&shell.control_up(x, y, 0.0)),
+        [Command::SetExpoMode(0x01)]
+    );
+    assert_eq!(
+        shell.sheet(),
+        Some(opc_monitor::sheets::SheetKind::Exposure),
+        "picking a value keeps the sheet open for the next one"
+    );
+}

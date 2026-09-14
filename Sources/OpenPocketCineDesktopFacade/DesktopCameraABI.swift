@@ -162,6 +162,16 @@ private func cameraFrame(kind: Int32, seq: UInt16, arguments: Arguments) -> Duml
     case OPC_CAM_EXIT_PLAYBACK:
         return Commands.exitPlayback(seq: seq)
 
+    case OPC_CAM_SET_EXPO_MODE:
+        guard let mode = ExpoMode(rawValue: arguments.byte(0)) else { return nil }
+        return Commands.setExpoMode(mode, seq: seq)
+    case OPC_CAM_SET_AUDIO_CHANNEL:
+        guard let channel = AudioChannel(rawValue: arguments.byte(0)) else { return nil }
+        return Commands.setAudioChannel(channel, seq: seq)
+    case OPC_CAM_SET_VOCAL_BOOST:
+        guard let boost = VocalBoost(rawValue: arguments.byte(0)) else { return nil }
+        return Commands.setVocalBoost(boost, seq: seq)
+
     default:
         return nil
     }

@@ -244,6 +244,9 @@ pub const OPC_CAM_GET_WIFI_SSID: i32 = 61;
 pub const OPC_CAM_GET_WIFI_PASSWORD: i32 = 62;
 pub const OPC_CAM_ENTER_PLAYBACK: i32 = 63;
 pub const OPC_CAM_EXIT_PLAYBACK: i32 = 64;
+pub const OPC_CAM_SET_EXPO_MODE: i32 = 65;
+pub const OPC_CAM_SET_AUDIO_CHANNEL: i32 = 66;
+pub const OPC_CAM_SET_VOCAL_BOOST: i32 = 67;
 
 pub const OPC_PKT_HANDSHAKE: u8 = 0x00;
 pub const OPC_PKT_TELEMETRY: u8 = 0x01;

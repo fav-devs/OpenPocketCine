@@ -5,6 +5,7 @@
 //! `opc-camera`, and a test of the viewfinder's behaviour should not need a toolchain
 //! that can build it.
 
+pub mod sheets;
 pub mod shell;
 
-pub use shell::{Intent, Shell, Toggles, TouchPhase};
+pub use shell::{GimbalMode, Intent, Shell, Toggles, TouchPhase};
