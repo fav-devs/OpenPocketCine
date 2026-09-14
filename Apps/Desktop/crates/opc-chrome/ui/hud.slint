@@ -425,7 +425,7 @@ component PhasePanel {
 
 // ── Root overlay ──────────────────────────────────────────────────────────────
 
-export component HudOverlay inherits Rectangle {
+export component HudOverlay inherits Window {
     // Exposure chips (shown in left column)
     in property <string> chip1: "";
     in property <string> chip2: "";
@@ -458,7 +458,7 @@ export component HudOverlay inherits Rectangle {
     callback gimbal-moved(float, float);
     callback gimbal-released();
 
-    background: #00000000;
+    background: transparent;
 
     // ── Top bar ───────────────────────────────────────────────────────────
     TopBar {

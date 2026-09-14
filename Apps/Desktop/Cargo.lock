@@ -3781,6 +3781,7 @@ version = "0.1.0"
 dependencies = [
  "opc-camera",
  "opc-ui",
+ "png 0.17.16",
  "slint",
  "slint-build",
 ]

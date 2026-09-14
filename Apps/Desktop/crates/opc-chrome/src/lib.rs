@@ -19,7 +19,13 @@ use slint::{LogicalPosition, PhysicalSize};
 use opc_ui::canvas::Canvas;
 use opc_ui::hud::Phase;
 
-slint::include_modules!();
+// Slint's generated component types carry no `Debug`; the workspace lint would flag them.
+mod generated {
+    #![allow(missing_debug_implementations)]
+    slint::include_modules!();
+}
+use generated::HudOverlay;
+use slint::ComponentHandle;
 
 // ── Custom RGBA pixel ────────────────────────────────────────────────────────
 
@@ -63,6 +69,13 @@ impl slint::platform::software_renderer::TargetPixel for RgbaPixel {
     fn from_rgb(r: u8, g: u8, b: u8) -> Self {
         RgbaPixel([r, g, b, 255])
     }
+
+    /// The overlay composites over the video frame, so the clear colour must be
+    /// fully transparent. The trait default is opaque black, which would hide the
+    /// picture under the chrome.
+    fn background() -> Self {
+        RgbaPixel([0, 0, 0, 0])
+    }
 }
 
 // ── Platform ─────────────────────────────────────────────────────────────────
@@ -100,10 +113,7 @@ fn ensure_platform(started: Instant) -> Rc<MinimalSoftwareWindow> {
         if slot.is_none() {
             let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
             *slot = Some(window.clone());
-            let _ = slint::platform::set_platform(Box::new(OpcPlatform {
-                window,
-                started,
-            }));
+            let _ = slint::platform::set_platform(Box::new(OpcPlatform { window, started }));
         }
         slot.as_ref().unwrap().clone()
     })
@@ -121,7 +131,10 @@ pub enum ChromeIntent {
     /// Slider value in the range 1.0 – 6.0.
     ZoomSet(f32),
     /// Normalised stick deflection in -1.0 … 1.0 on each axis.
-    GimbalMoved { x: f32, y: f32 },
+    GimbalMoved {
+        x: f32,
+        y: f32,
+    },
     /// Stick released — camera should return to centre.
     GimbalReleased,
 }
@@ -129,6 +142,7 @@ pub enum ChromeIntent {
 // ── State passed by the shell each frame ─────────────────────────────────────
 
 /// Everything the chrome needs to know for one frame.
+#[derive(Debug)]
 pub struct ChromeState<'a> {
     pub phase: &'a Phase,
     /// Exposure chips shown in the left column (shutter, ISO, EV, WB).
@@ -270,7 +284,7 @@ impl Chrome {
             return true;
         }
         // Zoom strip (44 px, starting at y=48)
-        if y >= 48.0 && y <= 92.0 {
+        if (48.0..=92.0).contains(&y) {
             return true;
         }
         // Left exposure column (60 px wide) — read-only, but don't start tracking boxes there
