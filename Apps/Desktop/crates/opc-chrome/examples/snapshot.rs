@@ -2,7 +2,10 @@
 //! `cargo run -p opc-chrome --example snapshot -- <out-dir>`
 use std::time::Instant;
 
-use opc_chrome::{Chrome, ChromeState, SheetRowState, SheetState};
+use opc_chrome::{
+    CellState, Chrome, ChromeState, LibraryState, PlayerState, Screen, SelectionState,
+    SheetRowState, SheetState,
+};
 use opc_ui::hud::Phase;
 
 fn write_png(path: &std::path::Path, w: u32, h: u32, rgba: &[u8]) {
@@ -16,6 +19,27 @@ fn write_png(path: &std::path::Path, w: u32, h: u32, rgba: &[u8]) {
 fn main() {
     let out = std::path::PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| ".".into()));
     let mut chrome = Chrome::new(Instant::now()).expect("chrome");
+    // A synthetic thumbnail: a warm gradient with a dark bar, standing in for a .scr.
+    let (tw, th) = (320u32, 180u32);
+    let mut thumb = vec![0u8; (tw * th * 4) as usize];
+    for y in 0..th {
+        for x in 0..tw {
+            let i = ((y * tw + x) * 4) as usize;
+            let dark = y > th * 2 / 3;
+            thumb[i] = if dark { 30 } else { 120 + (x * 100 / tw) as u8 };
+            thumb[i + 1] = if dark { 30 } else { 90 + (y * 60 / th) as u8 };
+            thumb[i + 2] = if dark { 34 } else { 70 };
+            thumb[i + 3] = 255;
+        }
+    }
+    for n in 0..5 {
+        chrome.set_thumb(
+            &format!("DCIM/DJI_001/DJI_2026081412525{n}_003{n}_D.MP4"),
+            tw,
+            th,
+            &thumb,
+        );
+    }
 
     // Name, phase, recording, window size. The last one is wider than 16:9 so the
     // side chrome parks in the gutters.
@@ -32,6 +56,8 @@ fn main() {
         ("wide", Phase::Live, false, (1600, 720)),
         ("sheet", Phase::Live, false, (1280, 720)),
         ("settings", Phase::Live, false, (1280, 720)),
+        ("library", Phase::Live, false, (1280, 720)),
+        ("player", Phase::Live, false, (1280, 720)),
     ];
 
     for (name, phase, rec, (w, h)) in shots {
@@ -65,6 +91,55 @@ fn main() {
             fps_shown: 30,
             timecode: "01:02:03:04".into(),
             grid_on: name == "sheet",
+            screen: match name {
+                "library" => Screen::Library,
+                "player" => Screen::Player,
+                _ => Screen::Viewfinder,
+            },
+            library: (name == "library").then(|| LibraryState {
+                tab: 0,
+                sort_label: "Newest".into(),
+                status: "11 files · 4.2 GB free".into(),
+                cells: (0..11)
+                    .map(|n| CellState {
+                        path: format!("DCIM/DJI_001/DJI_2026081412525{n}_003{n}_D.MP4"),
+                        title: format!(
+                            "DJI_2026081412525{n}_003{n}_D.{}",
+                            if n == 3 { "JPG" } else { "MP4" }
+                        ),
+                        meta: if n == 3 {
+                            "JPG".into()
+                        } else {
+                            format!("0:{:02}", 12 + n * 7)
+                        },
+                        is_video: n != 3,
+                        starred: n == 1 || n == 6,
+                        cached: n == 2,
+                        selected: n == 2,
+                    })
+                    .collect(),
+                selection: Some(SelectionState {
+                    title: "DJI_20260814125252_0032_D.MP4".into(),
+                    meta: "0:26 · 3840x2160 · 30 fps · 412.5 MB".into(),
+                    is_video: true,
+                    starred: false,
+                    cached: true,
+                    deletable: true,
+                    delete_armed: false,
+                    progress: Some(0.62),
+                    note: "Proxy on disk".into(),
+                }),
+            }),
+            player: (name == "player").then(|| PlayerState {
+                title: "DJI_20260814125252_0032_D.MP4".into(),
+                tag: "PROXY 720P".into(),
+                position_label: "0:09".into(),
+                duration_label: "0:26".into(),
+                progress: 0.35,
+                playing: true,
+                assists: "LUT  ZEB".into(),
+                is_photo: false,
+            }),
             sheet: (name == "sheet" || name == "settings").then(|| {
                 let row = |title: &str, options: &[&str], selected: Option<usize>, enabled| {
                     SheetRowState {

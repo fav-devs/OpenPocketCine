@@ -728,3 +728,69 @@ fn a_chip_on_the_exposure_sheet_sends_the_typed_command() {
         "picking a value keeps the sheet open for the next one"
     );
 }
+
+// ── Library and player ───────────────────────────────────────────────────────
+
+#[test]
+fn g_opens_the_library_and_escape_brings_live_view_back() {
+    use opc_chrome::Screen;
+    use opc_monitor::MediaAction;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    assert_eq!(
+        shell.press(Key::Char('g'), 0.0),
+        [Intent::Media(MediaAction::OpenLibrary)]
+    );
+    assert_eq!(shell.screen(), Screen::Library);
+    assert!(
+        shell.is_control(640.0, 360.0),
+        "the library owns the window; no tracking box under it"
+    );
+    // The arrow keys must not move the gimbal from the library.
+    assert!(shell.press(Key::Left, 0.0).is_empty());
+    assert_eq!(
+        shell.press(Key::Escape, 0.0),
+        [Intent::Media(MediaAction::CloseLibrary)]
+    );
+    assert_eq!(shell.screen(), Screen::Viewfinder);
+}
+
+#[test]
+fn a_listed_clip_can_be_selected_played_and_starred() {
+    use opc_chrome::Screen;
+    use opc_media::MediaFile;
+    use opc_monitor::MediaAction;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    shell.press(Key::Char('g'), 0.0);
+    let clip = MediaFile {
+        path: "DCIM/DJI_001/DJI_20260814125250_0034_D.MP4".to_string(),
+        thumb_path: "MISC/THM/DJI_001/DJI_20260814125250_0034_D.scr".to_string(),
+        handle: 0x4010_4480,
+        duration_seconds: 26,
+        ..MediaFile::default()
+    };
+    shell.library_listed(vec![clip.clone()], true);
+    // Drawing the grid is what asks for thumbnails, once.
+    shell.chrome(0.0);
+    let asked = shell.tick(0.1);
+    assert_eq!(asked, [Intent::Media(MediaAction::Thumb(clip.clone()))]);
+    assert!(shell.tick(0.2).is_empty(), "a thumbnail is asked for once");
+
+    shell.library_mut().select_index(0);
+    assert_eq!(shell.library().selected_file().map(|f| f.path.clone()), Some(clip.path.clone()));
+
+    // The player opens once the window has the clip on disk.
+    shell.open_player(clip.clone(), 26_000, true, false);
+    assert_eq!(shell.screen(), Screen::Player);
+    assert_eq!(
+        shell.press(Key::Space, 1.0),
+        [Intent::Media(MediaAction::PlayerToggle)]
+    );
+    assert!(!shell.player().unwrap().playing);
+    assert_eq!(
+        shell.press(Key::Escape, 1.0),
+        [Intent::Media(MediaAction::ClosePlayer)]
+    );
+    assert_eq!(shell.screen(), Screen::Library);
+}

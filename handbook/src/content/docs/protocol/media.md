@@ -25,7 +25,12 @@ Do not put camera paths or captured filenames that include secrets into issues.
 | --- | --- | --- |
 | `0x00/0x26` | media list request | cursor `@10` u32-LE; ctr `@4`. Trigger `4a040e10`. Newest page needs no playback (list it even if `0x02/0x0c` ACKs E0); older pages do. |
 | `0x00/0x27` | media list chunks | `[10B sub][chunk]`; subtype `01` is data. Concat in arrival order → CompositePack. |
-| `0x02/0x0c` | enter/exit playback | `01 01 00 01` / `01 01 00 00`. Hold with `0x00/0x88` ~1 Hz. Do not poll `0x02/0x8E` while held. |
+| `0x02/0x0c` | enter/exit playback | `01 01 00 01` / `01 01 00 00`. Hold with `0x00/0x88` ~1 Hz. Do not poll `0x02/0x8E` while held. The reply means received, not entered: confirm on bit 30 of `0x02/0x80`. |
+| `0x01/0x01` | Pocket 3 playback entry | Notify, no reply. When `0x02/0x0c` answers `E0`: `03 00000000 04000000 07 01` ~6 frames at ~20 Hz, then `00 00000000 04000000 04 01` at ~20 Hz until the playback bit sets (~350 ms). No exit; the body returns to capture on its own after the link drops. Learned from the public Osmosis notes (§13b). |
+
+A store is not mounted the instant playback is confirmed: a list sent too early answers
+`d8` and opens an empty transfer. Allow ~1.7 s after the bit sets, or re-ask a store that
+came back empty.
 
 ## Delete and star
 

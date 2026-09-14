@@ -69,7 +69,7 @@ impl BtleplugTransport {
         let rt = Runtime::new().map_err(io_err)?;
         let manager = rt
             .block_on(Manager::new())
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         let parse = |s: &str| {
             s.parse::<Uuid>()
@@ -108,7 +108,7 @@ impl BtleplugTransport {
                 .manager
                 .adapters()
                 .await
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| io::Error::other(e.to_string()))?;
             adapters
                 .into_iter()
                 .next()
@@ -137,19 +137,19 @@ impl BleTransport for BtleplugTransport {
             adapter
                 .start_scan(ScanFilter::default())
                 .await
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| io::Error::other(e.to_string()))?;
 
             tokio::time::sleep(Duration::from_secs_f64(seconds.max(3.0))).await;
 
             adapter
                 .stop_scan()
                 .await
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| io::Error::other(e.to_string()))?;
 
             adapter
                 .peripherals()
                 .await
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+                .map_err(|e| io::Error::other(e.to_string()))
         })?;
 
         blog!(log, "scan complete  raw_count={}", peripherals.len());
@@ -229,7 +229,7 @@ impl BleTransport for BtleplugTransport {
 
             p.discover_services()
                 .await
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| io::Error::other(e.to_string()))?;
 
             let chars = p.characteristics();
             blog!(log, "  {} characteristics found:", chars.len());
@@ -258,7 +258,7 @@ impl BleTransport for BtleplugTransport {
             );
             p.subscribe(notify_char)
                 .await
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| io::Error::other(e.to_string()))?;
             blog!(log, "  FFF4 subscribed");
 
             // Subscribe to FFF5 (write char) too — the Android app writes CCCD [0x01,0x00]
@@ -295,12 +295,7 @@ impl BleTransport for BtleplugTransport {
                 .clone();
             p.write(&notify_char2, &[0x01, 0x00], WriteType::WithResponse)
                 .await
-                .map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("pairing arm write failed: {e}"),
-                    )
-                })?;
+                .map_err(|e| io::Error::other(format!("pairing arm write failed: {e}")))?;
             blog!(log, "  pairing armed");
 
             // Brief post-arm settle before the state machine sends SessionWake.
@@ -399,11 +394,11 @@ impl BleTransport for BtleplugTransport {
         self.rt.block_on(async move {
             p.disconnect()
                 .await
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+                .map_err(|e| io::Error::other(e.to_string()))
         })
     }
 }
 
 fn io_err(e: impl std::error::Error) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, e.to_string())
+    io::Error::other(e.to_string())
 }

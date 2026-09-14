@@ -22,8 +22,11 @@ bottom says what the body is set to, and the keyboard drives it.
 | Tracking | Mouse or one-finger drag, `X` to clear | `opc-ui/tracking.rs`, `Shell::touch` |
 | Frame rate, resolution | `[` `]` | `opc-ui/format.rs` |
 | Assists | `Z` `P` `L` `M`, `H` hides the chrome | `opc-monitor/shell.rs`, `Toggles` |
+| Sheets | `Tab` settings, `E` exposure, the format chip | `opc-monitor/sheets.rs` |
+| Library | `G`, then the grid; `Space` and `Esc` in the player | `opc-monitor/library.rs`, `media.rs`, `opc-media` |
 
-There are no on-screen controls. The chrome is read-only.
+The chrome is a Slint Mimo replica with every button live (`opc-chrome`); the media
+library and player are `opc-media` (paging, HTTP, cache) driven by `opc-monitor/media.rs`.
 
 `opc-watcher` is the other program and the older one: a PC second screen for a feed an
 iPhone is already hosting. It shares the decoder, the renderer and the core facade, and

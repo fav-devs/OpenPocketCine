@@ -175,7 +175,7 @@ impl Demo {
                         window.set_fullscreen(wanted.then_some(Fullscreen::Borderless(None)));
                     }
                 }
-                Intent::Send(_) | Intent::Still => {}
+                Intent::Send(_) | Intent::Still | Intent::Media(_) => {}
             }
         }
     }

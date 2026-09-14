@@ -18,6 +18,7 @@ test = false
 opc-camera = { path = "../opc-camera" }
 opc-chrome = { path = "../opc-chrome" }
 opc-decode = { path = "../opc-decode" }
+opc-media = { path = "../opc-media" }
 opc-render = { path = "../opc-render" }
 opc-ui = { path = "../opc-ui" }
 raw-window-handle = "0.6"

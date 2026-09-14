@@ -511,11 +511,7 @@ fn ble_worker(gatt: Option<GattMap>, rx: mpsc::Receiver<BleCmd>, tx: mpsc::Sende
         }
     };
 
-    loop {
-        let cmd = match rx.recv() {
-            Ok(c) => c,
-            Err(_) => break,
-        };
+    while let Ok(cmd) = rx.recv() {
         match cmd {
             BleCmd::Scan => {
                 let _ = tx.send(BleEvent::Scanning);

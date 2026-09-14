@@ -946,6 +946,442 @@ component SheetPanel {
     }
 }
 
+// ── Library ───────────────────────────────────────────────────────────────────
+// The camera's card as a grid of thumbnails, with the selected clip's actions in a
+// bar along the bottom. Mimo's album, laid out for a laptop.
+
+export struct MediaCell {
+    path: string,
+    title: string,
+    meta: string,
+    thumb: image,
+    has-thumb: bool,
+    is-video: bool,
+    starred: bool,
+    cached: bool,
+    selected: bool,
+}
+
+export struct MediaSelection {
+    title: string,
+    meta: string,
+    is-video: bool,
+    starred: bool,
+    cached: bool,
+    deletable: bool,
+    delete-armed: bool,
+    /// -1 when nothing is transferring, else 0…1.
+    progress: float,
+    note: string,
+}
+
+component TextButton {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> enabled: true;
+    in property <bool> danger: false;
+    in property <bool> accent: false;
+    callback tapped();
+
+    width: t.preferred-width + (root.icon.width > 0 ? 44px : 28px);
+    height: 40px;
+    opacity: root.enabled ? 1.0 : 0.35;
+
+    Rectangle {
+        border-radius: 8px;
+        background: root.accent ? Pal.accent : (root.danger ? #f5222d33 : (ta.has-hover ? #ffffff24 : #ffffff14));
+        border-width: 1px;
+        border-color: root.accent ? Pal.accent : (root.danger ? Pal.rec : #ffffff2e);
+    }
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
+        alignment: center;
+        if root.icon.width > 0: Image {
+            source: root.icon;
+            colorize: root.accent ? #000000 : (root.danger ? Pal.rec : Pal.ink);
+            width: 18px; height: 18px;
+            y: (parent.height - self.height) / 2;
+        }
+        t := Text {
+            text: root.text;
+            color: root.accent ? #000000 : (root.danger ? Pal.rec : Pal.ink);
+            font-family: Pal.font;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.8px;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.tapped(); }
+    }
+}
+
+component LibraryPage {
+    in property <[string]> tabs;
+    in property <int> tab;
+    in property <string> sort-label;
+    in property <string> status;
+    in property <[MediaCell]> cells;
+    in property <MediaSelection> selection;
+    in property <bool> has-selection;
+
+    callback back();
+    callback tab-picked(int);
+    callback sort-tapped();
+    callback refresh();
+    callback cell-tapped(int);
+    callback play();
+    callback download();
+    callback favorite();
+    callback delete();
+
+    property <length> head-h: 64px;
+    property <length> foot-h: 96px;
+    property <length> cell-w: 220px;
+    property <length> cell-h: 124px + 44px;
+    property <length> gap: 10px;
+    property <length> inset: 24px;
+    property <int> columns: max(1, floor((root.width - 2 * root.inset + root.gap) / (root.cell-w + root.gap)));
+
+    Rectangle { x: 0; y: 0; width: parent.width; height: parent.height; background: #0a0a0a; }
+
+    // Header.
+    Rectangle {
+        x: 0; y: 0; width: parent.width;
+        height: root.head-h;
+        background: Pal.bar;
+        IconButton {
+            x: 8px; y: (parent.height - self.height) / 2;
+            icon: @image-url("../assets/icons/arrow-left.svg");
+            key: "ESC";
+            tapped => { root.back(); }
+        }
+        Text {
+            text: "LIBRARY";
+            color: Pal.ink;
+            font-family: Pal.font; font-size: 16px; font-weight: 700; letter-spacing: 1.5px;
+            x: 72px; y: (parent.height - self.preferred-height) / 2;
+        }
+        Rectangle {
+            width: tab-row.preferred-width;
+            height: parent.height;
+            x: (parent.width - self.width) / 2;
+            tab-row := HorizontalLayout {
+                spacing: 4px;
+                alignment: center;
+                for name[i] in root.tabs: Rectangle {
+                    width: tt.preferred-width + 28px;
+                    height: 32px;
+                    y: (root.head-h - self.height) / 2;
+                    border-radius: 8px;
+                    background: i == root.tab ? #ffffff1f : transparent;
+                    tt := Text {
+                        text: name;
+                        color: i == root.tab ? Pal.ink : Pal.ink-dim;
+                        font-family: Pal.font; font-size: 12px; font-weight: 700; letter-spacing: 1px;
+                        x: (parent.width - self.preferred-width) / 2;
+                        y: (parent.height - self.preferred-height) / 2;
+                    }
+                    TouchArea { clicked => { root.tab-picked(i); } }
+                }
+            }
+        }
+        Rectangle {
+            width: right-row.preferred-width;
+            height: parent.height;
+            x: parent.width - self.width - 12px;
+            right-row := HorizontalLayout {
+                spacing: 6px;
+                alignment: center;
+                TextButton {
+                    y: (root.head-h - self.height) / 2;
+                    text: root.sort-label;
+                    tapped => { root.sort-tapped(); }
+                }
+                IconButton {
+                    y: (root.head-h - self.height) / 2;
+                    icon: @image-url("../assets/icons/refresh.svg");
+                    key: "R";
+                    tapped => { root.refresh(); }
+                }
+            }
+        }
+    }
+
+    // Grid.
+    Flickable {
+        x: root.inset;
+        y: root.head-h + 12px;
+        width: parent.width - 2 * root.inset;
+        height: parent.height - root.head-h - root.foot-h - 24px;
+        viewport-height: max(self.height, ceil(root.cells.length / root.columns) * (root.cell-h + root.gap));
+        for cell[i] in root.cells: Rectangle {
+            x: mod(i, root.columns) * (root.cell-w + root.gap);
+            y: floor(i / root.columns) * (root.cell-h + root.gap);
+            width: root.cell-w;
+            height: root.cell-h;
+            border-radius: 10px;
+            background: cell.selected ? #ffffff1f : (cta.has-hover ? #ffffff14 : #ffffff0a);
+            border-width: cell.selected ? 2px : 1px;
+            border-color: cell.selected ? Pal.accent : #ffffff14;
+            clip: true;
+
+            Rectangle {
+                x: 0; y: 0; width: parent.width; height: 124px;
+                background: #000000;
+                if cell.has-thumb: Image {
+                    source: cell.thumb;
+                    width: parent.width; height: parent.height;
+                    image-fit: contain;
+                }
+                if !cell.has-thumb: Image {
+                    source: cell.is-video ? @image-url("../assets/icons/video.svg") : @image-url("../assets/icons/photo.svg");
+                    colorize: Pal.ink-faint;
+                    width: 32px; height: 32px;
+                    x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                }
+                // Duration / kind badge.
+                Rectangle {
+                    x: parent.width - self.width - 8px; y: parent.height - self.height - 8px;
+                    width: bt.preferred-width + 14px; height: 22px;
+                    border-radius: 5px;
+                    background: #000000b3;
+                    bt := Text {
+                        text: cell.meta;
+                        color: Pal.ink;
+                        font-family: Pal.font; font-size: 11px; font-weight: 700;
+                        x: (parent.width - self.preferred-width) / 2;
+                        y: (parent.height - self.preferred-height) / 2;
+                    }
+                }
+                if cell.starred: Image {
+                    source: @image-url("../assets/icons/star-filled.svg");
+                    colorize: Pal.accent;
+                    width: 18px; height: 18px; x: 8px; y: 8px;
+                }
+                if cell.cached: Image {
+                    source: @image-url("../assets/icons/photo-check.svg");
+                    colorize: Pal.online;
+                    width: 18px; height: 18px; x: cell.starred ? 32px : 8px; y: 8px;
+                }
+            }
+            Text {
+                text: cell.title;
+                color: Pal.ink-dim;
+                font-family: Pal.font; font-size: 12px; font-weight: 600;
+                x: 10px; y: 124px + 12px;
+                width: parent.width - 20px;
+                overflow: elide;
+            }
+            cta := TouchArea { clicked => { root.cell-tapped(i); } }
+        }
+    }
+
+    // Footer: the selection's actions, or the status.
+    Rectangle {
+        x: 0; y: parent.height - root.foot-h; width: parent.width;
+        height: root.foot-h;
+        background: Pal.bar;
+
+        if !root.has-selection: Text {
+            text: root.status;
+            color: Pal.ink-dim;
+            font-family: Pal.font; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;
+            x: root.inset; y: (parent.height - self.preferred-height) / 2;
+        }
+
+        if root.has-selection: VerticalLayout {
+            x: root.inset; y: 0; height: parent.height;
+            width: parent.width * 0.42;
+            alignment: center;
+            spacing: 4px;
+            Text {
+                text: root.selection.title;
+                color: Pal.ink;
+                font-family: Pal.font; font-size: 15px; font-weight: 700;
+                overflow: elide;
+            }
+            Text {
+                text: root.selection.meta + (root.selection.note != "" ? "  ·  " + root.selection.note : "");
+                color: Pal.ink-dim;
+                font-family: Pal.font; font-size: 12px; font-weight: 600;
+                overflow: elide;
+            }
+            if root.selection.progress >= 0: Rectangle {
+                height: 4px; width: 260px; border-radius: 2px; background: #ffffff24;
+                Rectangle {
+                    width: parent.width * root.selection.progress; height: parent.height;
+                    border-radius: 2px; background: Pal.accent;
+                }
+            }
+        }
+
+        if root.has-selection: Rectangle {
+            width: actions.preferred-width;
+            height: parent.height;
+            x: parent.width - self.width - root.inset;
+            actions := HorizontalLayout {
+                spacing: 8px;
+                alignment: center;
+                TextButton {
+                    y: (root.foot-h - self.height) / 2;
+                    text: root.selection.is-video ? "PLAY" : "VIEW";
+                    icon: @image-url("../assets/icons/player-play.svg");
+                    accent: true;
+                    tapped => { root.play(); }
+                }
+                TextButton {
+                    y: (root.foot-h - self.height) / 2;
+                    text: root.selection.cached ? "SAVED" : "DOWNLOAD";
+                    icon: @image-url("../assets/icons/download.svg");
+                    enabled: !root.selection.cached;
+                    tapped => { root.download(); }
+                }
+                TextButton {
+                    y: (root.foot-h - self.height) / 2;
+                    text: root.selection.starred ? "STARRED" : "STAR";
+                    icon: root.selection.starred ? @image-url("../assets/icons/star-filled.svg") : @image-url("../assets/icons/star.svg");
+                    tapped => { root.favorite(); }
+                }
+                TextButton {
+                    y: (root.foot-h - self.height) / 2;
+                    text: root.selection.delete-armed ? "CONFIRM DELETE" : "DELETE";
+                    icon: @image-url("../assets/icons/trash.svg");
+                    danger: true;
+                    enabled: root.selection.deletable;
+                    tapped => { root.delete(); }
+                }
+            }
+        }
+    }
+}
+
+// ── Player ────────────────────────────────────────────────────────────────────
+// Transport over the 720p proxy the feed pipeline is presenting. The assists and the
+// LUT keys work here exactly as on live view.
+
+export struct PlayerView {
+    title: string,
+    tag: string,
+    position-label: string,
+    duration-label: string,
+    progress: float,
+    playing: bool,
+    assists: string,
+    /// A still: no transport, the picture is the whole screen.
+    is-photo: bool,
+}
+
+component PlayerPage {
+    in property <PlayerView> view;
+    callback back();
+    callback toggle();
+    callback seek(float);
+
+    property <length> bar-h: 64px;
+    property <length> foot-h: 88px;
+
+    // Header.
+    Rectangle {
+        x: 0; y: 0; width: parent.width;
+        height: root.bar-h;
+        background: Pal.bar;
+        IconButton {
+            x: 8px; y: (parent.height - self.height) / 2;
+            icon: @image-url("../assets/icons/arrow-left.svg");
+            key: "ESC";
+            tapped => { root.back(); }
+        }
+        Text {
+            text: root.view.title;
+            color: Pal.ink;
+            font-family: Pal.font; font-size: 15px; font-weight: 700;
+            x: 72px; y: (parent.height - self.preferred-height) / 2;
+            width: parent.width - 300px;
+            overflow: elide;
+        }
+        if root.view.tag != "": Rectangle {
+            x: parent.width - self.width - 16px; y: (parent.height - self.height) / 2;
+            width: tag.preferred-width + 18px; height: 26px;
+            border-radius: 6px;
+            background: #ffffff1f;
+            tag := Text {
+                text: root.view.tag;
+                color: Pal.ink-dim;
+                font-family: Pal.font; font-size: 11px; font-weight: 700; letter-spacing: 1px;
+                x: (parent.width - self.preferred-width) / 2;
+                y: (parent.height - self.preferred-height) / 2;
+            }
+        }
+    }
+
+    // Transport.
+    if !root.view.is-photo: Rectangle {
+        x: 0; y: parent.height - root.foot-h; width: parent.width;
+        height: root.foot-h;
+        background: Pal.bar;
+
+        IconButton {
+            x: 16px; y: (parent.height - self.height) / 2;
+            icon: root.view.playing ? @image-url("../assets/icons/player-pause.svg") : @image-url("../assets/icons/player-play.svg");
+            key: "SPACE";
+            tapped => { root.toggle(); }
+        }
+        Text {
+            text: root.view.position-label;
+            color: Pal.ink;
+            font-family: Pal.font; font-size: 13px; font-weight: 700;
+            x: 84px; y: (parent.height - self.preferred-height) / 2;
+        }
+        track := Rectangle {
+            x: 160px; y: (parent.height - self.height) / 2;
+            width: parent.width - 160px - 200px; height: 24px;
+            Rectangle {
+                y: (parent.height - self.height) / 2; height: 4px; width: parent.width;
+                border-radius: 2px; background: #ffffff33;
+                Rectangle {
+                    width: parent.width * root.view.progress; height: parent.height;
+                    border-radius: 2px; background: Pal.accent;
+                }
+            }
+            Rectangle {
+                width: 14px; height: 14px; border-radius: 7px;
+                x: parent.width * root.view.progress - self.width / 2;
+                y: (parent.height - self.height) / 2;
+                background: Pal.ink;
+            }
+            TouchArea {
+                pointer-event(e) => {
+                    if e.kind == PointerEventKind.down {
+                        root.seek((self.mouse-x / track.width).clamp(0, 1));
+                    }
+                }
+                moved => {
+                    if self.pressed {
+                        root.seek((self.mouse-x / track.width).clamp(0, 1));
+                    }
+                }
+            }
+        }
+        Text {
+            text: root.view.duration-label;
+            color: Pal.ink-dim;
+            font-family: Pal.font; font-size: 13px; font-weight: 700;
+            x: parent.width - 190px; y: (parent.height - self.preferred-height) / 2;
+        }
+        Text {
+            text: root.view.assists;
+            color: Pal.ink-faint;
+            font-family: Pal.font; font-size: 11px; font-weight: 700; letter-spacing: 1px;
+            x: parent.width - self.preferred-width - 16px; y: (parent.height - self.preferred-height) / 2;
+        }
+    }
+}
+
 // ── Root overlay ──────────────────────────────────────────────────────────────
 
 export component HudOverlay inherits Window {
@@ -979,6 +1415,17 @@ export component HudOverlay inherits Window {
     in property <string> timecode: "";
     /// Rule-of-thirds lines over the picture.
     in property <bool> grid-on: false;
+
+    // Which screen is up: 0 viewfinder, 1 library, 2 player, 3 photo.
+    in property <int> screen: 0;
+    in property <[string]> library-tabs: ["ALL", "VIDEOS", "PHOTOS", "FAVORITES"];
+    in property <int> library-tab: 0;
+    in property <string> library-sort: "Newest";
+    in property <string> library-status: "";
+    in property <[MediaCell]> library-cells: [];
+    in property <MediaSelection> library-selection;
+    in property <bool> library-has-selection: false;
+    in property <PlayerView> player;
 
     // The open sheet, if any: its title, tabs and rows come from the shell.
     in property <bool> sheet-open: false;
@@ -1024,6 +1471,18 @@ export component HudOverlay inherits Window {
     callback sheet-picked(int, int);
     callback sheet-tab-picked(int);
     callback sheet-closed();
+    callback library-back();
+    callback library-tab-picked(int);
+    callback library-sort-tapped();
+    callback library-refresh();
+    callback library-cell-tapped(int);
+    callback library-play();
+    callback library-download();
+    callback library-favorite();
+    callback library-delete();
+    callback player-back();
+    callback player-toggle();
+    callback player-seek(float);
 
     background: transparent;
 
@@ -1035,7 +1494,7 @@ export component HudOverlay inherits Window {
     property <length> left-gutter: root.fit-x;
     property <length> right-gutter: root.width - root.fit-x - root.fit-width;
 
-    if root.grid-on: Rectangle {
+    if root.screen == 0 && root.grid-on: Rectangle {
         x: root.fit-x; y: root.fit-y; width: root.fit-width; height: root.fit-height;
         Rectangle { x: parent.width / 3; width: 1px; height: parent.height; background: #ffffff59; }
         Rectangle { x: parent.width * 2 / 3; width: 1px; height: parent.height; background: #ffffff59; }
@@ -1043,7 +1502,7 @@ export component HudOverlay inherits Window {
         Rectangle { y: parent.height * 2 / 3; height: 1px; width: parent.width; background: #ffffff59; }
     }
 
-    TopBar {
+    if root.screen == 0: TopBar {
         x: 0; y: 0; width: parent.width;
         timecode: root.timecode;
         follow-label: root.follow-label;
@@ -1060,7 +1519,7 @@ export component HudOverlay inherits Window {
         exit-tapped => { root.exit-tapped(); }
     }
 
-    ZoomDial {
+    if root.screen == 0: ZoomDial {
         x: root.fit-x + (root.fit-width - self.width) / 2;
         y: root.mid-top + 10px;
         value <=> root.zoom-value;
@@ -1069,7 +1528,7 @@ export component HudOverlay inherits Window {
         changed(v) => { root.zoom-changed(v); }
     }
 
-    ExposureColumn {
+    if root.screen == 0: ExposureColumn {
         // Park in the left gutter when there is one wide enough, else over the picture edge.
         x: root.left-gutter >= self.width + 24px ? (root.left-gutter - self.width) / 2 : root.fit-x + 16px;
         y: root.mid-top + (root.mid-bottom - root.mid-top - self.height) / 2;
@@ -1079,7 +1538,7 @@ export component HudOverlay inherits Window {
         wb: root.wb;
     }
 
-    StatusColumn {
+    if root.screen == 0: StatusColumn {
         x: root.right-gutter >= self.width + 24px
             ? root.width - root.right-gutter + (root.right-gutter - self.width) / 2
             : root.fit-x + root.fit-width - self.width - 16px;
@@ -1091,7 +1550,7 @@ export component HudOverlay inherits Window {
         fps-text: root.fps-text;
     }
 
-    BottomBar {
+    if root.screen == 0: BottomBar {
         x: 0; y: parent.height - self.height; width: parent.width;
         is-recording: root.is-recording;
         photo-mode: root.photo-mode;
@@ -1112,20 +1571,20 @@ export component HudOverlay inherits Window {
         gimbal-released => { root.gimbal-released(); }
     }
 
-    if root.countdown != "": CountdownPanel {
+    if root.screen == 0 && root.countdown != "": CountdownPanel {
         x: root.fit-x + (root.fit-width - self.width) / 2;
         y: root.mid-top + (root.mid-bottom - root.mid-top - self.height) / 2;
         seconds: root.countdown;
     }
 
-    if root.phase-message != "": PhasePanel {
+    if root.screen == 0 && root.phase-message != "": PhasePanel {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         message: root.phase-message;
         failed: root.phase-failed;
     }
 
-    if root.sheet-open: Rectangle {
+    if root.screen == 0 && root.sheet-open: Rectangle {
         // A scrim: a tap outside the panel closes it, and nothing under it is a control.
         background: #00000059;
         TouchArea { clicked => { root.sheet-closed(); } }
@@ -1141,5 +1600,33 @@ export component HudOverlay inherits Window {
             tab-picked(i) => { root.sheet-tab-picked(i); }
             close => { root.sheet-closed(); }
         }
+    }
+
+    if root.screen == 1: LibraryPage {
+        width: parent.width; height: parent.height;
+        tabs: root.library-tabs;
+        tab: root.library-tab;
+        sort-label: root.library-sort;
+        status: root.library-status;
+        cells: root.library-cells;
+        selection: root.library-selection;
+        has-selection: root.library-has-selection;
+        back => { root.library-back(); }
+        tab-picked(i) => { root.library-tab-picked(i); }
+        sort-tapped => { root.library-sort-tapped(); }
+        refresh => { root.library-refresh(); }
+        cell-tapped(i) => { root.library-cell-tapped(i); }
+        play => { root.library-play(); }
+        download => { root.library-download(); }
+        favorite => { root.library-favorite(); }
+        delete => { root.library-delete(); }
+    }
+
+    if root.screen == 2 || root.screen == 3: PlayerPage {
+        width: parent.width; height: parent.height;
+        view: root.player;
+        back => { root.player-back(); }
+        toggle => { root.player-toggle(); }
+        seek(p) => { root.player-seek(p); }
     }
 }

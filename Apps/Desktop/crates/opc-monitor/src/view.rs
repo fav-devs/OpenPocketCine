@@ -8,8 +8,11 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use opc_camera::Recovery;
+use opc_chrome::Screen;
 use opc_decode::{Codec, Decoder, OwnedPicture};
 use opc_render::{write_png, FeedRenderer, Lut, Presented};
+
+use crate::media::MediaDriver;
 use opc_ui::{Key as UiKey, Phase};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
@@ -57,6 +60,9 @@ struct View {
     pointer: (f64, f64),
     pointer_control: bool,
     started: Instant,
+    media: MediaDriver,
+    /// A name for the cache folder: the body's model id, or "camera".
+    camera_id: String,
 }
 
 impl View {
@@ -76,6 +82,13 @@ impl View {
                         window.set_fullscreen(wanted.then_some(Fullscreen::Borderless(None)));
                     }
                 }
+                Intent::Media(action) => {
+                    let now = self.now();
+                    let camera_id = self.camera_id.clone();
+                    for command in self.media.action(&mut self.shell, action, &camera_id, now) {
+                        self.link.send(command);
+                    }
+                }
             }
         }
         if let Some(wanted) = self.shell.take_lut_change() {
@@ -84,6 +97,23 @@ impl View {
                 if let Err(error) = renderer.set_lut(cube) {
                     eprintln!("could not set the cube: {error}");
                 }
+            }
+        }
+    }
+
+    /// Intents raised between frames rather than by a key or a tap: sends and media
+    /// fetches. Nothing here can close the window.
+    fn carry_out_quietly(&mut self, intents: Vec<Intent>, now: f64) {
+        for intent in intents {
+            match intent {
+                Intent::Send(command) => self.link.send(command),
+                Intent::Media(action) => {
+                    let camera_id = self.camera_id.clone();
+                    for command in self.media.action(&mut self.shell, action, &camera_id, now) {
+                        self.link.send(command);
+                    }
+                }
+                Intent::Still | Intent::Quit | Intent::ToggleFullscreen => {}
             }
         }
     }
@@ -99,7 +129,12 @@ impl View {
                     let keyframe = is_keyframe(&bytes);
                     self.pending.push(Unit { keyframe, bytes });
                 }
+                FromCamera::Frame(frame) => {
+                    let now = self.now();
+                    self.media.frame(frame, now);
+                }
                 FromCamera::Status(status) => {
+                    self.media.status(status.in_playback);
                     self.shell.set_status(*status);
                     if matches!(self.shell.phase(), Phase::Waiting) && self.latest.is_some() {
                         self.shell.set_phase(Phase::Live);
@@ -180,20 +215,27 @@ impl View {
         self.decode();
         let now = self.now();
         let intents = self.shell.tick(now);
-        for intent in intents {
-            if let Intent::Send(command) = intent {
-                self.link.send(command);
-            }
+        self.carry_out_quietly(intents, now);
+        for command in self.media.tick(&mut self.shell, now) {
+            self.link.send(command);
         }
 
-        let (Some(renderer), Some(latest)) = (self.renderer.as_mut(), self.latest.as_ref()) else {
+        // A screen other than the viewfinder presents its own picture: black under the
+        // library, the still in the viewer, the clip's frame in the player.
+        let on_screen = self.shell.screen() != Screen::Viewfinder;
+        let latest = if on_screen {
+            Some(self.media.picture().clone())
+        } else {
+            self.latest.clone()
+        };
+        let (Some(renderer), Some(latest)) = (self.renderer.as_mut(), latest.as_ref()) else {
             // No picture yet. ControlFlow::Wait (set in about_to_wait) keeps the GPU
             // idle; nothing to present until the first frame arrives.
             return;
         };
 
         self.shell.set_source(latest.width, latest.height);
-        if matches!(self.shell.phase(), Phase::Waiting | Phase::Recovering) {
+        if !on_screen && matches!(self.shell.phase(), Phase::Waiting | Phase::Recovering) {
             self.shell.set_phase(Phase::Live);
         }
 
@@ -220,8 +262,12 @@ impl View {
 
         match renderer.present(&picture, options) {
             Ok(Presented::Shown) => {
-                self.shell.note_presented(now);
-                self.link.note_presented();
+                if on_screen {
+                    self.media.note_presented(now);
+                } else {
+                    self.shell.note_presented(now);
+                    self.link.note_presented();
+                }
             }
             Ok(Presented::Rebuilt) => {}
             Err(error) => eprintln!("present failed: {error}"),
@@ -441,7 +487,10 @@ impl ApplicationHandler for View {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if self.latest.is_some() {
+        if self.latest.is_some()
+            || self.media.is_active()
+            || self.shell.screen() != Screen::Viewfinder
+        {
             // Live feed: poll continuously so latency stays at one frame.
             event_loop.set_control_flow(ControlFlow::Poll);
         } else {
@@ -464,6 +513,15 @@ pub fn run(options: Options) -> Result<(), String> {
         renderer: None,
         window: None,
         shell: Shell::new().with_grade(graded).with_model(options.model_id),
+        media: {
+            let mut media = MediaDriver::default();
+            media.set_body(options.model_id);
+            media
+        },
+        camera_id: options
+            .model_id
+            .map(|id| format!("model-{id:04x}"))
+            .unwrap_or_else(|| "camera".to_string()),
         link,
         decoder: None,
         pending: Vec::new(),

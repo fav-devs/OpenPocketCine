@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 
+use opc_camera::DumlFrame;
 use opc_camera::{CameraSession, Command, Recovery, SessionEvent, Status};
 
 /// What the camera thread tells the window.
@@ -25,6 +26,9 @@ pub enum FromCamera {
     Recovering(Recovery),
     /// The camera never answered, or the link died.
     Lost(String),
+    /// A reply the media browser reads: catalogue chunks, delete and favourite
+    /// answers, and the playback entry's acknowledgement.
+    Frame(DumlFrame),
 }
 
 /// What the window tells the camera thread.
@@ -221,12 +225,28 @@ fn run(
                     ));
                     return;
                 }
-                // Command replies are already folded into the status decoder.
-                SessionEvent::Frame(_) => continue,
+                // Status replies are already folded into the status decoder; only the
+                // media browser reads frames by hand.
+                SessionEvent::Frame(frame) => {
+                    if is_media_reply(&frame) {
+                        FromCamera::Frame(frame)
+                    } else {
+                        continue;
+                    }
+                }
             };
             if events.send(message).is_err() {
                 return;
             }
         }
     }
+}
+
+/// The replies the media browser drives on: catalogue chunks (`0x00/0x27`), delete
+/// (`0x00/0x28`), favourite (`0x02/0xBF`) and the playback entry (`0x02/0x0C`).
+fn is_media_reply(frame: &DumlFrame) -> bool {
+    matches!(
+        (frame.cmd_set, frame.cmd_id),
+        (0x00, 0x27) | (0x00, 0x28) | (0x02, 0xBF) | (0x02, 0x0C)
+    )
 }

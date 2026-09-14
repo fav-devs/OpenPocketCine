@@ -35,6 +35,8 @@ mod connect;
 #[cfg(opc_core_linked)]
 mod link;
 #[cfg(opc_core_linked)]
+mod media;
+#[cfg(opc_core_linked)]
 mod view;
 
 #[cfg(not(opc_core_linked))]

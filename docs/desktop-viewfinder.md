@@ -56,6 +56,44 @@ A chip lights up when the camera confirms the value, not when it is tapped; a se
 the body never reports (audio channel, field of view, gimbal speed) is kept as last
 commanded.
 
+## The library
+
+The gallery button, or `G`, opens the camera's card over the picture: a grid of
+thumbnails with `ALL · VIDEOS · PHOTOS · FAVORITES` tabs, a sort chip
+(`Newest · Oldest · Name · Rating`) and Refresh. Tapping a clip fills the bar along the
+bottom with its name, duration, size and resolution, and the actions:
+
+- **PLAY** fetches the 720p `.LRF` proxy to the cache and opens the player on it; the
+  original is the fallback when there is no proxy. **VIEW** does the same for a still.
+- **DOWNLOAD** fetches the original into the library folder, with a progress bar.
+- **STAR** flips the favourite locally and tells the camera when the record carries a
+  handle to tell it with.
+- **DELETE** arms on the first tap and sends on the second. Only a handle the core's
+  base + step fit vouched for ever goes out; a shared or unfitted handle greys the
+  button. A delete is irreversible.
+
+Listing follows the phones' sequence and the Osmosis notes for the bodies that need
+them: enter playback (`0x02/0x0c`, three tries), fall through to the Pocket 3's
+`0x01/0x01` entry at 20 Hz when the body refuses, wait 1.7 s for the store to mount,
+then list the internal store, the trigger, and the card, and collect until the camera
+goes quiet. Older pages walk the oldest video handle down while playback holds; a body
+that never enters still lists its newest page. The catalogue itself is decoded by the
+Swift core through the facade — no manifest byte is read in Rust — and the last list
+and the local stars are kept per camera under the platform cache folder, so the
+library opens instantly next time.
+
+Closing the library exits playback until the body's playback bit clears and then asks
+for live view again, the same loop the phones run.
+
+## The player
+
+The proxy plays through the feed pipeline, so the LUT, zebra, peaking and mirror keys
+work on it exactly as on live view and the chrome says which are on. `Space` pauses,
+the bar scrubs, `Esc` goes back to the library. A still is converted to the same 4:2:0
+path, so it is graded too. Playback is from the file on disk, never streamed from
+`/v2`: the camera parks `moov` at the end and serves no extension, which no player
+copes with.
+
 Every button carries its key hint in small type, so a keyboard operator learns the
 bindings from the screen. When the window is wider than the picture, the two plates park
 in the black gutters and leave the shot clean.
@@ -83,6 +121,7 @@ writes PNGs of the finding, live, recording, failed and wide-window states.
 | Drag | track what you drew around | `X` | stop tracking |
 | `[` / `]` | step resolution / frame rate | `H` | hide the chrome |
 | `Tab` | settings | `E` | exposure sheet |
+| `G` | the library | `R` | refresh the list (library) |
 | `F11` | fullscreen (button) | `Esc` | close a sheet first |
 | `Z` | zebra | `P` | peaking |
 | `L` | colour cube | `M` | mirror |

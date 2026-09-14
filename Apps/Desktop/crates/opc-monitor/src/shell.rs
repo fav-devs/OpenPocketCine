@@ -9,8 +9,10 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use opc_camera::{Command, Status};
-use opc_chrome::{Chrome, ChromeIntent, ChromeState};
+use opc_chrome::{Chrome, ChromeIntent, ChromeState, Screen};
+use opc_media::MediaFile;
 
+use crate::library::{Library, MediaAction, Player};
 use crate::sheets::{self, Pick, Prefs, SheetKind};
 use opc_render::{letterbox, GradeOptions, Peaking, PeakingSense, Rgba, Zebra};
 use opc_ui::{
@@ -44,6 +46,8 @@ pub enum Intent {
     Quit,
     /// Toggle the window between fullscreen and windowed.
     ToggleFullscreen,
+    /// Something for the media browser: a fetch, a screen change, the player.
+    Media(MediaAction),
 }
 
 /// The gimbal's live mode, as commanded. The body's GET cannot tell FPV from Tilt
@@ -192,6 +196,11 @@ pub struct Shell {
     prefs: Prefs,
     /// The body's model id for commands that encode per model, or -1 when unknown.
     model_id: i32,
+    screen: Screen,
+    library: Library,
+    player: Option<Player>,
+    /// Delete and favourite carry a running index the camera does not police.
+    media_counter: u32,
 }
 
 impl Default for Shell {
@@ -231,6 +240,10 @@ impl Shell {
             sheet_tab: 0,
             prefs: Prefs::default(),
             model_id: -1,
+            screen: Screen::Viewfinder,
+            library: Library::default(),
+            player: None,
+            media_counter: 0,
             drawn_second: None,
         }
     }
@@ -429,6 +442,12 @@ impl Shell {
         if key == Key::Escape && self.sheet.is_some() {
             self.close_sheet();
             return Vec::new();
+        }
+        if self.screen != Screen::Viewfinder {
+            return self.press_on_screen(key);
+        }
+        if key == Key::Char('g') || key == Key::Char('G') {
+            return self.open_library();
         }
         if self.stick.set(key, true) {
             self.stick_sent_at = now;
@@ -715,12 +734,261 @@ impl Shell {
                     }
                 }
                 ChromeIntent::Exit => fired.push(Intent::Quit),
+                ChromeIntent::OpenGallery => fired.extend(self.open_library()),
+                ChromeIntent::LibraryBack => fired.extend(self.close_library()),
+                ChromeIntent::LibraryTab(index) => {
+                    if let Some(tab) = opc_media::LibraryTab::ALL.get(index) {
+                        self.library.tab = *tab;
+                        self.chrome_stale = true;
+                    }
+                }
+                ChromeIntent::LibrarySortNext => {
+                    self.library.sort = self.library.sort.next();
+                    self.chrome_stale = true;
+                }
+                ChromeIntent::LibraryRefresh => {
+                    fired.extend(self.press_on_screen(Key::Char('r')));
+                }
+                ChromeIntent::LibrarySelect(index) => {
+                    self.library.select_index(index);
+                    self.chrome_stale = true;
+                }
+                ChromeIntent::LibraryPlay => fired.extend(self.library_open_selected()),
+                ChromeIntent::LibraryDownload => {
+                    if let Some(file) = self.library.selected_file().cloned() {
+                        self.library.progress.insert(file.path.clone(), (0, None));
+                        self.chrome_stale = true;
+                        fired.push(Intent::Media(MediaAction::Download(file)));
+                    }
+                }
+                ChromeIntent::LibraryFavorite => {
+                    let counter = self.next_media_counter();
+                    if let Some(command) = self.library.toggle_favorite(counter) {
+                        fired.push(Intent::Send(command));
+                    }
+                    self.chrome_stale = true;
+                }
+                ChromeIntent::LibraryDelete => {
+                    let counter = self.next_media_counter();
+                    if let Some(command) = self.library.delete_tapped(counter) {
+                        fired.push(Intent::Send(command));
+                    }
+                    self.chrome_stale = true;
+                }
+                ChromeIntent::PlayerBack => fired.extend(self.close_player()),
+                ChromeIntent::PlayerToggle => fired.extend(self.player_toggle()),
+                ChromeIntent::PlayerSeek(fraction) => {
+                    if let Some(player) = self.player.as_mut() {
+                        let position = (f64::from(fraction).clamp(0.0, 1.0)
+                            * player.duration_ms as f64)
+                            as i64;
+                        player.position_ms = position;
+                        self.chrome_stale = true;
+                        fired.push(Intent::Media(MediaAction::PlayerSeek(position)));
+                    }
+                }
                 ChromeIntent::FullscreenToggle => fired.push(Intent::ToggleFullscreen),
                 // Surfaces that do not exist on the desktop yet.
-                ChromeIntent::OpenGallery | ChromeIntent::OrientationToggle => {}
+                ChromeIntent::OrientationToggle => {}
             }
         }
         fired
+    }
+
+    // ── Screens ──────────────────────────────────────────────────────────────
+
+    pub fn screen(&self) -> Screen {
+        self.screen
+    }
+
+    pub fn library(&self) -> &Library {
+        &self.library
+    }
+
+    pub fn library_mut(&mut self) -> &mut Library {
+        self.chrome_stale = true;
+        &mut self.library
+    }
+
+    pub fn player(&self) -> Option<&Player> {
+        self.player.as_ref()
+    }
+
+    fn next_media_counter(&mut self) -> u32 {
+        self.media_counter = self.media_counter.wrapping_add(1);
+        self.media_counter
+    }
+
+    /// The gallery button, or `G`: the library comes up over the picture.
+    pub fn open_library(&mut self) -> Vec<Intent> {
+        if self.screen == Screen::Library {
+            return Vec::new();
+        }
+        self.close_sheet();
+        self.screen = Screen::Library;
+        self.player = None;
+        self.library.listing = true;
+        self.library.status.clear();
+        self.chrome_stale = true;
+        vec![Intent::Media(MediaAction::OpenLibrary)]
+    }
+
+    pub fn close_library(&mut self) -> Vec<Intent> {
+        if self.screen == Screen::Viewfinder {
+            return Vec::new();
+        }
+        self.screen = Screen::Viewfinder;
+        self.player = None;
+        self.library.delete_armed = None;
+        self.chrome_stale = true;
+        vec![Intent::Media(MediaAction::CloseLibrary)]
+    }
+
+    /// The window listed a page: append what is new.
+    pub fn library_listed(&mut self, files: Vec<MediaFile>, done: bool) {
+        for file in files {
+            if !self
+                .library
+                .files
+                .iter()
+                .any(|known| known.path == file.path)
+            {
+                self.library.files.push(file);
+            }
+        }
+        self.library.listing = !done;
+        self.chrome_stale = true;
+    }
+
+    pub fn library_status(&mut self, status: impl Into<String>) {
+        self.library.status = status.into();
+        self.library.listing = false;
+        self.chrome_stale = true;
+    }
+
+    /// A thumbnail decoded: the chrome keeps it by path.
+    pub fn library_thumb(&mut self, path: &str, width: u32, height: u32, rgba: &[u8]) {
+        if let Some(cr) = self.chrome_renderer.as_mut() {
+            cr.set_thumb(path, width, height, rgba);
+        }
+        self.chrome_stale = true;
+    }
+
+    pub fn library_progress(&mut self, path: &str, done: u64, total: Option<u64>) {
+        self.library
+            .progress
+            .insert(path.to_string(), (done, total));
+        self.chrome_stale = true;
+    }
+
+    /// A file landed on disk.
+    pub fn library_file_ready(&mut self, path: &str, proxy: bool) {
+        self.library.progress.remove(path);
+        if proxy {
+            self.library.proxies.insert(path.to_string());
+        } else {
+            self.library.cached.insert(path.to_string());
+            self.library
+                .notes
+                .insert(path.to_string(), "Saved to the library folder".to_string());
+        }
+        self.chrome_stale = true;
+    }
+
+    pub fn library_failed(&mut self, path: &str, reason: &str) {
+        self.library.progress.remove(path);
+        self.library
+            .notes
+            .insert(path.to_string(), format!("Could not fetch: {reason}"));
+        self.chrome_stale = true;
+    }
+
+    /// The window opened a clip in the player, or a still in the viewer.
+    pub fn open_player(&mut self, file: MediaFile, duration_ms: i64, proxy: bool, is_photo: bool) {
+        self.screen = if is_photo {
+            Screen::Photo
+        } else {
+            Screen::Player
+        };
+        self.player = Some(Player {
+            file,
+            playing: !is_photo,
+            position_ms: 0,
+            duration_ms,
+            proxy,
+            is_photo,
+        });
+        self.chrome_stale = true;
+    }
+
+    pub fn player_position(&mut self, position_ms: i64) {
+        if let Some(player) = self.player.as_mut() {
+            if (player.position_ms / 1000) != (position_ms / 1000) {
+                self.chrome_stale = true;
+            }
+            player.position_ms = position_ms;
+        }
+    }
+
+    /// The clip ran out: the transport shows the end, paused.
+    pub fn player_ended(&mut self) {
+        if let Some(player) = self.player.as_mut() {
+            player.playing = false;
+            player.position_ms = player.duration_ms;
+            self.chrome_stale = true;
+        }
+    }
+
+    fn press_on_screen(&mut self, key: Key) -> Vec<Intent> {
+        match (self.screen, key) {
+            (Screen::Library, Key::Escape) => self.close_library(),
+            (Screen::Library, Key::Char('r' | 'R')) => {
+                self.library.listing = true;
+                self.library.status.clear();
+                self.chrome_stale = true;
+                vec![Intent::Media(MediaAction::Refresh)]
+            }
+            (Screen::Player | Screen::Photo, Key::Escape) => self.close_player(),
+            (Screen::Player, Key::Space) => self.player_toggle(),
+            (_, Key::Char('h' | 'H')) => {
+                self.chrome_visible = !self.chrome_visible;
+                self.chrome_stale = true;
+                Vec::new()
+            }
+            (_, Key::Char('z' | 'Z')) => self.act(Action::ToggleZebra, 0.0),
+            (_, Key::Char('p' | 'P')) => self.act(Action::TogglePeaking, 0.0),
+            (_, Key::Char('l' | 'L')) => self.act(Action::ToggleGrade, 0.0),
+            (_, Key::Char('m' | 'M')) => self.act(Action::ToggleMirror, 0.0),
+            _ => Vec::new(),
+        }
+    }
+
+    fn close_player(&mut self) -> Vec<Intent> {
+        self.player = None;
+        self.screen = Screen::Library;
+        self.chrome_stale = true;
+        vec![Intent::Media(MediaAction::ClosePlayer)]
+    }
+
+    fn player_toggle(&mut self) -> Vec<Intent> {
+        if let Some(player) = self.player.as_mut() {
+            player.playing = !player.playing;
+            self.chrome_stale = true;
+            return vec![Intent::Media(MediaAction::PlayerToggle)];
+        }
+        Vec::new()
+    }
+
+    fn library_open_selected(&mut self) -> Vec<Intent> {
+        let Some(file) = self.library.selected_file().cloned() else {
+            return Vec::new();
+        };
+        self.chrome_stale = true;
+        if file.is_video() {
+            vec![Intent::Media(MediaAction::Play(file))]
+        } else {
+            vec![Intent::Media(MediaAction::Photo(file))]
+        }
     }
 
     fn controls_enabled(&self) -> bool {
@@ -740,8 +1008,9 @@ impl Shell {
         if !self.chrome_visible {
             return false;
         }
-        // An open sheet owns the window: the scrim around it is a close button.
-        if self.sheet.is_some() {
+        // An open sheet owns the window: the scrim around it is a close button. So
+        // does any screen but the viewfinder: there is no picture to draw a box on.
+        if self.sheet.is_some() || self.screen != Screen::Viewfinder {
             return true;
         }
         if let Some(cr) = &self.chrome_renderer {
@@ -859,6 +1128,16 @@ impl Shell {
                 String::new()
             };
             let grid_on = self.prefs.grid;
+            let screen = self.screen;
+            let library = (screen == Screen::Library).then(|| self.library.state());
+            if screen == Screen::Library {
+                for file in self.library.thumbs_wanted() {
+                    self.chrome_pending_intents
+                        .push(Intent::Media(MediaAction::Thumb(file)));
+                }
+            }
+            let assists = self.toggles.names();
+            let player = self.player.as_ref().map(|player| player.state(&assists));
             let mut canvas = if let Some(cr) = self.chrome_renderer.as_mut() {
                 let status = &self.hud.status;
                 let link_state = self.hud.connection_chip();
@@ -909,6 +1188,9 @@ impl Shell {
                     timecode,
                     grid_on,
                     sheet,
+                    screen,
+                    library,
+                    player,
                 };
                 cr.render(&state, self.window.0, self.window.1)
             } else {

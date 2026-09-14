@@ -14,7 +14,12 @@ use slint::platform::{
     software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType},
     Platform, PlatformError, PointerEventButton, WindowEvent,
 };
-use slint::{LogicalPosition, ModelRc, PhysicalSize, SharedString, VecModel};
+use std::collections::HashMap;
+
+use slint::{
+    Image, LogicalPosition, ModelRc, PhysicalSize, Rgba8Pixel, SharedPixelBuffer, SharedString,
+    VecModel,
+};
 
 use opc_ui::canvas::Canvas;
 use opc_ui::hud::Phase;
@@ -24,7 +29,7 @@ mod generated {
     #![allow(missing_debug_implementations)]
     slint::include_modules!();
 }
-use generated::{HudOverlay, SheetRow};
+use generated::{HudOverlay, MediaCell, MediaSelection, PlayerView as SlintPlayerView, SheetRow};
 use slint::ComponentHandle;
 
 // ── Custom RGBA pixel ────────────────────────────────────────────────────────
@@ -166,6 +171,93 @@ pub enum ChromeIntent {
     SheetTab(usize),
     /// The sheet's close button, or a tap on the scrim around it.
     SheetClose,
+    // The library.
+    LibraryBack,
+    LibraryTab(usize),
+    LibrarySortNext,
+    LibraryRefresh,
+    /// A cell tapped, by index into the cells the shell passed.
+    LibrarySelect(usize),
+    LibraryPlay,
+    LibraryDownload,
+    LibraryFavorite,
+    LibraryDelete,
+    // The player.
+    PlayerBack,
+    PlayerToggle,
+    /// Where on the clip to go, 0…1.
+    PlayerSeek(f32),
+}
+
+/// Which screen the chrome draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Screen {
+    #[default]
+    Viewfinder,
+    Library,
+    Player,
+    Photo,
+}
+
+impl Screen {
+    fn index(self) -> i32 {
+        match self {
+            Self::Viewfinder => 0,
+            Self::Library => 1,
+            Self::Player => 2,
+            Self::Photo => 3,
+        }
+    }
+}
+
+/// One tile of the library grid. The thumbnail itself is looked up by path in the
+/// chrome's own cache, filled by [`Chrome::set_thumb`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellState {
+    pub path: String,
+    pub title: String,
+    /// The duration badge for a clip, or the kind for a still.
+    pub meta: String,
+    pub is_video: bool,
+    pub starred: bool,
+    pub cached: bool,
+    pub selected: bool,
+}
+
+/// The selected file's bar at the bottom of the library.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectionState {
+    pub title: String,
+    pub meta: String,
+    pub is_video: bool,
+    pub starred: bool,
+    pub cached: bool,
+    pub deletable: bool,
+    pub delete_armed: bool,
+    /// A transfer in flight, 0…1.
+    pub progress: Option<f32>,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LibraryState {
+    pub tab: usize,
+    pub sort_label: String,
+    pub status: String,
+    pub cells: Vec<CellState>,
+    pub selection: Option<SelectionState>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerState {
+    pub title: String,
+    pub tag: String,
+    pub position_label: String,
+    pub duration_label: String,
+    pub progress: f32,
+    pub playing: bool,
+    pub assists: String,
+    pub is_photo: bool,
 }
 
 /// One row of a sheet: a title and the chips beside it.
@@ -245,6 +337,9 @@ pub struct ChromeState<'a> {
     pub grid_on: bool,
     /// The open sheet, if any.
     pub sheet: Option<SheetState>,
+    pub screen: Screen,
+    pub library: Option<LibraryState>,
+    pub player: Option<PlayerState>,
 }
 
 // Layout metrics mirrored from `hud.slint`; `is_over_control` uses them for hit zones.
@@ -262,6 +357,8 @@ pub struct Chrome {
     pixels: Vec<RgbaPixel>,
     size: (u32, u32),
     intents: Rc<RefCell<Vec<ChromeIntent>>>,
+    /// Thumbnails by camera path, built once and reused across redraws.
+    thumbs: HashMap<String, Image>,
 }
 
 impl std::fmt::Debug for Chrome {
@@ -366,6 +463,37 @@ impl Chrome {
             });
         }
         simple!(on_sheet_closed, ChromeIntent::SheetClose);
+        simple!(on_library_back, ChromeIntent::LibraryBack);
+        simple!(on_library_sort_tapped, ChromeIntent::LibrarySortNext);
+        simple!(on_library_refresh, ChromeIntent::LibraryRefresh);
+        simple!(on_library_play, ChromeIntent::LibraryPlay);
+        simple!(on_library_download, ChromeIntent::LibraryDownload);
+        simple!(on_library_favorite, ChromeIntent::LibraryFavorite);
+        simple!(on_library_delete, ChromeIntent::LibraryDelete);
+        simple!(on_player_back, ChromeIntent::PlayerBack);
+        simple!(on_player_toggle, ChromeIntent::PlayerToggle);
+        {
+            let q = intents.clone();
+            component.on_library_tab_picked(move |i| {
+                if i >= 0 {
+                    q.borrow_mut().push(ChromeIntent::LibraryTab(i as usize));
+                }
+            });
+        }
+        {
+            let q = intents.clone();
+            component.on_library_cell_tapped(move |i| {
+                if i >= 0 {
+                    q.borrow_mut().push(ChromeIntent::LibrarySelect(i as usize));
+                }
+            });
+        }
+        {
+            let q = intents.clone();
+            component.on_player_seek(move |p| {
+                q.borrow_mut().push(ChromeIntent::PlayerSeek(p));
+            });
+        }
 
         Ok(Chrome {
             window,
@@ -373,6 +501,7 @@ impl Chrome {
             pixels: Vec::new(),
             size: (0, 0),
             intents,
+            thumbs: HashMap::new(),
         })
     }
 
@@ -411,6 +540,24 @@ impl Chrome {
         self.window.dispatch_event(WindowEvent::PointerExited);
     }
 
+    /// A thumbnail arrived for a camera path. Tightly packed RGBA.
+    pub fn set_thumb(&mut self, path: &str, width: u32, height: u32, rgba: &[u8]) {
+        if width == 0 || height == 0 || rgba.len() < (width * height * 4) as usize {
+            return;
+        }
+        let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+            &rgba[..(width * height * 4) as usize],
+            width,
+            height,
+        );
+        self.thumbs
+            .insert(path.to_string(), Image::from_rgba8(buffer));
+    }
+
+    pub fn has_thumb(&self, path: &str) -> bool {
+        self.thumbs.contains_key(path)
+    }
+
     /// Drain all ChromeIntents fired since the last call.
     pub fn drain_intents(&self) -> Vec<ChromeIntent> {
         self.intents.borrow_mut().drain(..).collect()
@@ -422,7 +569,8 @@ impl Chrome {
     pub fn is_over_control(&self, x: f64, y: f64, w: u32, h: u32) -> bool {
         let (w, h) = (w as f64, h as f64);
         // An open sheet owns the whole window: the scrim around it is a close button.
-        if self.component.get_sheet_open() {
+        // So does any screen but the viewfinder: there is no picture to draw a box on.
+        if self.component.get_sheet_open() || self.component.get_screen() != 0 {
             return true;
         }
         // Top bar and bottom bar (with the mode strip) hold every button.
@@ -512,6 +660,62 @@ impl Chrome {
         );
         c.set_timecode(state.timecode.clone().into());
         c.set_grid_on(state.grid_on);
+        c.set_screen(state.screen.index());
+
+        if let Some(library) = &state.library {
+            let cells: Vec<MediaCell> = library
+                .cells
+                .iter()
+                .map(|cell| {
+                    let thumb = self.thumbs.get(&cell.path).cloned();
+                    MediaCell {
+                        path: cell.path.clone().into(),
+                        title: cell.title.clone().into(),
+                        meta: cell.meta.clone().into(),
+                        has_thumb: thumb.is_some(),
+                        thumb: thumb.unwrap_or_default(),
+                        is_video: cell.is_video,
+                        starred: cell.starred,
+                        cached: cell.cached,
+                        selected: cell.selected,
+                    }
+                })
+                .collect();
+            c.set_library_cells(ModelRc::new(VecModel::from(cells)));
+            c.set_library_tab(library.tab as i32);
+            c.set_library_sort(library.sort_label.clone().into());
+            c.set_library_status(library.status.clone().into());
+            c.set_library_has_selection(library.selection.is_some());
+            if let Some(selection) = &library.selection {
+                c.set_library_selection(MediaSelection {
+                    title: selection.title.clone().into(),
+                    meta: selection.meta.clone().into(),
+                    is_video: selection.is_video,
+                    starred: selection.starred,
+                    cached: selection.cached,
+                    deletable: selection.deletable,
+                    delete_armed: selection.delete_armed,
+                    progress: selection.progress.unwrap_or(-1.0),
+                    note: selection.note.clone().into(),
+                });
+            }
+        } else if state.screen == Screen::Viewfinder && c.get_library_has_selection() {
+            c.set_library_cells(ModelRc::new(VecModel::from(Vec::<MediaCell>::new())));
+            c.set_library_has_selection(false);
+        }
+
+        if let Some(player) = &state.player {
+            c.set_player(SlintPlayerView {
+                title: player.title.clone().into(),
+                tag: player.tag.clone().into(),
+                position_label: player.position_label.clone().into(),
+                duration_label: player.duration_label.clone().into(),
+                progress: player.progress,
+                playing: player.playing,
+                assists: player.assists.clone().into(),
+                is_photo: player.is_photo,
+            });
+        }
 
         let strings = |items: &[String]| -> ModelRc<SharedString> {
             ModelRc::new(VecModel::from(

@@ -3821,6 +3821,7 @@ dependencies = [
  "opc-camera",
  "opc-chrome",
  "opc-decode",
+ "opc-media",
  "opc-render",
  "opc-ui",
  "raw-window-handle",
