@@ -60,6 +60,25 @@ A chip lights up when the camera confirms the value, not when it is tapped; a se
 the body never reports (audio channel, field of view, gimbal speed) is kept as last
 commanded.
 
+## Programmed moves
+
+`K` opens the Moves sheet: **Set here** captures the body's live pose into A, B or an
+optional C (the sheet shows the live pan and tilt as the camera reports them), the
+`A → B` and `B → C` rows pick each leg's duration, and **Start** counts 3-2-1, closes
+the sheet and runs the take with a readout in the top bar. **Stop**, any arrow key,
+or the pad cancels it with a native stop.
+
+The engine is the core's `GimbalMoveEngine` transcribed (`opc-monitor/moves.rs`) minus
+smoothing at B and pause / resume: the approach to A in steps under 120° at 120°/s,
+a two-second hold, one native timed target (`0x04/0x14`) per exact leg, legs over 180°
+or 25.5 s split into native parts along the reachable arc, every target checked
+against attitude no older than 300 ms so the firmware can never take the route
+through the missing sector, and a final check that the camera stopped within 0.15°.
+A late boundary dispatch (over 40 ms, the window's draw loop being no scheduler)
+stops the take. Attitude reaches the desktop as the `0x04/0x05` yaw, display tilt and
+native pitch the facade now reads out with every status. Timing and positional
+accuracy are unqualified on a body; see `docs/programmed-moves.md`.
+
 ## The library
 
 The gallery button, or `G`, opens the camera's card over the picture: a grid of
@@ -126,6 +145,7 @@ writes PNGs of the finding, live, recording, failed and wide-window states.
 | `[` / `]` | step resolution / frame rate | `H` | hide the chrome |
 | `Tab` | settings | `E` | exposure sheet |
 | `G` | the library | `R` | refresh the list (library) |
+| `K` | programmed moves | | |
 | `F11` | fullscreen (button) | `Esc` | close a sheet first |
 | `Z` | zebra | `P` | peaking |
 | `L` | colour cube | `M` | mirror |

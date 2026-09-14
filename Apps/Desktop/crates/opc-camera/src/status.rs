@@ -52,6 +52,13 @@ pub struct Status {
     pub available_colors: Vec<u8>,
     pub timecode: Option<String>,
     pub firmware: Option<String>,
+    /// The gimbal's last `0x04/0x05` attitude in 0.1°: yaw, display tilt (look-up
+    /// positive), and the native absolute pitch timed targets take.
+    pub gimbal_yaw_tenth: Option<i16>,
+    pub gimbal_pitch_tenth: Option<i16>,
+    pub gimbal_native_pitch_tenth: Option<i16>,
+    /// Counts attitude pushes, so a shell can tell a fresh reading from a held one.
+    pub gimbal_attitude_seq: u32,
 }
 
 impl Status {
@@ -248,6 +255,12 @@ impl StatusDecoder {
             focus_track: optional_byte(raw.focus_track),
             storage_free_mb: raw.storage_free_mb,
             storage_total_mb: raw.storage_total_mb,
+            gimbal_yaw_tenth: (raw.gimbal_attitude_seq > 0).then_some(raw.gimbal_yaw_tenth as i16),
+            gimbal_pitch_tenth: (raw.gimbal_attitude_seq > 0)
+                .then_some(raw.gimbal_pitch_tenth as i16),
+            gimbal_native_pitch_tenth: (raw.gimbal_attitude_seq > 0)
+                .then_some(raw.gimbal_native_pitch_tenth as i16),
+            gimbal_attitude_seq: raw.gimbal_attitude_seq.max(0) as u32,
             zoom_hundredths: optional(raw.zoom_hundredths),
             available_shutter: list(&raw.available_shutter, raw.available_shutter_count),
             available_iso: list(&raw.available_iso, raw.available_iso_count)

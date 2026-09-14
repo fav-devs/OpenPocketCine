@@ -211,6 +211,9 @@ typedef struct {
 #define OPC_CAM_MEDIA_DELETE 70
 #define OPC_CAM_MEDIA_FAVORITE 71
 #define OPC_CAM_PLAYBACK_SPECIAL 72
+// Native timed gimbal target `0x04/0x14`: yaw and native pitch in 0.1°, duration
+// in tenths of a second (1–255). The core refuses an unreachable or ill-timed one.
+#define OPC_CAM_GIMBAL_TIMED_TARGET 73
 
 // `DumlTransport.PktType`.
 #define OPC_PKT_HANDSHAKE 0x00
@@ -329,6 +332,13 @@ typedef struct {
     int32_t available_format_count;
     int32_t available_color_count;
     int32_t reserved;
+    // Gimbal attitude from the `0x04/0x05` heartbeat, 0.1°: yaw i16 @4, display
+    // tilt (look-up positive) from @20, and the native absolute pitch i16 @0 that
+    // `0x04/0x14` targets take. `gimbal_attitude_seq` counts pushes; zero is none.
+    int32_t gimbal_yaw_tenth;
+    int32_t gimbal_pitch_tenth;
+    int32_t gimbal_native_pitch_tenth;
+    int32_t gimbal_attitude_seq;
     /// The values this body offers, as it reported them. A picker that invents its own
     /// list offers settings the camera will refuse.
     int32_t available_shutter[OPC_STATUS_LIST_CAP];

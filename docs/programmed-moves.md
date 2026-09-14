@@ -5,6 +5,14 @@ The portable `GimbalMoveEngine` and the Android implementation control pan and
 tilt on a fixed camera body. Roll, translation and zoom are outside the path.
 Saved zoom values do not cause zoom SETs during a take.
 
+## Desktop
+
+The PC shell (`opc-monitor/moves.rs`) runs exact legs on the same native targets with
+the approach, hold, sub-move split and missing-sector guard below, and stops on stale
+attitude or a late dispatch (40 ms, from the window's draw loop rather than a
+scheduler). It does not smooth B, pause, resume, or fit a feedback delay for the B
+check. Attitude comes through the facade's status record. Unqualified on a body.
+
 ## Timing contract
 
 Save A/B and optional C, then choose each leg's duration. No operator rate

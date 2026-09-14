@@ -252,6 +252,7 @@ pub const OPC_CAM_MEDIA_LIST_TRIGGER: i32 = 69;
 pub const OPC_CAM_MEDIA_DELETE: i32 = 70;
 pub const OPC_CAM_MEDIA_FAVORITE: i32 = 71;
 pub const OPC_CAM_PLAYBACK_SPECIAL: i32 = 72;
+pub const OPC_CAM_GIMBAL_TIMED_TARGET: i32 = 73;
 
 pub const OPC_PKT_HANDSHAKE: u8 = 0x00;
 pub const OPC_PKT_TELEMETRY: u8 = 0x01;
@@ -299,6 +300,10 @@ pub struct OpcCameraStatus {
     pub available_format_count: i32,
     pub available_color_count: i32,
     pub reserved: i32,
+    pub gimbal_yaw_tenth: i32,
+    pub gimbal_pitch_tenth: i32,
+    pub gimbal_native_pitch_tenth: i32,
+    pub gimbal_attitude_seq: i32,
     pub available_shutter: [i32; OPC_STATUS_LIST_CAP],
     pub available_iso: [i32; OPC_STATUS_LIST_CAP],
     pub available_format_resolution: [i32; OPC_STATUS_LIST_CAP],
@@ -735,11 +740,12 @@ mod layout {
     #[test]
     fn the_status_record_matches_the_header_file() {
         assert_eq!(OPC_STATUS_LIST_CAP, 32);
-        assert_eq!(size_of::<OpcCameraStatus>(), 768);
-        assert_eq!(offset_of!(OpcCameraStatus, available_shutter), 128);
+        assert_eq!(size_of::<OpcCameraStatus>(), 784);
+        assert_eq!(offset_of!(OpcCameraStatus, gimbal_yaw_tenth), 128);
+        assert_eq!(offset_of!(OpcCameraStatus, available_shutter), 144);
         assert_eq!(
             offset_of!(OpcCameraStatus, available_color),
-            128 + 4 * 32 * 4
+            144 + 4 * 32 * 4
         );
     }
 

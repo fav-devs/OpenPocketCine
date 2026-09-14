@@ -150,6 +150,7 @@ component TopBar {
     in property <bool>   is-recording;
     in property <string> rec-elapsed;
     in property <string> timecode;
+    in property <string> move-text;
     in property <bool>   enabled;
 
     callback menu-tapped();
@@ -225,6 +226,26 @@ component TopBar {
                     font-weight: 700;
                     letter-spacing: 1px;
                     vertical-alignment: center;
+                }
+            }
+
+            if root.move-text != "": Rectangle {
+                height: 28px;
+                width: mt.preferred-width + 24px;
+                y: (parent.height - self.height) / 2;
+                background: #ffc40026;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: Pal.accent;
+                mt := Text {
+                    text: root.move-text;
+                    color: Pal.accent;
+                    font-family: Pal.font;
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: 0.8px;
+                    x: (parent.width - self.preferred-width) / 2;
+                    y: (parent.height - self.preferred-height) / 2;
                 }
             }
 
@@ -1415,6 +1436,8 @@ export component HudOverlay inherits Window {
     in property <string> timecode: "";
     /// Rule-of-thirds lines over the picture.
     in property <bool> grid-on: false;
+    /// A programmed move's readout, shown in the top bar while a take runs.
+    in property <string> move-text: "";
 
     // Which screen is up: 0 viewfinder, 1 library, 2 player, 3 photo.
     in property <int> screen: 0;
@@ -1505,6 +1528,7 @@ export component HudOverlay inherits Window {
     if root.screen == 0: TopBar {
         x: 0; y: 0; width: parent.width;
         timecode: root.timecode;
+        move-text: root.move-text;
         follow-label: root.follow-label;
         format-label: root.format-label;
         expo-label: root.expo-label;

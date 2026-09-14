@@ -867,3 +867,58 @@ fn with_the_ramp_on_a_throw_eases_in_and_eases_back_to_rest() {
         "nothing more goes out once rested"
     );
 }
+
+// ── Programmed moves ─────────────────────────────────────────────────────────
+
+#[test]
+fn a_take_captures_points_from_the_live_pose_counts_down_and_sends_timed_targets() {
+    use opc_monitor::sheets::SheetKind;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    let pose = |yaw_tenth: i16, seq: u32| Status {
+        gimbal_yaw_tenth: Some(yaw_tenth),
+        gimbal_pitch_tenth: Some(0),
+        gimbal_native_pitch_tenth: Some(0),
+        gimbal_attitude_seq: seq,
+        ..Status::default()
+    };
+    shell.tick(0.0);
+    shell.set_status(pose(100, 1));
+    assert!(shell.press(Key::Char('k'), 0.0).is_empty());
+    assert_eq!(shell.sheet(), Some(SheetKind::Moves));
+    shell.set_point_for_test(opc_monitor::sheets::Slot::A);
+    shell.set_status(pose(600, 2));
+    shell.set_point_for_test(opc_monitor::sheets::Slot::B);
+    assert_eq!(shell.program().a.map(|p| p.yaw), Some(10.0));
+    assert_eq!(shell.program().b.map(|p| p.yaw), Some(60.0));
+    shell.set_leg_for_test(opc_monitor::sheets::Slot::A, 4.0);
+
+    // Start: the sheet closes and a 3 s countdown runs before anything is sent.
+    shell.tick(1.0);
+    shell.set_status(pose(0, 3));
+    assert!(shell.start_move_for_test().is_empty());
+    assert_eq!(shell.sheet(), None);
+    assert!(shell.move_running());
+    assert!(sent(&shell.tick(2.0)).is_empty(), "still counting down");
+
+    // After the countdown, the approach to A goes out against fresh attitude.
+    let mut first = Vec::new();
+    let mut t = 4.05;
+    while first.is_empty() && t < 5.0 {
+        shell.set_status(pose(0, 10 + (t * 100.0) as u32));
+        first = sent(&shell.tick(t));
+        t += 0.05;
+    }
+    assert!(
+        matches!(
+            first.as_slice(),
+            [Command::GimbalTimedTarget { yaw_tenth: 100, .. }]
+        ),
+        "the approach targets A: {first:?}"
+    );
+
+    // Manual control cancels the path with a native stop.
+    let cancel = sent(&shell.press(Key::Left, t));
+    assert!(cancel.contains(&Command::GimbalTimedStop), "{cancel:?}");
+    assert!(!shell.move_running());
+}

@@ -41,9 +41,10 @@ pub enum Action {
     CycleFrameRate,
     /// Hide the chrome entirely, for a clean look at the shot.
     ToggleChrome,
-    /// Open or close the settings panel and the exposure sheet.
+    /// Open or close the settings panel, the exposure sheet, and the moves sheet.
     ToggleSettings,
     ToggleExposure,
+    ToggleMoves,
     /// Grab the current frame.
     Still,
     Quit,
@@ -125,6 +126,7 @@ impl Controls {
                 'l' => Action::ToggleGrade,
                 'm' => Action::ToggleMirror,
                 'e' => Action::ToggleExposure,
+                'k' => Action::ToggleMoves,
                 's' => Action::Still,
                 _ => return None,
             },

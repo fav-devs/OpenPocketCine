@@ -13,7 +13,10 @@ All notable changes to this project are documented here. The format is based on
   and files over `/v2`, star and delete, and the 720p proxy played through the
   feed pipeline so the assists work on it. The Camera tab gains the gimbal
   ramp, the Assist tab a LUT row fed by the official cubes and a `.cube`
-  drop folder, and the countdown length. Unqualified on a physical body.
+  drop folder, and the countdown length. `K` opens programmed moves: A, B
+  and C from the live pose, per-leg durations, exact legs on native timed
+  targets with the approach, hold and missing-sector guard. Unqualified on a
+  physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

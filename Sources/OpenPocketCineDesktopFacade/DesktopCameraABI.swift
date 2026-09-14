@@ -188,6 +188,12 @@ private func cameraFrame(kind: Int32, seq: UInt16, arguments: Arguments) -> Duml
             counter: UInt32(truncatingIfNeeded: arguments.int(1)), seq: seq)
     case OPC_CAM_PLAYBACK_SPECIAL:
         return Commands.pocket3PlaybackEntry(step: arguments.int(0), seq: seq)
+    case OPC_CAM_GIMBAL_TIMED_TARGET:
+        // Tenths on the wire in, degrees and seconds to the builder, which holds the
+        // reach and duration rules and answers nil for anything outside them.
+        return Commands.gimbalTimedTarget(
+            yawDeg: Double(arguments.int(0)) / 10, nativePitchDeg: Double(arguments.int(1)) / 10,
+            duration: Double(arguments.int(2)) / 10, seq: seq)
 
     default:
         return nil

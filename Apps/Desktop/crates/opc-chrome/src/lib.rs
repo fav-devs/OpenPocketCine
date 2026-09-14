@@ -335,6 +335,8 @@ pub struct ChromeState<'a> {
     pub timecode: String,
     /// Rule-of-thirds lines over the picture.
     pub grid_on: bool,
+    /// A programmed move's readout for the top bar, or empty.
+    pub move_text: String,
     /// The open sheet, if any.
     pub sheet: Option<SheetState>,
     pub screen: Screen,
@@ -660,6 +662,7 @@ impl Chrome {
         );
         c.set_timecode(state.timecode.clone().into());
         c.set_grid_on(state.grid_on);
+        c.set_move_text(state.move_text.clone().into());
         c.set_screen(state.screen.index());
 
         if let Some(library) = &state.library {

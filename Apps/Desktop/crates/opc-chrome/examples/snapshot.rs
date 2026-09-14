@@ -91,6 +91,11 @@ fn main() {
             fps_shown: 30,
             timecode: "01:02:03:04".into(),
             grid_on: name == "sheet",
+            move_text: if name == "recording" {
+                "MOVE · A→B 3.2 / 8.0 s".into()
+            } else {
+                String::new()
+            },
             screen: match name {
                 "library" => Screen::Library,
                 "player" => Screen::Player,

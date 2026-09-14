@@ -118,6 +118,14 @@ pub enum Command {
     },
     /// `0x01/0x01` Pocket 3 playback entry, step 1 or 2.
     PlaybackSpecial(u8),
+    /// `0x04/0x14` absolute timed target: yaw and native pitch in 0.1°, duration in
+    /// tenths of a second. The core refuses one outside the reach or the 0.1–25.5 s
+    /// window.
+    GimbalTimedTarget {
+        yaw_tenth: i32,
+        native_pitch_tenth: i32,
+        duration_tenths: u8,
+    },
 
     // Reads.
     ParamGet(u16),
@@ -283,6 +291,15 @@ impl Command {
             Self::PlaybackSpecial(step) => (
                 sys::OPC_CAM_PLAYBACK_SPECIAL,
                 ints(&[i32::from(step)]),
+                vec![],
+            ),
+            Self::GimbalTimedTarget {
+                yaw_tenth,
+                native_pitch_tenth,
+                duration_tenths,
+            } => (
+                sys::OPC_CAM_GIMBAL_TIMED_TARGET,
+                ints(&[yaw_tenth, native_pitch_tenth, i32::from(duration_tenths)]),
                 vec![],
             ),
         }

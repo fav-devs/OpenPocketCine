@@ -7,6 +7,7 @@
 
 pub mod library;
 pub mod luts;
+pub mod moves;
 pub mod sheets;
 pub mod shell;
 

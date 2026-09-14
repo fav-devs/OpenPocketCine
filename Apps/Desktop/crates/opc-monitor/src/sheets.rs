@@ -9,6 +9,7 @@ use opc_camera::{frame_rate_fps, resolution_name, Command, Status};
 use opc_chrome::{SheetRowState, SheetState};
 
 use crate::luts::{self, LutChoice, LutMenu};
+use crate::moves::{Program, Waypoint};
 use crate::shell::{GimbalMode, Toggles};
 
 /// Which sheet is open.
@@ -17,6 +18,16 @@ pub enum SheetKind {
     Format,
     Exposure,
     Settings,
+    /// Programmed gimbal moves: A, B, C and their durations.
+    Moves,
+}
+
+/// Which programmed point a chip is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Slot {
+    A,
+    B,
+    C,
 }
 
 /// The settings tabs, in order.
@@ -87,6 +98,13 @@ pub enum Pick {
     Ramp(u8),
     Countdown(u32),
     Lut(LutChoice),
+    /// Capture the body's live pose into a point.
+    SetPoint(Slot),
+    ClearPoint(Slot),
+    /// A leg's duration: the A→B leg for `Slot::A`, the B→C leg for `Slot::B`.
+    LegDuration(Slot, f64),
+    MoveStart,
+    MoveStop,
     /// A chip that is shown but does nothing here yet.
     Nothing,
 }
@@ -102,6 +120,10 @@ pub struct Context<'a> {
     pub model_id: i32,
     pub luts: &'a LutMenu,
     pub lut_choice: &'a LutChoice,
+    pub program: &'a Program,
+    /// The body's live pose, if it has reported one.
+    pub live_pose: Option<Waypoint>,
+    pub move_running: bool,
 }
 
 /// A built sheet: what to draw, and what each chip means.
@@ -219,7 +241,69 @@ pub fn build(kind: SheetKind, tab: usize, context: Context) -> Built {
         SheetKind::Format => format(context.status),
         SheetKind::Exposure => exposure(context.status),
         SheetKind::Settings => settings(tab, context),
+        SheetKind::Moves => moves(context),
     }
+}
+
+const LEG_DURATIONS: [f64; 8] = [1.0, 2.0, 4.0, 5.0, 8.0, 15.0, 30.0, 60.0];
+
+fn moves(context: Context) -> Built {
+    let program = context.program;
+    let can_set = context.live_pose.is_some() && !context.move_running;
+    let point = |title: &str, slot: Slot, pose: Option<Waypoint>, optional: bool| {
+        let mut row = RowBuilder::new(title)
+            .option("Set here", false, Pick::SetPoint(slot))
+            .enabled(can_set);
+        if optional {
+            row = row.option("Clear", false, Pick::ClearPoint(slot));
+        }
+        let label = pose.map_or_else(|| "not set".to_string(), |pose| pose.label());
+        row = row.option(label, pose.is_some(), Pick::Nothing);
+        row
+    };
+    let leg = |title: &str, slot: Slot, current: f64| {
+        let mut row = RowBuilder::new(title).enabled(!context.move_running);
+        for seconds in LEG_DURATIONS {
+            row = row.option(
+                format!("{seconds:.0} s"),
+                (current - seconds).abs() < 1e-9,
+                Pick::LegDuration(slot, seconds),
+            );
+        }
+        row
+    };
+    let ready = program.a.is_some() && program.b.is_some() && context.live_pose.is_some();
+    let take = RowBuilder::new("Take")
+        .option(
+            "Start",
+            false,
+            if ready && !context.move_running {
+                Pick::MoveStart
+            } else {
+                Pick::Nothing
+            },
+        )
+        .option("Stop", context.move_running, Pick::MoveStop);
+    let live = RowBuilder::placeholder(
+        "Live",
+        &context
+            .live_pose
+            .map_or_else(|| "No gimbal attitude yet".to_string(), |pose| pose.label()),
+    );
+    assemble(
+        "MOVES",
+        &[],
+        0,
+        vec![
+            point("Point A", Slot::A, program.a, false),
+            point("Point B", Slot::B, program.b, false),
+            point("Point C", Slot::C, program.c, true),
+            leg("A → B", Slot::A, program.duration_ab),
+            leg("B → C", Slot::B, program.duration_bc),
+            take,
+            live,
+        ],
+    )
 }
 
 fn format(status: &Status) -> Built {
@@ -585,7 +669,41 @@ mod tests {
                 folder: "/tmp/luts".to_string(),
             }),
             lut_choice: &CHOICE,
+            program: PROGRAM.get_or_init(Program::default),
+            live_pose: Some(Waypoint {
+                yaw: 12.0,
+                pitch: -3.0,
+                native_pitch: -3.0,
+            }),
+            move_running: false,
         }
+    }
+
+    static PROGRAM: std::sync::OnceLock<Program> = std::sync::OnceLock::new();
+
+    #[test]
+    fn the_moves_sheet_offers_points_legs_and_a_take() {
+        let status = Status::default();
+        let built = build(SheetKind::Moves, 0, context(&status));
+        let titles: Vec<&str> = built.sheet.rows.iter().map(|r| r.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["Point A", "Point B", "Point C", "A → B", "B → C", "Take", "Live"]
+        );
+        assert_eq!(built.pick(0, 0), Some(&Pick::SetPoint(Slot::A)));
+        assert_eq!(built.pick(2, 1), Some(&Pick::ClearPoint(Slot::C)));
+        assert_eq!(built.pick(3, 2), Some(&Pick::LegDuration(Slot::A, 4.0)));
+        assert_eq!(
+            built.sheet.rows[3].selected,
+            Some(3),
+            "5 s is not a stop; nothing lit"
+        );
+        assert_eq!(
+            built.pick(5, 0),
+            Some(&Pick::Nothing),
+            "no A and B yet: Start is inert"
+        );
+        assert!(built.sheet.rows[6].options[0].contains("pan +12.0°"));
     }
 
     #[test]

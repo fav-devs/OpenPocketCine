@@ -14,7 +14,8 @@ use opc_media::MediaFile;
 
 use crate::library::{Library, MediaAction, Player};
 use crate::luts::{LutChoice, LutMenu};
-use crate::sheets::{self, Pick, Prefs, SheetKind};
+use crate::moves::{MoveEngine, Program, Waypoint};
+use crate::sheets::{self, Pick, Prefs, SheetKind, Slot};
 use opc_render::{letterbox, GradeOptions, Peaking, PeakingSense, Rgba, Zebra};
 use opc_ui::{
     next_frame_rate, next_resolution, Action, Controls, Countdown, Drag, Fit, Hud, Key, Phase,
@@ -208,6 +209,15 @@ pub struct Shell {
     pad_target: (f64, f64),
     lut_menu: LutMenu,
     lut_choice: LutChoice,
+    /// Programmed moves: the points, the engine while a take runs, and the clock
+    /// that says how fresh the last attitude is.
+    program: Program,
+    move_engine: Option<MoveEngine>,
+    move_countdown: Option<Countdown>,
+    attitude_seq: u32,
+    attitude_at: f64,
+    last_now: f64,
+    move_ticked_at: f64,
 }
 
 /// What the window must do about the cube, once.
@@ -265,6 +275,13 @@ impl Shell {
             pad_target: (0.0, 0.0),
             lut_menu: LutMenu::default(),
             lut_choice: LutChoice::Off,
+            program: Program::default(),
+            move_engine: None,
+            move_countdown: None,
+            attitude_seq: 0,
+            attitude_at: f64::NEG_INFINITY,
+            last_now: 0.0,
+            move_ticked_at: 0.0,
             drawn_second: None,
         }
     }
@@ -310,6 +327,18 @@ impl Shell {
         self.apply_pick(Pick::Ramp(ramp));
     }
 
+    pub fn set_point_for_test(&mut self, slot: Slot) {
+        self.apply_pick(Pick::SetPoint(slot));
+    }
+
+    pub fn set_leg_for_test(&mut self, slot: Slot, seconds: f64) {
+        self.apply_pick(Pick::LegDuration(slot, seconds));
+    }
+
+    pub fn start_move_for_test(&mut self) -> Vec<Intent> {
+        self.apply_pick(Pick::MoveStart)
+    }
+
     pub fn phase(&self) -> &Phase {
         &self.hud.phase
     }
@@ -331,8 +360,116 @@ impl Shell {
         if let Some(hundredths) = status.zoom_hundredths {
             self.controls.set_zoom(f64::from(hundredths) / 100.0);
         }
+        // A new attitude push is what makes a pose fresh enough to dispatch against.
+        if status.gimbal_attitude_seq != self.attitude_seq {
+            self.attitude_seq = status.gimbal_attitude_seq;
+            self.attitude_at = self.last_now;
+        }
         self.hud.status = status;
         self.chrome_stale = true;
+    }
+
+    /// The body's live pose, when it has reported one.
+    pub fn live_pose(&self) -> Option<Waypoint> {
+        Waypoint::from_status(&self.hud.status)
+    }
+
+    pub fn program(&self) -> &Program {
+        &self.program
+    }
+
+    pub fn move_running(&self) -> bool {
+        self.move_engine
+            .as_ref()
+            .is_some_and(MoveEngine::is_running)
+            || self.move_countdown.is_some()
+    }
+
+    /// What the top bar says about a take, or nothing.
+    fn move_text(&self, now: f64) -> String {
+        if let Some(countdown) = self.move_countdown {
+            return format!("MOVE · STARTING IN {}", countdown.remaining(now));
+        }
+        self.move_engine
+            .as_ref()
+            .map_or_else(String::new, MoveEngine::readout)
+    }
+
+    /// Start pressed on the moves sheet: a 3-2-1 like the phones, then the approach.
+    fn move_start(&mut self, now: f64) -> Vec<Intent> {
+        if self.program.a.is_none() || self.program.b.is_none() || self.live_pose().is_none() {
+            return Vec::new();
+        }
+        self.move_engine = None;
+        self.move_countdown = Some(Countdown::start(now, 3.0));
+        self.close_sheet();
+        Vec::new()
+    }
+
+    fn move_stop(&mut self) -> Vec<Intent> {
+        self.move_countdown = None;
+        let mut intents = Vec::new();
+        if let Some(engine) = self.move_engine.as_mut() {
+            if engine.is_running() {
+                engine.cancel();
+                intents.push(Intent::Send(Command::GimbalTimedStop));
+            }
+        }
+        self.chrome_stale = true;
+        intents
+    }
+
+    /// One frame of a running take.
+    fn move_tick(&mut self, now: f64) -> Vec<Intent> {
+        let mut intents = Vec::new();
+        if let Some(countdown) = self.move_countdown {
+            if countdown.remaining(now) != (countdown.remaining(now - 0.05)) {
+                self.chrome_stale = true;
+            }
+            if countdown.is_done(now) {
+                self.move_countdown = None;
+                let Some(live) = self.live_pose() else {
+                    self.chrome_stale = true;
+                    return intents;
+                };
+                match MoveEngine::start(&self.program, live) {
+                    Ok(engine) => {
+                        self.move_engine = Some(engine);
+                        self.move_ticked_at = now;
+                    }
+                    Err(reason) => {
+                        self.hud.phase = self.hud.phase.clone();
+                        self.library.status = reason;
+                        self.chrome_stale = true;
+                        return intents;
+                    }
+                }
+            } else {
+                return intents;
+            }
+        }
+        let Some(engine) = self.move_engine.as_mut() else {
+            return intents;
+        };
+        if !engine.is_running() {
+            return intents;
+        }
+        let dt = now - self.move_ticked_at;
+        if dt < 0.02 {
+            return intents;
+        }
+        self.move_ticked_at = now;
+        let live = Waypoint::from_status(&self.hud.status);
+        let age = now - self.attitude_at;
+        let output = engine.tick(dt.min(0.12), live, age.max(0.0));
+        if let Some((target, duration)) = output.target {
+            intents.push(Intent::Send(target.timed_target(duration)));
+        }
+        if output.stop {
+            intents.push(Intent::Send(Command::GimbalTimedStop));
+        }
+        self.chrome_stale = true;
+        intents
     }
 
     pub fn set_window(&mut self, width: u32, height: u32) {
@@ -388,6 +525,9 @@ impl Shell {
             model_id: self.model_id,
             luts: &self.lut_menu,
             lut_choice: &self.lut_choice,
+            program: &self.program,
+            live_pose: self.live_pose(),
+            move_running: self.move_running(),
         }
     }
 
@@ -444,6 +584,35 @@ impl Shell {
                 self.refresh_assists();
                 Vec::new()
             }
+            Pick::SetPoint(slot) => {
+                let pose = self.live_pose().filter(Waypoint::is_reachable);
+                match slot {
+                    Slot::A => self.program.a = pose,
+                    Slot::B => self.program.b = pose,
+                    Slot::C => self.program.c = pose,
+                }
+                Vec::new()
+            }
+            Pick::ClearPoint(slot) => {
+                match slot {
+                    Slot::A => self.program.a = None,
+                    Slot::B => self.program.b = None,
+                    Slot::C => self.program.c = None,
+                }
+                Vec::new()
+            }
+            Pick::LegDuration(slot, seconds) => {
+                match slot {
+                    Slot::A => self.program.duration_ab = seconds,
+                    _ => self.program.duration_bc = seconds,
+                }
+                Vec::new()
+            }
+            Pick::MoveStart => {
+                let now = self.last_now;
+                self.move_start(now)
+            }
+            Pick::MoveStop => self.move_stop(),
             Pick::Nothing => Vec::new(),
         }
     }
@@ -494,6 +663,7 @@ impl Shell {
 
     /// A key went down.
     pub fn press(&mut self, key: Key, now: f64) -> Vec<Intent> {
+        self.last_now = self.last_now.max(now);
         if key == Key::Escape && self.sheet.is_some() {
             self.close_sheet();
             return Vec::new();
@@ -505,7 +675,10 @@ impl Shell {
             return self.open_library();
         }
         if self.stick.set(key, true) {
-            return self.stick_changed(now);
+            // Manual control cancels the path, as on the phones.
+            let mut intents = self.move_stop();
+            intents.extend(self.stick_changed(now));
+            return intents;
         }
         let Some(action) = self.controls.press(key) else {
             return Vec::new();
@@ -626,6 +799,10 @@ impl Shell {
             }
             Action::ToggleExposure => {
                 self.toggle_sheet(SheetKind::Exposure);
+                Vec::new()
+            }
+            Action::ToggleMoves => {
+                self.toggle_sheet(SheetKind::Moves);
                 Vec::new()
             }
             Action::ClearTracking => {
@@ -1148,7 +1325,8 @@ impl Shell {
 
     /// Pointer pressed in a control zone: forward to Slint.
     /// Returns `Some([])` so the caller knows it was claimed (even if no intent fired yet).
-    pub fn control_down(&mut self, x: f64, y: f64, _now: f64) -> Option<Vec<Intent>> {
+    pub fn control_down(&mut self, x: f64, y: f64, now: f64) -> Option<Vec<Intent>> {
+        self.last_now = self.last_now.max(now);
         if !self.chrome_visible {
             return None;
         }
@@ -1181,7 +1359,8 @@ impl Shell {
     }
 
     /// Pointer released over a control zone.
-    pub fn control_up(&mut self, x: f64, y: f64, _now: f64) -> Vec<Intent> {
+    pub fn control_up(&mut self, x: f64, y: f64, now: f64) -> Vec<Intent> {
+        self.last_now = self.last_now.max(now);
         if let Some(cr) = &self.chrome_renderer {
             cr.pointer_released(x as f32, y as f32);
         }
@@ -1211,9 +1390,11 @@ impl Shell {
     /// The clock moved on: fires the countdown, keeps the stick alive, and
     /// returns any intents fired by Slint controls since last tick.
     pub fn tick(&mut self, now: f64) -> Vec<Intent> {
+        self.last_now = self.last_now.max(now);
         let mut intents = Vec::new();
         // Drain intents queued by Slint button callbacks.
         intents.append(&mut self.chrome_pending_intents);
+        intents.extend(self.move_tick(now));
         if self.hud.countdown_fired(now) {
             self.hud.countdown = None;
             self.chrome_stale = true;
@@ -1280,6 +1461,7 @@ impl Shell {
                 String::new()
             };
             let grid_on = self.prefs.grid;
+            let move_text = self.move_text(now);
             let screen = self.screen;
             let library = (screen == Screen::Library).then(|| self.library.state());
             if screen == Screen::Library {
@@ -1339,6 +1521,7 @@ impl Shell {
                     fps_shown: self.hud.fps,
                     timecode,
                     grid_on,
+                    move_text,
                     sheet,
                     screen,
                     library,
