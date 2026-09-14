@@ -208,6 +208,15 @@ private func cameraFrame(kind: Int32, seq: UInt16, arguments: Arguments) -> Duml
             yawDeg: Double(arguments.int(0)) / 10, nativePitchDeg: Double(arguments.int(1)) / 10,
             duration: Double(arguments.int(2)) / 10, seq: seq)
 
+    case OPC_CAM_TAP_FOCUS_PREPARE:
+        return Commands.tapFocusPrepare(seq: seq)
+    case OPC_CAM_TAP_FOCUS_POINT:
+        return Commands.tapFocusPoint(arguments.float(0), arguments.float(1), seq: seq)
+    case OPC_CAM_TAP_FOCUS_HINT:
+        return Commands.tapFocusLiveHint(seq: seq)
+    case OPC_CAM_TAP_FOCUS_COMMIT:
+        return Commands.tapFocusCommit(arguments.float(0), arguments.float(1), seq: seq)
+
     default:
         return nil
     }

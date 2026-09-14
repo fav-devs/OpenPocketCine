@@ -160,13 +160,71 @@ fn a_drag_on_a_mirrored_picture_points_at_the_same_thing() {
 }
 
 #[test]
-fn a_click_does_not_clear_what_the_camera_is_already_following() {
+fn a_click_focuses_where_it_landed_and_leaves_tracking_alone() {
     let mut shell = framed();
     shell.pointer_down(640.0, 360.0);
+    let sent = sent(&shell.pointer_up(641.0, 361.0, 0.0));
+    // The picture is 1280 × 720 fitted edge to edge, so the click is the centre.
+    assert_eq!(sent.len(), 4, "Mimo's four-write burst");
+    assert_eq!(sent[0], Command::TapFocusPrepare);
     assert!(
-        shell.pointer_up(641.0, 361.0, 0.0).is_empty(),
-        "a click is not a box, and must not send anything"
+        matches!(sent[1], Command::TapFocusPoint { x, y } if (x - 0.5).abs() < 0.01 && (y - 0.5).abs() < 0.01)
     );
+    assert_eq!(sent[2], Command::TapFocusHint);
+    assert!(matches!(sent[3], Command::TapFocusCommit { .. }));
+    assert!(
+        !sent.contains(&Command::TrackClear),
+        "a click is not a box, and must not clear what the camera is following"
+    );
+}
+
+#[test]
+fn a_click_on_a_mirrored_picture_focuses_on_the_same_thing() {
+    let mut shell = framed();
+    shell.press(Key::Char('m'), 0.0);
+    shell.pointer_down(320.0, 360.0);
+    let sent = sent(&shell.pointer_up(320.0, 360.0, 0.0));
+    assert!(matches!(sent[1], Command::TapFocusPoint { x, .. } if (x - 0.75).abs() < 0.01));
+}
+
+#[test]
+fn a_box_is_polled_until_the_body_locks_and_then_until_it_lets_go() {
+    use opc_camera::TrackingPoll;
+    let mut shell = framed();
+    shell.pointer_down(320.0, 180.0);
+    shell.pointer_moved(640.0, 360.0);
+    shell.pointer_up(640.0, 360.0, 0.0);
+    assert!(shell.is_tracking());
+    assert!(shell.tick(0.1).is_empty(), "not yet");
+    assert_eq!(sent(&shell.tick(0.5)), [Command::TrackPoll]);
+    assert!(shell.tick(0.6).is_empty(), "one poll per half second");
+    // Six idle answers before any lock: the body never found anything.
+    for i in 0..5 {
+        shell.tracking_reply(TrackingPoll::Idle, 0.5 + f64::from(i));
+        assert!(shell.is_tracking());
+    }
+    shell.tracking_reply(TrackingPoll::Idle, 6.0);
+    assert!(!shell.is_tracking(), "given up");
+
+    // A lock keeps the box past the 1.5 s it would otherwise fade at.
+    shell.pointer_down(320.0, 180.0);
+    shell.pointer_moved(640.0, 360.0);
+    shell.pointer_up(640.0, 360.0, 10.0);
+    shell.tracking_reply(TrackingPoll::Locked(Some((0.3, 0.3, 0.2, 0.2))), 10.5);
+    shell.tick(12.5);
+    assert!(shell.is_tracking());
+    // The first idle after a lock is the subject gone.
+    shell.tracking_reply(TrackingPoll::Idle, 13.0);
+    assert!(!shell.is_tracking());
+    // A click while tracking clears the body first.
+    shell.pointer_down(320.0, 180.0);
+    shell.pointer_moved(640.0, 360.0);
+    shell.pointer_up(640.0, 360.0, 20.0);
+    shell.pointer_down(200.0, 200.0);
+    let sent = sent(&shell.pointer_up(200.0, 200.0, 20.5));
+    assert_eq!(sent[0], Command::TrackClear);
+    assert_eq!(sent.len(), 5);
+    assert!(!shell.is_tracking());
 }
 
 #[test]
@@ -648,14 +706,14 @@ fn a_finger_released_frees_the_screen_for_the_next_one() {
 }
 
 #[test]
-fn a_tap_sends_nothing_by_finger_as_by_mouse() {
+fn a_tap_focuses_by_finger_as_by_mouse() {
     let mut shell = framed();
     shell.touch(1, TouchPhase::Started, 640.0, 360.0, 0.0);
+    let sent = sent(&shell.touch(1, TouchPhase::Ended, 641.0, 361.0, 0.0));
+    assert_eq!(sent.len(), 4, "a tap is not a box: it focuses");
     assert!(
-        shell
-            .touch(1, TouchPhase::Ended, 641.0, 361.0, 0.0)
-            .is_empty(),
-        "a tap is not a box, and must not clear what the camera is following"
+        !sent.contains(&Command::TrackClear),
+        "and must not clear what the camera is following"
     );
 }
 

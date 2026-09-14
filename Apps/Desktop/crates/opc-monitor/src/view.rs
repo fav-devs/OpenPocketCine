@@ -194,7 +194,13 @@ impl View {
                 }
                 FromCamera::Frame(frame) => {
                     let now = self.now();
-                    self.media.frame(frame, now);
+                    if (frame.cmd_set, frame.cmd_id) == (0x02, 0xA5) {
+                        if let Some(poll) = opc_camera::tracking_poll(&frame.payload) {
+                            self.shell.tracking_reply(poll, now);
+                        }
+                    } else {
+                        self.media.frame(frame, now);
+                    }
                 }
                 FromCamera::Set(outcome) => self.shell.note_set(outcome),
                 FromCamera::Status(status) => {

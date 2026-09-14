@@ -253,6 +253,16 @@ pub const OPC_CAM_MEDIA_DELETE: i32 = 70;
 pub const OPC_CAM_MEDIA_FAVORITE: i32 = 71;
 pub const OPC_CAM_PLAYBACK_SPECIAL: i32 = 72;
 pub const OPC_CAM_GIMBAL_TIMED_TARGET: i32 = 73;
+/// Mimo's tap-to-focus burst, one frame each.
+pub const OPC_CAM_TAP_FOCUS_PREPARE: i32 = 74;
+pub const OPC_CAM_TAP_FOCUS_POINT: i32 = 75;
+pub const OPC_CAM_TAP_FOCUS_HINT: i32 = 76;
+pub const OPC_CAM_TAP_FOCUS_COMMIT: i32 = 77;
+/// A `0x02/0xA5` tracking poll reply, as `opc_tracking_poll` reads it.
+pub const OPC_TRACKING_UNKNOWN: i32 = -1;
+pub const OPC_TRACKING_IDLE: i32 = 0;
+pub const OPC_TRACKING_LOCKED: i32 = 1;
+pub const OPC_TRACKING_LOCKED_BOX: i32 = 2;
 
 /// `CameraSetMailbox` decisions, as `opc_mailbox_*` return them.
 pub const OPC_MAILBOX_LAUNCH: i32 = 0;
@@ -575,6 +585,10 @@ extern "C" {
     pub fn opc_zoom_hop(factor: f64, color_mode: i32, is_recording: i32, out_mode: *mut i32)
         -> i32;
     pub fn opc_zoom_restore_dlog2(factor: f64) -> i32;
+
+    /// Reads a tracking poll reply; `out_box` gets four floats when a box is carried.
+    pub fn opc_tracking_poll(payload: *const u8, count: usize, out_box: *mut f32) -> i32;
+    pub fn opc_model_supports_tap_focus(model_id: i32) -> i32;
 
     /// The scale's legend, one `label<TAB>r<TAB>g<TAB>b` line per zone.
     pub fn opc_false_color_legend(

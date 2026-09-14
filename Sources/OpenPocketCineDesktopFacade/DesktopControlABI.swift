@@ -186,3 +186,36 @@ func opc_zoom_hop(
 func opc_zoom_restore_dlog2(_ factor: Double) -> Int32 {
     CamFov.shouldRestoreDLog2(factor: factor) ? 1 : 0
 }
+
+// MARK: - Tracking and focus
+
+/// Reads a `0x02/0xA5` poll reply. `OPC_TRACKING_LOCKED_BOX` also writes the subject
+/// box as normalised `x, y, width, height` into `outBox`.
+@_cdecl("opc_tracking_poll")
+func opc_tracking_poll(
+    _ payload: UnsafePointer<UInt8>?, _ count: Int, _ outBox: UnsafeMutablePointer<Float>?
+) -> Int32 {
+    guard let payload, count >= 0 else { return OPC_TRACKING_UNKNOWN }
+    let bytes = [UInt8](UnsafeBufferPointer(start: payload, count: count))
+    switch TrackingPoll.parse(bytes) {
+    case .idle:
+        return OPC_TRACKING_IDLE
+    case .locked(let box):
+        guard let box else { return OPC_TRACKING_LOCKED }
+        if let outBox {
+            outBox[0] = Float(box.x)
+            outBox[1] = Float(box.y)
+            outBox[2] = Float(box.width)
+            outBox[3] = Float(box.height)
+        }
+        return OPC_TRACKING_LOCKED_BOX
+    case nil:
+        return OPC_TRACKING_UNKNOWN
+    }
+}
+
+/// Whether this body takes Mimo's tap-to-focus burst (the Nano does not).
+@_cdecl("opc_model_supports_tap_focus")
+func opc_model_supports_tap_focus(_ modelId: Int32) -> Int32 {
+    CameraModel.resolve(modelId: Int(modelId), name: nil).supportsTapFocus ? 1 : 0
+}

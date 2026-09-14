@@ -52,7 +52,7 @@ Three sheets open over the picture and close on `Esc`, the `×`, or a tap outsid
 - **Exposure** (`AUTO`/`M` chip, or `E`) — `Auto`/`Manual`, then ISO and shutter for
   manual, ISO max and EV for auto. The rows the mode does not use are drawn greyed, the
   way Mimo shows them.
-- **Settings** (`⋮`, or `Tab`) — three tabs. **Camera:** focus mode, white balance
+- **Settings** (`⋮`, or `Tab`) — three tabs. **Camera:** focus mode, focus-track mode (Default / Product Showcase / Subject Lock / Registered Priority), white balance
   presets, colour profile (from the body's own list), field of view, gimbal mode,
   speed and **ramp** (Off / Soft / Medium, the phones' first-order ease on the stick,
   applied to the arrow keys and the on-screen pad alike). **Audio:** channel and vocal
@@ -198,6 +198,17 @@ disabled while the link is recovering or failed.
 A finger drags a tracking box on the unobstructed fitted image, exactly as the mouse
 does. A press that starts in a control stays a control — it can never become tracking.
 Keyboard shortcuts remain available.
+
+A click (or a tap) that is not a drag is **tap-to-focus**: Mimo's four-write burst
+(`0x22` spot, `0x30` region, `0x68` hint, `0x32` commit) at that point on the sensor,
+mirroring undone, with a bracketed reticle and the AE spot marked at its corner for
+1.5 s. A body already following something is told to stop first. The Nano takes no
+tap focus, so a click on one sends nothing. A drag's box is then **polled** on the
+phones' cadence (`0x02/0xA5` every 0.5 s): the box stays as long as the body says it
+has the subject, moves to the subject's rectangle when the body sends one, and comes
+off at the first idle after a lock or after six idle answers with no lock. The AF-C
+face bracket is not here: the phones detect faces on-device, and the desktop has no
+detector yet.
 
 Touch is handled explicitly rather than left to the system: once winit registers a window
 for touch, Windows stops synthesising mouse clicks from taps, so without this a finger on

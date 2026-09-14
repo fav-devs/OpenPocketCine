@@ -66,6 +66,18 @@ pub enum Command {
     TrackPoll,
     FocusTrackSet(u8),
     FocusTrackGet,
+    /// Mimo's tap-to-focus burst, in order: `0x22` spot, `0x30` region, `0x68` hint,
+    /// `0x32` commit. `x` and `y` are picture fractions on the sensor.
+    TapFocusPrepare,
+    TapFocusPoint {
+        x: f32,
+        y: f32,
+    },
+    TapFocusHint,
+    TapFocusCommit {
+        x: f32,
+        y: f32,
+    },
 
     // Exposure and look.
     SetIsoIndex(u8),
@@ -216,6 +228,18 @@ impl Command {
                 vec![],
             ),
             Self::FocusTrackGet => (sys::OPC_CAM_FOCUS_TRACK_GET, vec![], vec![]),
+            Self::TapFocusPrepare => (sys::OPC_CAM_TAP_FOCUS_PREPARE, vec![], vec![]),
+            Self::TapFocusPoint { x, y } => (
+                sys::OPC_CAM_TAP_FOCUS_POINT,
+                vec![],
+                vec![f64::from(x), f64::from(y)],
+            ),
+            Self::TapFocusHint => (sys::OPC_CAM_TAP_FOCUS_HINT, vec![], vec![]),
+            Self::TapFocusCommit { x, y } => (
+                sys::OPC_CAM_TAP_FOCUS_COMMIT,
+                vec![],
+                vec![f64::from(x), f64::from(y)],
+            ),
 
             Self::SetIsoIndex(index) => (
                 sys::OPC_CAM_SET_ISO_INDEX,
@@ -311,6 +335,19 @@ impl Command {
     }
 
     /// Builds this command as an encoded DUML frame, CRC included.
+    /// Mimo's tap-to-focus burst for a point on the sensor. AF-S and AF-C are the same
+    /// four writes; the phones wait for the region's ACK before the last two.
+    pub fn tap_focus(x: f32, y: f32) -> [Self; 4] {
+        let x = x.clamp(0.0, 1.0);
+        let y = y.clamp(0.0, 1.0);
+        [
+            Self::TapFocusPrepare,
+            Self::TapFocusPoint { x, y },
+            Self::TapFocusHint,
+            Self::TapFocusCommit { x, y },
+        ]
+    }
+
     /// The opcode key (`set << 8 | cmd`) of the frame this becomes, from the core.
     /// `None` without the core, or for a command it cannot build.
     #[cfg(opc_core_linked)]

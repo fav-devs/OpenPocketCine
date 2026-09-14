@@ -22,8 +22,10 @@ All notable changes to this project are documented here. The format is based on
   the feed's axis, thirds / phi / diagonal grid, guide frames with a mask, and
   the crosshair. Live-control SETs run through the core's `CameraSetMailbox`
   (latest wins, 300 ms retransmit, 2 s settle, FORMAT pin, "no answer" notice)
-  and the zoom ruler carries the body's own stops with the D-Log2 hop.
-  Unqualified on a physical body.
+  and the zoom ruler carries the body's own stops with the D-Log2 hop. A
+  click on the picture is Mimo's tap-to-focus burst, a drag is a tracking
+  box polled until the body locks or lets go, and the Camera tab has the
+  focus-track mode. Unqualified on a physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

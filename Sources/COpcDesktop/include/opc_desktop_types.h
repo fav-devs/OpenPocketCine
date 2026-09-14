@@ -214,6 +214,11 @@ typedef struct {
 // Native timed gimbal target `0x04/0x14`: yaw and native pitch in 0.1°, duration
 // in tenths of a second (1–255). The core refuses an unreachable or ill-timed one.
 #define OPC_CAM_GIMBAL_TIMED_TARGET 73
+/* Mimo's tap-to-focus burst, one frame each: 0x22 spot, 0x30 region, 0x68 hint, 0x32 commit. */
+#define OPC_CAM_TAP_FOCUS_PREPARE 74
+#define OPC_CAM_TAP_FOCUS_POINT 75
+#define OPC_CAM_TAP_FOCUS_HINT 76
+#define OPC_CAM_TAP_FOCUS_COMMIT 77
 
 /* False-colour scales for opc_false_color_cube / opc_false_color_legend. */
 #define OPC_FALSE_COLOR_STOPS 0
@@ -235,6 +240,12 @@ typedef struct {
 #define OPC_MAILBOX_PENDING_IMMEDIATE 0
 #define OPC_MAILBOX_PENDING_AFTER_HOLD 1
 #define OPC_MAILBOX_PENDING_NONE 2
+
+/* A 0x02/0xA5 tracking poll reply, for opc_tracking_poll. */
+#define OPC_TRACKING_UNKNOWN (-1)
+#define OPC_TRACKING_IDLE 0
+#define OPC_TRACKING_LOCKED 1
+#define OPC_TRACKING_LOCKED_BOX 2
 
 /* What a zoom write needs first, for opc_zoom_hop. */
 #define OPC_ZOOM_HOP_NONE 0

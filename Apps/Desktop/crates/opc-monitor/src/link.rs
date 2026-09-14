@@ -251,5 +251,10 @@ fn is_media_reply(frame: &DumlFrame) -> bool {
     matches!(
         (frame.cmd_set, frame.cmd_id),
         (0x00, 0x27) | (0x00, 0x28) | (0x02, 0xBF) | (0x02, 0x0C)
-    )
+    ) || is_tracking_reply(frame)
+}
+
+/// The `0x02/0xA5` poll answer the shell reads to keep or drop its tracking box.
+fn is_tracking_reply(frame: &DumlFrame) -> bool {
+    (frame.cmd_set, frame.cmd_id) == (0x02, 0xA5)
 }

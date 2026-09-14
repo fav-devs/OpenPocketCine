@@ -16,6 +16,7 @@ mod sequence;
 mod session;
 pub mod softap;
 mod status;
+mod tracking;
 mod transport;
 mod watchdog;
 pub mod wifi;
@@ -32,6 +33,7 @@ pub use pairing::{PairState, PairStep, Pairing, Reply, PAIR_DEADLINE, STEP_RETRY
 pub use sequence::{Outgoing, Phase, Sequencer, ACK_INTERVAL, HANDSHAKE_DEADLINE, HANDSHAKE_RETRY};
 pub use session::{CameraSession, SessionError, SessionEvent};
 pub use status::{frame_rate_fps, resolution_name, Status, StatusDecoder};
+pub use tracking::{supports_tap_focus, tracking_poll, TrackingPoll};
 pub use transport::{
     encode_frame, handshake, is_handshake, pair_approval_ack, pair_set_pin, pair_wake_access_point,
     routing_header, scan_frames, status_string, subscribe, tap_focus, transport_header,

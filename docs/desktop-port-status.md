@@ -19,7 +19,7 @@ bottom says what the body is set to, and the keyboard drives it.
 | Zoom | `+` `-` `0` step the body's own stops; D-Log2 hop | `opc-monitor/zoom.rs` |
 | Record | `Space`, `R` | `opc-ui/controls.rs` |
 | Timer | `T` — 3 seconds, cancellable | `opc-monitor/shell.rs`, `Countdown` |
-| Tracking | Mouse or one-finger drag, `X` to clear | `opc-ui/tracking.rs`, `Shell::touch` |
+| Tracking | Mouse or one-finger drag, polled at 0.5 s until lock or idle, `X` to clear; a click is tap-to-focus (Mimo's four-write burst) | `opc-ui/tracking.rs`, `Shell::touch`, `opc-camera/tracking.rs` |
 | Frame rate, resolution | `[` `]` | `opc-ui/format.rs` |
 | Assists | `A` opens the phones' toolbar (long press for options); `Z` `P` `L` `M`, `H` hides the chrome | `opc-monitor/assists.rs`, `shell.rs`, `Toggles` |
 | Sheets | `Tab` settings, `E` exposure, the format chip | `opc-monitor/sheets.rs` |

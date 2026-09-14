@@ -195,6 +195,14 @@ const COLOR_MODES: [(u8, &str); 6] = [
     (0x00, "D-Log M"),
 ];
 
+/// `FocusTrackMode` on the wire and the phones' labels for it.
+const FOCUS_TRACK: [(u8, &str); 4] = [
+    (0x00, "Default"),
+    (0x01, "Product Showcase"),
+    (0x02, "Subject Lock"),
+    (0x03, "Registered Priority"),
+];
+
 const WHITE_BALANCE: [(i32, &str); 9] = [
     (0, "Auto"),
     (2800, "2800K"),
@@ -705,6 +713,17 @@ fn camera_rows(context: Context) -> Vec<RowBuilder> {
             Pick::Send(vec![Command::SetFocusMode(0x02)]),
         );
 
+    // `0x8E` pid `0x003B`: how the body picks its subject.
+    let track_now = status.focus_track;
+    let mut focus_track = RowBuilder::new("Focus track");
+    for (code, label) in FOCUS_TRACK {
+        focus_track = focus_track.option(
+            label,
+            track_now == Some(code),
+            Pick::Send(vec![Command::FocusTrackSet(code)]),
+        );
+    }
+
     let kelvin_now = status.white_balance_kelvin.unwrap_or(0);
     let mut white_balance = RowBuilder::new("White balance");
     for (kelvin, label) in WHITE_BALANCE {
@@ -777,7 +796,16 @@ fn camera_rows(context: Context) -> Vec<RowBuilder> {
         .option("Soft", prefs.ramp == 1, Pick::Ramp(1))
         .option("Medium", prefs.ramp == 2, Pick::Ramp(2));
 
-    vec![focus, white_balance, color, fov, follow, speed, ramp]
+    vec![
+        focus,
+        focus_track,
+        white_balance,
+        color,
+        fov,
+        follow,
+        speed,
+        ramp,
+    ]
 }
 
 fn audio_rows(prefs: Prefs) -> Vec<RowBuilder> {

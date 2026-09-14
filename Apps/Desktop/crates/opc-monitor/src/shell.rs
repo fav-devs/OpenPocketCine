@@ -8,7 +8,7 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use opc_camera::{Command, Status};
+use opc_camera::{Command, Status, TrackingPoll};
 use opc_chrome::{AssistChip, Chrome, ChromeIntent, ChromeState, Overlays, Screen};
 use opc_media::MediaFile;
 
@@ -36,6 +36,13 @@ const STICK_REPEAT: f64 = 0.2;
 /// It is not kept: the camera does not report where the subject moved to, so a box left
 /// on screen would stop being where the subject is and the operator would believe it.
 const BOX_CONFIRM: f64 = 1.5;
+/// How long the tap-to-focus reticle stays on the picture.
+const FOCUS_MARKER_SECONDS: f64 = 1.5;
+/// The phones' `0x02/0xA5` cadence, and how many idle answers end a search.
+const TRACK_POLL_INTERVAL: f64 = 0.5;
+const TRACK_IDLE_TICKS: u32 = 6;
+/// Mimo's yellow, for the reticle.
+const RETICLE: opc_ui::canvas::Colour = [255, 196, 0, 255];
 /// Frames older than this stop counting towards the rate shown.
 const FPS_WINDOW: f64 = 1.0;
 /// How long a FORMAT pin and a notice stay up, as the phones keep them.
@@ -219,6 +226,10 @@ pub struct Shell {
     format_pin: Option<(u8, u8, String, f64)>,
     /// A line for the operator in the top bar, and when it goes away.
     notice: Option<(String, f64)>,
+    /// Where the operator tapped to focus, as seen, and when the reticle goes away.
+    focus_marker: Option<((f64, f64), f64)>,
+    /// A box sent to the body and the polling that follows it.
+    tracking: Option<TrackingState>,
     stick_sent_at: f64,
     presented: VecDeque<f64>,
     /// The rasterised chrome, kept until something it draws changes.
@@ -313,6 +324,8 @@ impl Shell {
             zoom_policy: zoom::policy(),
             format_pin: None,
             notice: None,
+            focus_marker: None,
+            tracking: None,
             stick_sent_at: f64::NEG_INFINITY,
             presented: VecDeque::new(),
             chrome: None,
@@ -1254,6 +1267,7 @@ impl Shell {
                 self.drag = None;
                 self.committed = None;
                 self.hud.drag = None;
+                self.tracking = None;
                 vec![Intent::Send(Command::TrackClear)]
             }
             Action::CycleResolution | Action::CycleFrameRate => {
@@ -1322,14 +1336,83 @@ impl Shell {
         };
         self.chrome_stale = true;
         let Some(command) = drag.command(self.next_track_id) else {
-            // A click, not a drag. Leaving whatever the camera is already following
-            // alone is safer than clearing it by accident.
+            // A click, not a drag: tap to focus there, the way a tap on the phones does.
             self.hud.drag = None;
-            return Vec::new();
+            let (x, y, _, _) = drag.rectangle();
+            return self.tap_focus((x, y), now);
         };
         self.next_track_id = self.next_track_id.wrapping_add(1).max(1);
         self.committed = Some((drag.rectangle(), now + BOX_CONFIRM));
+        self.tracking = Some(TrackingState::new(drag.rectangle(), now));
         vec![Intent::Send(command)]
+    }
+
+    /// Mimo's tap-to-focus burst at a point on the picture as seen. Mirroring is
+    /// undone so the body focuses where the operator pointed. A body that is already
+    /// following something is told to stop first, as on the phones.
+    fn tap_focus(&mut self, seen: (f64, f64), now: f64) -> Vec<Intent> {
+        if !opc_camera::supports_tap_focus(self.model_id) {
+            return Vec::new();
+        }
+        let mut intents = Vec::new();
+        if self.tracking.is_some() {
+            self.tracking = None;
+            self.committed = None;
+            intents.push(Intent::Send(Command::TrackClear));
+        }
+        let x = if self.toggles.mirror {
+            1.0 - seen.0
+        } else {
+            seen.0
+        };
+        intents.extend(
+            Command::tap_focus(x as f32, seen.1 as f32)
+                .into_iter()
+                .map(Intent::Send),
+        );
+        self.focus_marker = Some((seen, now + FOCUS_MARKER_SECONDS));
+        self.chrome_stale = true;
+        intents
+    }
+
+    /// The body answered a tracking poll.
+    pub fn tracking_reply(&mut self, poll: TrackingPoll, now: f64) {
+        let Some(tracking) = self.tracking.as_mut() else {
+            return;
+        };
+        match poll {
+            TrackingPoll::Locked(subject) => {
+                tracking.saw_lock = true;
+                tracking.idle_ticks = 0;
+                if let Some((x, y, w, h)) = subject {
+                    tracking.subject =
+                        Some((f64::from(x), f64::from(y), f64::from(w), f64::from(h)));
+                }
+                // The box stays as long as the body says it has the subject.
+                let shown = tracking.subject.unwrap_or(tracking.search);
+                self.committed = Some((shown, now + 2.0 * TRACK_POLL_INTERVAL));
+            }
+            TrackingPoll::Idle => {
+                if tracking.saw_lock {
+                    self.tracking = None;
+                    self.committed = None;
+                    self.hud.drag = None;
+                } else {
+                    tracking.idle_ticks += 1;
+                    if tracking.idle_ticks >= TRACK_IDLE_TICKS {
+                        self.tracking = None;
+                        self.committed = None;
+                        self.hud.drag = None;
+                    }
+                }
+            }
+        }
+        self.chrome_stale = true;
+    }
+
+    /// Whether a box is out with the body and being polled.
+    pub fn is_tracking(&self) -> bool {
+        self.tracking.is_some()
     }
 
     /// A finger touched, moved, or left the screen.
@@ -1916,6 +1999,17 @@ impl Shell {
         let mut intents = Vec::new();
         // Drain intents queued by Slint button callbacks.
         intents.append(&mut self.chrome_pending_intents);
+        // Ask the body about its subject on the phones' cadence.
+        if let Some(tracking) = self.tracking.as_mut() {
+            if now >= tracking.next_poll_at {
+                tracking.next_poll_at = now + TRACK_POLL_INTERVAL;
+                intents.push(Intent::Send(Command::TrackPoll));
+            }
+        }
+        if self.focus_marker.is_some_and(|(_, until)| now >= until) {
+            self.focus_marker = None;
+            self.chrome_stale = true;
+        }
         intents.extend(self.move_tick(now));
         if self.hud.countdown_fired(now) {
             self.hud.countdown = None;
@@ -2068,13 +2162,13 @@ impl Shell {
             };
 
             // Draw tracking box on top.
+            let fit = self.hud.fit.unwrap_or(opc_ui::Fit {
+                x: 0.0,
+                y: 0.0,
+                width: f64::from(self.window.0),
+                height: f64::from(self.window.1),
+            });
             if let Some((x, y, bw, bh)) = self.hud.drag {
-                let fit = self.hud.fit.unwrap_or(opc_ui::Fit {
-                    x: 0.0,
-                    y: 0.0,
-                    width: f64::from(self.window.0),
-                    height: f64::from(self.window.1),
-                });
                 canvas.stroke(
                     (fit.x + x * fit.width) as i64,
                     (fit.y + y * fit.height) as i64,
@@ -2083,6 +2177,25 @@ impl Shell {
                     2,
                     opc_ui::canvas::TRACKING,
                 );
+            }
+            // The tap-to-focus reticle: Mimo's bracketed square with the AE spot
+            // marked at its corner.
+            if let Some(((x, y), until)) = self.focus_marker {
+                if now < until {
+                    let cx = (fit.x + x * fit.width) as i64;
+                    let cy = (fit.y + y * fit.height) as i64;
+                    let half = 32;
+                    let arm = 12;
+                    for (sx, sy) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                        let corner_x = cx + sx * half;
+                        let corner_y = cy + sy * half;
+                        let hx = if sx < 0 { corner_x } else { corner_x - arm };
+                        let vy = if sy < 0 { corner_y } else { corner_y - arm };
+                        canvas.stroke(hx, corner_y - 1, arm as u32, 2, 2, RETICLE);
+                        canvas.stroke(corner_x - 1, vy, 2, arm as u32, 2, RETICLE);
+                    }
+                    canvas.circle(cx + half + 10, cy - half - 10, 5, RETICLE);
+                }
             }
 
             self.chrome = Some(Rgba {
@@ -2101,5 +2214,29 @@ impl Shell {
     /// Whether the chrome is being drawn at all.
     pub fn chrome_visible(&self) -> bool {
         self.chrome_visible
+    }
+}
+
+/// A box out with the body, and the polling that decides whether it took.
+#[derive(Debug, Clone, PartialEq)]
+struct TrackingState {
+    /// What was drawn and sent.
+    search: (f64, f64, f64, f64),
+    /// Where the body says the subject is, once it has said.
+    subject: Option<(f64, f64, f64, f64)>,
+    saw_lock: bool,
+    idle_ticks: u32,
+    next_poll_at: f64,
+}
+
+impl TrackingState {
+    fn new(search: (f64, f64, f64, f64), now: f64) -> Self {
+        Self {
+            search,
+            subject: None,
+            saw_lock: false,
+            idle_ticks: 0,
+            next_poll_at: now + TRACK_POLL_INTERVAL,
+        }
     }
 }
