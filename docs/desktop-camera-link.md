@@ -168,6 +168,10 @@ The exchange that ends with the camera's Wi-Fi credentials, from the protocol no
 4. Ask it to wake its access point (`0x53/0x10`).
 5. Read the Wi-Fi name (`0x07/0x07`), then the password (`0x07/0x0E`).
 
+`0x00/0x2B` is a fire-and-forget session open, not a gate on this sequence: the camera
+can send no reply. Send `0x07/0x45` after the paced wake write; do not leave the desktop
+in “Opening session” waiting for a `0x00/0x2B` frame.
+
 `Pairing` in `opc-camera` runs that with no radio attached: it decides the next step
 from what the camera has said, and the driver turns steps into writes. So the branch that
 needs a person standing at the camera is testable, as is the one where a step goes
@@ -243,6 +247,13 @@ What the operator asked for, and where each piece stands.
 | The UDP session itself | `DumlTransport`, `AckWindows`, `HevcDepacketizer` | **Done** | **Done** |
 | Surviving a frozen feed | `FeedWatchdog` | **Done** | **Done** |
 | HUD telemetry | `CameraStatusDecoder` | **Done** | **Done** |
+
+On a watchdog `ReopenDatalink` or desktop `FullRejoin`, the monitor discards the old
+ephemeral UDP client socket and opens a fresh one while the camera Wi-Fi association is
+still alive. Resetting only the sequencer on the old five-tuple is not a recovery: a
+Pocket can continue telemetry there while video remains stranded. This UDP rebuild does
+not add a second connect-path live enable; the watchdog remains the sole owner of repeat
+enables.
 
 The session runs and carries commands. What is missing before an operator sees anything
 is Bluetooth pairing and the Wi-Fi join in front of it, and the UI behind it.

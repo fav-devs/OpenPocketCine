@@ -51,4 +51,34 @@ int32_t opc_decoder_receive(OpcDecoder *decoder, OpcDecodedFrame *out);
 /// Drops decoder state after a reconnect, the way the shells flush for recovery.
 void opc_decoder_flush(OpcDecoder *decoder);
 
+// ── Files ─────────────────────────────────────────────────────────────────────
+// A clip on disk — the camera's 720p LRF proxy, or an original — demuxed and decoded
+// picture by picture, for the media player. Only the first video stream is read.
+
+typedef struct OpcFileReader OpcFileReader;
+
+typedef struct {
+    int32_t width;
+    int32_t height;
+    /// Frame rate as a rational, e.g. 30000/1001.
+    int32_t fps_num;
+    int32_t fps_den;
+    /// Whole clip, in milliseconds; zero when the container does not say.
+    int64_t duration_ms;
+} OpcFileInfo;
+
+#define OPC_FILE_END 3
+
+/// Opens a file for reading. NULL when it has no decodable video stream.
+OpcFileReader *opc_file_open(const char *path);
+void opc_file_close(OpcFileReader *reader);
+int32_t opc_file_info(OpcFileReader *reader, OpcFileInfo *out);
+
+/// Decodes the next picture. `OPC_DECODE_FRAME` filled `out` and `pts_ms`;
+/// `OPC_FILE_END` means the clip is over.
+int32_t opc_file_next(OpcFileReader *reader, OpcDecodedFrame *out, int64_t *pts_ms);
+
+/// Seeks to the keyframe at or before `position_ms` and flushes the decoder.
+int32_t opc_file_seek(OpcFileReader *reader, int64_t position_ms);
+
 #endif

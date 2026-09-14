@@ -318,10 +318,16 @@ fn the_cube_is_loaded_once_per_change_not_once_per_frame() {
     let mut shell = framed();
     assert_eq!(shell.take_lut_change(), None);
     shell.press(Key::Char('l'), 0.0);
-    assert_eq!(shell.take_lut_change(), Some(true));
+    assert_eq!(
+        shell.take_lut_change(),
+        Some(opc_monitor::LutRequest::Toggle(true))
+    );
     assert_eq!(shell.take_lut_change(), None, "already applied");
     shell.press(Key::Char('l'), 0.0);
-    assert_eq!(shell.take_lut_change(), Some(false));
+    assert_eq!(
+        shell.take_lut_change(),
+        Some(opc_monitor::LutRequest::Toggle(false))
+    );
 }
 
 #[test]
@@ -494,7 +500,8 @@ fn a_finger_that_lands_off_the_picture_does_not_lock_out_the_next_one() {
     shell.set_window(1280, 1280);
     shell.set_source(1920, 1080);
     // The window is square and the picture is 16:9, so the top is a letterbox bar.
-    shell.touch(1, TouchPhase::Started, 640.0, 10.0, 0.0);
+    // Land below the top bar and above the picture: bar, not button.
+    shell.touch(1, TouchPhase::Started, 640.0, 200.0, 0.0);
 
     // A finger that does land on the shot must still be able to draw.
     let fit = shell.fit();
@@ -558,4 +565,361 @@ fn stray_phases_for_a_finger_nobody_is_tracking_do_nothing() {
     assert!(shell
         .touch(9, TouchPhase::Cancelled, 200.0, 200.0, 0.0)
         .is_empty());
+}
+
+#[test]
+fn gimbal_pad_throws_on_down_and_rests_on_release_and_cancel() {
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    // The pad is 96 px square at the bottom left, centred on (252, 624) in this
+    // 1280 × 720 layout. Above and right of centre throws both axes positive: up is
+    // positive on the pad exactly as the Up arrow is.
+    let thrown = sent(&shell.control_down(280.0, 600.0, 0.0).expect("gimbal pad"));
+    assert!(
+        matches!(thrown.as_slice(), [Command::GimbalStick { axis0, axis1 }] if *axis0 > 1024 && *axis1 > 1024)
+    );
+    assert_eq!(
+        sent(&shell.control_up(280.0, 600.0, 0.0)),
+        [Command::GimbalStick {
+            axis0: 1024,
+            axis1: 1024
+        }],
+        "a release is an immediate rest, not a later timer tick"
+    );
+
+    shell.control_down(280.0, 600.0, 1.0).expect("gimbal pad");
+    assert_eq!(
+        sent(&shell.control_cancel()),
+        [Command::GimbalStick {
+            axis0: 1024,
+            axis1: 1024
+        }],
+        "focus loss and touch cancellation must also rest the camera"
+    );
+}
+
+#[test]
+fn control_hit_rectangles_beat_tracking_and_buttons_keep_typed_commands() {
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    // STILL is the third button of the trailing-bottom cluster at this layout. Its
+    // target is 56 px, safely above the 44 px minimum, and it must not make a tracking
+    // box.
+    assert!(shell.is_control(1_184.0, 630.0));
+    assert_eq!(
+        sent(
+            &shell
+                .control_down(1_184.0, 630.0, 0.0)
+                .expect("still button")
+        ),
+        [],
+    );
+    assert_eq!(
+        sent(&shell.control_up(1_184.0, 630.0, 0.0)),
+        [Command::ShootPhoto]
+    );
+    assert!(shell.pointer_up(1_184.0, 630.0, 0.0).is_empty());
+}
+
+#[test]
+fn recovering_controls_are_inert_but_still_claim_their_area() {
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Recovering);
+    assert!(shell.is_control(950.0, 670.0));
+    assert!(sent(&shell.control_down(950.0, 670.0, 0.0).expect("still button")).is_empty());
+    assert!(shell.control_up(950.0, 670.0, 0.0).is_empty());
+}
+
+#[test]
+fn every_primary_control_hit_target_survives_resize() {
+    let mut shell = framed();
+    // Centres of - / 1X / + / REC / STILL / FLIP / CTR / gimbal at 1280×720.
+    for point in [
+        (52.0, 668.0),
+        (118.0, 668.0),
+        (184.0, 668.0),
+        (640.0, 668.0),
+        (954.0, 668.0),
+        (1_020.0, 668.0),
+        (1_086.0, 668.0),
+        (1_190.0, 554.0),
+    ] {
+        assert!(
+            shell.is_control(point.0, point.1),
+            "{point:?} should be a control"
+        );
+    }
+    shell.set_window(1_920, 1_080);
+    // The same trailing and bottom layout scales its plates, while remaining far above
+    // the 44 px target floor.
+    for point in [
+        (60.0, 1_020.0),
+        (142.0, 1_020.0),
+        (224.0, 1_020.0),
+        (960.0, 1_020.0),
+        (1_506.0, 1_020.0),
+        (1_588.0, 1_020.0),
+        (1_670.0, 1_020.0),
+        (1_812.0, 880.0),
+    ] {
+        assert!(
+            shell.is_control(point.0, point.1),
+            "{point:?} should resize with chrome"
+        );
+    }
+}
+
+// ── Sheets ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn tab_opens_the_settings_and_escape_closes_them_before_it_quits() {
+    let mut shell = framed();
+    assert!(shell.press(Key::Tab, 0.0).is_empty());
+    assert_eq!(
+        shell.sheet(),
+        Some(opc_monitor::sheets::SheetKind::Settings)
+    );
+    assert!(
+        shell.press(Key::Escape, 0.0).is_empty(),
+        "escape with a sheet open closes the sheet, not the window"
+    );
+    assert_eq!(shell.sheet(), None);
+    assert_eq!(shell.press(Key::Escape, 0.0), [Intent::Quit]);
+}
+
+#[test]
+fn e_opens_the_exposure_sheet_and_a_second_press_closes_it() {
+    let mut shell = framed();
+    shell.press(Key::Char('e'), 0.0);
+    assert_eq!(
+        shell.sheet(),
+        Some(opc_monitor::sheets::SheetKind::Exposure)
+    );
+    shell.press(Key::Char('e'), 0.0);
+    assert_eq!(shell.sheet(), None);
+}
+
+#[test]
+fn an_open_sheet_owns_the_whole_window() {
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    shell.press(Key::Tab, 0.0);
+    // The window draws the frame before any tap can land on it.
+    shell.chrome(0.0);
+    // The middle of the picture would start a tracking box; under a sheet it cannot.
+    assert!(shell.is_control(640.0, 500.0));
+    // Below the panel is scrim, whatever the tab's row count.
+    shell.control_down(640.0, 690.0, 0.0).expect("scrim");
+    shell.control_up(640.0, 690.0, 0.0);
+    assert_eq!(shell.sheet(), None, "a tap on the scrim closes the sheet");
+}
+
+#[test]
+fn a_chip_on_the_exposure_sheet_sends_the_typed_command() {
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    shell.press(Key::Char('e'), 0.0);
+    // The first chip of the first row ("Mode" → "Auto") at this 1280 × 720 layout:
+    // the panel starts 16 px under the 56 px top bar, its header is 60 px, rows are
+    // 56 px, and chips start 160 px in from the row's 16 px inset.
+    shell.chrome(0.0);
+    let (x, y) = (200.0 + 16.0 + 160.0 + 20.0, 56.0 + 16.0 + 60.0 + 8.0 + 28.0);
+    assert!(shell.is_control(x, y));
+    shell.control_down(x, y, 0.0).expect("chip");
+    assert_eq!(
+        sent(&shell.control_up(x, y, 0.0)),
+        [Command::SetExpoMode(0x01)]
+    );
+    assert_eq!(
+        shell.sheet(),
+        Some(opc_monitor::sheets::SheetKind::Exposure),
+        "picking a value keeps the sheet open for the next one"
+    );
+}
+
+// ── Library and player ───────────────────────────────────────────────────────
+
+#[test]
+fn g_opens_the_library_and_escape_brings_live_view_back() {
+    use opc_chrome::Screen;
+    use opc_monitor::MediaAction;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    assert_eq!(
+        shell.press(Key::Char('g'), 0.0),
+        [Intent::Media(MediaAction::OpenLibrary)]
+    );
+    assert_eq!(shell.screen(), Screen::Library);
+    assert!(
+        shell.is_control(640.0, 360.0),
+        "the library owns the window; no tracking box under it"
+    );
+    // The arrow keys must not move the gimbal from the library.
+    assert!(shell.press(Key::Left, 0.0).is_empty());
+    assert_eq!(
+        shell.press(Key::Escape, 0.0),
+        [Intent::Media(MediaAction::CloseLibrary)]
+    );
+    assert_eq!(shell.screen(), Screen::Viewfinder);
+}
+
+#[test]
+fn a_listed_clip_can_be_selected_played_and_starred() {
+    use opc_chrome::Screen;
+    use opc_media::MediaFile;
+    use opc_monitor::MediaAction;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    shell.press(Key::Char('g'), 0.0);
+    let clip = MediaFile {
+        path: "DCIM/DJI_001/DJI_20260814125250_0034_D.MP4".to_string(),
+        thumb_path: "MISC/THM/DJI_001/DJI_20260814125250_0034_D.scr".to_string(),
+        handle: 0x4010_4480,
+        duration_seconds: 26,
+        ..MediaFile::default()
+    };
+    shell.library_listed(vec![clip.clone()], true);
+    // Drawing the grid is what asks for thumbnails, once.
+    shell.chrome(0.0);
+    let asked = shell.tick(0.1);
+    assert_eq!(asked, [Intent::Media(MediaAction::Thumb(clip.clone()))]);
+    assert!(shell.tick(0.2).is_empty(), "a thumbnail is asked for once");
+
+    // Slot 0 is the day header; the tile is the slot after it.
+    shell.library_mut().select_index(1);
+    assert_eq!(
+        shell.library().selected_file().map(|f| f.path.clone()),
+        Some(clip.path.clone())
+    );
+
+    // The player opens once the window has the clip on disk.
+    shell.open_player(clip.clone(), 26_000, true, false);
+    assert_eq!(shell.screen(), Screen::Player);
+    assert_eq!(
+        shell.press(Key::Space, 1.0),
+        [Intent::Media(MediaAction::PlayerToggle)]
+    );
+    assert!(!shell.player().unwrap().playing);
+    assert_eq!(
+        shell.press(Key::Escape, 1.0),
+        [Intent::Media(MediaAction::ClosePlayer)]
+    );
+    assert_eq!(shell.screen(), Screen::Library);
+}
+
+// ── Gimbal ramp ──────────────────────────────────────────────────────────────
+
+#[test]
+fn with_the_ramp_on_a_throw_eases_in_and_eases_back_to_rest() {
+    use opc_monitor::sheets::SheetKind;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    // Pick "Soft" on the Camera tab's ramp row through the sheet, as the operator would.
+    shell.press(Key::Tab, 0.0);
+    shell.chrome(0.0);
+    assert_eq!(shell.sheet(), Some(SheetKind::Settings));
+    shell.set_ramp_for_test(1);
+    shell.press(Key::Escape, 0.0);
+
+    let first = sent(&shell.press(Key::Right, 1.0));
+    let axis0 = |commands: &[Command]| match commands.last() {
+        Some(Command::GimbalStick { axis0, .. }) => *axis0,
+        other => panic!("expected a stick, got {other:?}"),
+    };
+    let start = axis0(&first);
+    assert!(
+        start > 1024 && start < 1424,
+        "the first step is a fraction: {start}"
+    );
+    let mut last = start;
+    let mut t = 1.05;
+    while t < 3.0 {
+        let step = sent(&shell.tick(t));
+        if !step.is_empty() {
+            let now = axis0(&step);
+            assert!(now >= last, "the throw only grows toward the target");
+            last = now;
+        }
+        t += 0.05;
+    }
+    assert!(
+        last >= 1420,
+        "held long enough, the throw reaches full: {last}"
+    );
+
+    shell.release(Key::Right, 3.0);
+    let mut rested = false;
+    let mut t = 3.05;
+    while t < 6.0 {
+        let step = sent(&shell.tick(t));
+        if let Some(Command::GimbalStick { axis0, axis1 }) = step.last() {
+            if *axis0 == 1024 && *axis1 == 1024 {
+                rested = true;
+            }
+        }
+        t += 0.05;
+    }
+    assert!(
+        rested,
+        "the stick ends centred, not parked at a small throw"
+    );
+    assert!(
+        sent(&shell.tick(7.0)).is_empty(),
+        "nothing more goes out once rested"
+    );
+}
+
+// ── Programmed moves ─────────────────────────────────────────────────────────
+
+#[test]
+fn a_take_captures_points_from_the_live_pose_counts_down_and_sends_timed_targets() {
+    use opc_monitor::sheets::SheetKind;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    let pose = |yaw_tenth: i16, seq: u32| Status {
+        gimbal_yaw_tenth: Some(yaw_tenth),
+        gimbal_pitch_tenth: Some(0),
+        gimbal_native_pitch_tenth: Some(0),
+        gimbal_attitude_seq: seq,
+        ..Status::default()
+    };
+    shell.tick(0.0);
+    shell.set_status(pose(100, 1));
+    assert!(shell.press(Key::Char('k'), 0.0).is_empty());
+    assert_eq!(shell.sheet(), Some(SheetKind::Moves));
+    shell.set_point_for_test(opc_monitor::sheets::Slot::A);
+    shell.set_status(pose(600, 2));
+    shell.set_point_for_test(opc_monitor::sheets::Slot::B);
+    assert_eq!(shell.program().a.map(|p| p.yaw), Some(10.0));
+    assert_eq!(shell.program().b.map(|p| p.yaw), Some(60.0));
+    shell.set_leg_for_test(opc_monitor::sheets::Slot::A, 4.0);
+
+    // Start: the sheet closes and a 3 s countdown runs before anything is sent.
+    shell.tick(1.0);
+    shell.set_status(pose(0, 3));
+    assert!(shell.start_move_for_test().is_empty());
+    assert_eq!(shell.sheet(), None);
+    assert!(shell.move_running());
+    assert!(sent(&shell.tick(2.0)).is_empty(), "still counting down");
+
+    // After the countdown, the approach to A goes out against fresh attitude.
+    let mut first = Vec::new();
+    let mut t = 4.05;
+    while first.is_empty() && t < 5.0 {
+        shell.set_status(pose(0, 10 + (t * 100.0) as u32));
+        first = sent(&shell.tick(t));
+        t += 0.05;
+    }
+    assert!(
+        matches!(
+            first.as_slice(),
+            [Command::GimbalTimedTarget { yaw_tenth: 100, .. }]
+        ),
+        "the approach targets A: {first:?}"
+    );
+
+    // Manual control cancels the path with a native stop.
+    let cancel = sent(&shell.press(Key::Left, t));
+    assert!(cancel.contains(&Command::GimbalTimedStop), "{cancel:?}");
+    assert!(!shell.move_running());
 }

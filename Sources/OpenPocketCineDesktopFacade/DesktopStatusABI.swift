@@ -11,6 +11,11 @@ import OpenPocketViewCore
 private final class StatusBox {
     var status = CameraStatus()
     var model: CameraModel?
+    /// The last `0x04/0x05` attitude, which `CameraStatus` itself swallows.
+    var gimbalYawTenth: Int16?
+    var gimbalPitchTenth: Int16?
+    var gimbalNativePitchTenth: Int16?
+    var gimbalAttitudeSeq: Int32 = 0
 }
 
 private func statusBox(_ handle: UnsafeMutableRawPointer?) -> StatusBox? {
@@ -48,6 +53,15 @@ func opc_status_apply_frame(
     let frame = Duml.Frame(
         sender: sender, receiver: receiver, seq: seq, flags: flags, cmdSet: cmdSet,
         cmdId: cmdId, payload: body)
+    if cmdSet == 0x04, cmdId == 0x05, body.count >= 22,
+        let yaw = GimbalStick.yawTenthDeg(body), let pitch = GimbalStick.pitchTenthDeg(body)
+    {
+        box.gimbalYawTenth = yaw
+        box.gimbalPitchTenth = pitch
+        box.gimbalNativePitchTenth = Int16(bitPattern: UInt16(body[0]) | (UInt16(body[1]) << 8))
+        box.gimbalAttitudeSeq &+= 1
+        if box.gimbalAttitudeSeq == 0 { box.gimbalAttitudeSeq = 1 }
+    }
     return CameraStatusDecoder.apply(frame, to: &box.status, model: box.model) ? 1 : 0
 }
 
@@ -103,6 +117,10 @@ func opc_status_read(
     out.pointee.zoom_hundredths =
         status.zoomFactor.map { Int32(($0 * 100).rounded()) } ?? -1
     out.pointee.reserved = 0
+    out.pointee.gimbal_yaw_tenth = box.gimbalYawTenth.map { Int32($0) } ?? 0
+    out.pointee.gimbal_pitch_tenth = box.gimbalPitchTenth.map { Int32($0) } ?? 0
+    out.pointee.gimbal_native_pitch_tenth = box.gimbalNativePitchTenth.map { Int32($0) } ?? 0
+    out.pointee.gimbal_attitude_seq = box.gimbalAttitudeSeq
 
     let cap = Int(OPC_STATUS_LIST_CAP)
     let shutters = withUnsafeMutablePointer(to: &out.pointee.available_shutter) {

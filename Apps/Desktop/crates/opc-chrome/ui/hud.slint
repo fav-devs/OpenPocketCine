@@ -1,0 +1,1822 @@
+// OpenPocketCine desktop viewfinder chrome — a DJI Mimo replica laid out for a
+// landscape laptop window.
+//
+//  ┌ TopBar ──────────────────────────────────────────────────────────────────┐
+//  │ ⋮   ⟳ON   ▭1080P·60   ◎AUTO        ● REC 00:12:34                    ⇥ │
+//  ├──────────────────────────────────────────────────────────────────────────┤
+//  │                       · · · ·(●)· · · ·   1.0×                           │
+//  │  1/60                                                        ᯤ  ▮15%     │
+//  │  ISO 400                    V I D E O                        ▤ 5:36:07   │
+//  │  EV -0.3                                                     ⛶            │
+//  ├ BottomBar ───────────────────────────────────────────────────────────────┤
+//  │ ▣ ⇅ ⟲  (joystick)              (● REC)              ⊙CTR ⟳  ⛶ 📷        │
+//  │        TIMELAPSE  SLOWMOTION  LOW-LIGHT  VIDEO  PHOTO  PANO  LIVESTREAM   │
+//  └──────────────────────────────────────────────────────────────────────────┘
+//
+// Every cluster is its own component with an explicit x/y so a later edit mode
+// can move it without touching the internals.
+
+import "../assets/fonts/Outfit-Regular.ttf";
+import "../assets/fonts/Outfit-Medium.ttf";
+import "../assets/fonts/Outfit-SemiBold.ttf";
+import "../assets/fonts/Outfit-Bold.ttf";
+
+// ── Palette ───────────────────────────────────────────────────────────────────
+
+export global Pal {
+    out property <color> bar:          #000000e6;
+    out property <color> plate:        #00000099;
+    out property <color> ink:          #ffffff;
+    out property <color> ink-dim:      #ffffffb3;
+    out property <color> ink-faint:    #ffffff4d;
+    out property <color> accent:       #ffc400;   // Mimo yellow: active mode, focus box
+    out property <color> online:       #34c759;
+    out property <color> offline:      #8e8e93;
+    out property <color> rec:          #f5222d;
+    out property <color> rec-bg:       #f5222d33;
+    out property <color> warn:         #ffd60a;
+    out property <color> ring:         #ffffff;
+    out property <color> ring-faint:   #ffffff66;
+    out property <string> font:        "Outfit";
+}
+
+// ── Building blocks ───────────────────────────────────────────────────────────
+
+// A square icon button with an optional caption (label) and a key hint.
+component IconButton {
+    in property <image> icon;
+    in property <string> label;
+    in property <string> key;
+    in property <length> icon-size: 24px;
+    in property <color> tint: Pal.ink;
+    in property <bool> enabled: true;
+    callback tapped();
+
+    width: 56px;
+    height: 56px;
+    opacity: root.enabled ? 1.0 : 0.35;
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.tapped(); }
+    }
+
+    Rectangle {
+        border-radius: 8px;
+        background: ta.pressed ? #ffffff2e : (ta.has-hover ? #ffffff14 : transparent);
+    }
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        Image {
+            source: root.icon;
+            colorize: root.tint;
+            width: root.icon-size;
+            height: root.icon-size;
+            horizontal-alignment: center;
+        }
+        if root.label != "": Text {
+            text: root.label;
+            color: root.tint;
+            font-family: Pal.font;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            horizontal-alignment: center;
+        }
+        if root.key != "": Text {
+            text: root.key;
+            color: Pal.ink-faint;
+            font-family: Pal.font;
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.6px;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+// A readout with a small glyph box on the left ("ISO", "EV") and a value.
+component Readout {
+    in property <string> badge;
+    in property <image> badge-icon;
+    in property <string> value;
+    height: 22px;
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+        if root.badge != "": Rectangle {
+            width: 26px;
+            height: 16px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3px;
+            background: Pal.ink;
+            Text {
+                text: root.badge;
+                color: #000000;
+                font-family: Pal.font;
+                font-size: 9px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        if root.badge == "" && root.badge-icon.width > 0: Image {
+            source: root.badge-icon;
+            colorize: Pal.ink;
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+        }
+        Text {
+            text: root.value;
+            color: Pal.ink;
+            font-family: Pal.font;
+            font-size: 14px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// ── Top bar ───────────────────────────────────────────────────────────────────
+
+component TopBar {
+    in property <string> follow-label;   // "ON" / "OFF"
+    in property <string> format-label;   // "1080P·60"
+    in property <string> expo-label;     // "AUTO" / "M"
+    in property <string> link-state;
+    in property <bool>   is-recording;
+    in property <string> rec-elapsed;
+    in property <string> timecode;
+    in property <string> move-text;
+    in property <bool>   enabled;
+
+    callback menu-tapped();
+    callback follow-tapped();
+    callback format-tapped();
+    callback expo-tapped();
+    callback exit-tapped();
+
+    height: 56px;
+
+    Rectangle { background: Pal.bar; }
+
+    HorizontalLayout {
+        x: 8px;
+        y: 0;
+        height: parent.height;
+        spacing: 4px;
+        alignment: start;
+
+        IconButton {
+            icon: @image-url("../assets/icons/dots-vertical.svg");
+            key: "TAB";
+            tapped => { root.menu-tapped(); }
+        }
+        IconButton {
+            icon: @image-url("../assets/icons/rotate-clockwise-2.svg");
+            label: root.follow-label;
+            tint: root.follow-label == "ON" ? Pal.ink : Pal.ink-dim;
+            enabled: root.enabled;
+            tapped => { root.follow-tapped(); }
+        }
+        IconButton {
+            icon: @image-url("../assets/icons/video.svg");
+            label: root.format-label;
+            key: "[ ]";
+            width: 84px;
+            enabled: root.enabled;
+            tapped => { root.format-tapped(); }
+        }
+        IconButton {
+            icon: @image-url("../assets/icons/aperture.svg");
+            label: root.expo-label;
+            key: "E";
+            enabled: root.enabled;
+            tapped => { root.expo-tapped(); }
+        }
+    }
+
+    // Centre: link state, and the REC badge while rolling.
+    centre := Rectangle {
+        width: centre-row.preferred-width;
+        height: parent.height;
+        x: (parent.width - self.width) / 2;
+        y: 0;
+        centre-row := HorizontalLayout {
+            spacing: 12px;
+            alignment: center;
+
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: center;
+                Rectangle {
+                    width: 7px; height: 7px;
+                    border-radius: 4px;
+                    y: (parent.height - self.height) / 2;
+                    background: root.link-state == "LINK" ? Pal.online : Pal.offline;
+                }
+                Text {
+                    text: root.link-state;
+                    color: root.link-state == "LINK" ? Pal.online : Pal.ink-dim;
+                    font-family: Pal.font;
+                    font-size: 11px;
+                    font-weight: 700;
+                    letter-spacing: 1px;
+                    vertical-alignment: center;
+                }
+            }
+
+            if root.move-text != "": Rectangle {
+                height: 28px;
+                width: mt.preferred-width + 24px;
+                y: (parent.height - self.height) / 2;
+                background: #ffc40026;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: Pal.accent;
+                mt := Text {
+                    text: root.move-text;
+                    color: Pal.accent;
+                    font-family: Pal.font;
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: 0.8px;
+                    x: (parent.width - self.preferred-width) / 2;
+                    y: (parent.height - self.preferred-height) / 2;
+                }
+            }
+
+            if root.timecode != "": Text {
+                text: root.timecode;
+                color: Pal.ink-dim;
+                font-family: Pal.font;
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: 1px;
+                vertical-alignment: center;
+            }
+
+            if root.is-recording: Rectangle {
+                height: 28px;
+                width: ri.preferred-width + 34px;
+                y: (parent.height - self.height) / 2;
+                background: Pal.rec-bg;
+                border-radius: 6px;
+                border-color: Pal.rec;
+                border-width: 1px;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 7px;
+                    Rectangle {
+                        width: 8px; height: 8px; border-radius: 4px;
+                        background: Pal.rec;
+                        y: (parent.height - self.height) / 2;
+                    }
+                    ri := Text {
+                        text: "REC  " + root.rec-elapsed;
+                        color: Pal.rec;
+                        font-family: Pal.font;
+                        font-size: 13px;
+                        font-weight: 700;
+                        letter-spacing: 0.8px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    IconButton {
+        x: parent.width - self.width - 8px;
+        y: 0;
+        icon: @image-url("../assets/icons/logout.svg");
+        key: "ESC";
+        tapped => { root.exit-tapped(); }
+    }
+}
+
+// ── Zoom dial ─────────────────────────────────────────────────────────────────
+// Mimo's dotted ruler with a ring in the middle. Horizontal drag sets the zoom.
+
+component ZoomDial {
+    in-out property <float> value: 1.0;
+    in property <float> minimum: 1.0;
+    in property <float> maximum: 6.0;
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback changed(float);
+
+    width: 360px;
+    height: 76px;
+    opacity: root.enabled ? 1.0 : 0.4;
+
+    // The ruler is `ruler-w` wide for the full range and slides so that the current
+    // value sits under the fixed ring in the middle.
+    property <float> pct: (root.value - root.minimum) / (root.maximum - root.minimum);
+    property <length> ruler-w: 480px;
+    property <length> centre: root.width / 2;
+    property <length> knob: 44px;
+    property <float> press-value;
+
+    for i in 41: Rectangle {
+        property <length> px: root.centre + root.ruler-w * (i / 40 - root.pct);
+        property <bool> major: mod(i, 8) == 0;
+        width: self.major ? 7px : 3px;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: self.px - self.width / 2;
+        y: 22px - self.height / 2;
+        background: Pal.ink;
+        opacity: 1.0 - min(1.0, abs((self.px - root.centre) / (root.width / 2 - 8px)));
+        visible: abs((self.px - root.centre) / 1px) > 26 && self.px > 0 && self.px < root.width;
+    }
+
+    Rectangle {
+        width: root.knob; height: root.knob;
+        border-radius: root.knob / 2;
+        x: root.centre - self.width / 2;
+        y: 22px - self.height / 2;
+        border-width: 2px;
+        border-color: Pal.ring;
+        background: #00000033;
+        Rectangle {
+            width: 14px; height: 14px; border-radius: 7px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Pal.ink;
+        }
+    }
+
+    Text {
+        text: root.label;
+        color: Pal.ink;
+        font-family: Pal.font;
+        font-size: 15px;
+        font-weight: 600;
+        x: (parent.width - self.preferred-width) / 2;
+        y: 50px;
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        height: 48px;
+        moved => {
+            if self.pressed {
+                // Dragging right pulls the ruler left, so the value goes up.
+                let delta = (self.mouse-x - self.pressed-x) / root.ruler-w;
+                root.value = (root.press-value + delta * (root.maximum - root.minimum))
+                    .clamp(root.minimum, root.maximum);
+                root.changed(root.value);
+            }
+        }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                root.press-value = root.value;
+            }
+        }
+    }
+}
+
+// ── Exposure column ───────────────────────────────────────────────────────────
+
+component ExposureColumn {
+    in property <string> shutter;
+    in property <string> iso;
+    in property <string> ev;
+    in property <string> wb;
+
+    width: 110px;
+    height: layout.preferred-height + 24px;
+
+    Rectangle {
+        background: Pal.plate;
+        border-radius: 10px;
+    }
+
+    layout := VerticalLayout {
+        x: 12px;
+        y: 12px;
+        spacing: 12px;
+        alignment: start;
+        if root.shutter != "": Readout { value: root.shutter; }
+        if root.iso != "": Readout { badge: "ISO"; value: root.iso; }
+        if root.ev != "": Readout { badge: "EV"; value: root.ev; }
+        if root.wb != "": Readout { badge: "WB"; value: root.wb; }
+    }
+}
+
+// ── Status column ─────────────────────────────────────────────────────────────
+
+component StatusColumn {
+    in property <string> link-state;
+    in property <string> battery-text;
+    in property <string> storage-text;
+    in property <int>    battery-percent;
+    in property <string> fps-text;
+
+    width: 108px;
+    height: layout.preferred-height + 24px;
+
+    Rectangle {
+        background: Pal.plate;
+        border-radius: 10px;
+    }
+
+    layout := VerticalLayout {
+        x: 12px;
+        y: 12px;
+        spacing: 12px;
+        alignment: start;
+
+        HorizontalLayout {
+            spacing: 6px;
+            Image {
+                source: @image-url("../assets/icons/wifi.svg");
+                colorize: root.link-state == "LINK" ? Pal.ink : Pal.offline;
+                width: 18px; height: 18px;
+            }
+            Text {
+                text: root.link-state == "LINK" ? "Wi-Fi" : "—";
+                color: root.link-state == "LINK" ? Pal.ink : Pal.offline;
+                font-family: Pal.font; font-size: 13px; font-weight: 600;
+                vertical-alignment: center;
+            }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            Image {
+                source: @image-url("../assets/icons/battery-2.svg");
+                colorize: root.battery-percent <= 20 ? Pal.rec : (root.battery-percent <= 40 ? Pal.warn : Pal.ink);
+                width: 18px; height: 18px;
+            }
+            Text {
+                text: root.battery-text;
+                color: root.battery-percent <= 20 ? Pal.rec : Pal.ink;
+                font-family: Pal.font; font-size: 13px; font-weight: 600;
+                vertical-alignment: center;
+            }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            Image {
+                source: @image-url("../assets/icons/device-sd-card.svg");
+                colorize: Pal.ink;
+                width: 18px; height: 18px;
+            }
+            Text {
+                text: root.storage-text;
+                color: Pal.ink;
+                font-family: Pal.font; font-size: 13px; font-weight: 600;
+                vertical-alignment: center;
+            }
+        }
+        // The rate reaching the screen, which is the desktop's own truth, not the body's.
+        if root.fps-text != "": Text {
+            text: root.fps-text;
+            color: Pal.ink-dim;
+            font-family: Pal.font; font-size: 12px; font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+    }
+}
+
+// ── Countdown ─────────────────────────────────────────────────────────────────
+// The T-key take countdown: one big number in the middle of the shot.
+
+component CountdownPanel {
+    in property <string> seconds;
+    width: 120px;
+    height: 120px;
+    Rectangle {
+        border-radius: 60px;
+        background: #000000b3;
+        border-width: 3px;
+        border-color: Pal.accent;
+    }
+    Text {
+        text: root.seconds;
+        color: Pal.accent;
+        font-family: Pal.font;
+        font-size: 64px;
+        font-weight: 700;
+        x: (parent.width - self.preferred-width) / 2;
+        y: (parent.height - self.preferred-height) / 2;
+    }
+}
+
+// ── Gimbal joystick ───────────────────────────────────────────────────────────
+
+component GimbalPad {
+    in property <bool> enabled: true;
+    callback gimbal-moved(float, float);
+    callback gimbal-released();
+
+    width: 96px;
+    height: 96px;
+    opacity: root.enabled ? 1.0 : 0.4;
+
+    property <float> dx: 0;
+    property <float> dy: 0;
+
+    Rectangle {
+        border-radius: 48px;
+        border-width: 1.5px;
+        border-color: Pal.ring-faint;
+        background: #00000066;
+    }
+
+    Image { source: @image-url("../assets/icons/chevron-up.svg"); colorize: Pal.ink-dim;
+        width: 16px; height: 16px; x: (parent.width - self.width) / 2; y: 6px; }
+    Image { source: @image-url("../assets/icons/chevron-down.svg"); colorize: Pal.ink-dim;
+        width: 16px; height: 16px; x: (parent.width - self.width) / 2; y: parent.height - self.height - 6px; }
+    Image { source: @image-url("../assets/icons/chevron-left.svg"); colorize: Pal.ink-dim;
+        width: 16px; height: 16px; x: 6px; y: (parent.height - self.height) / 2; }
+    Image { source: @image-url("../assets/icons/chevron-right.svg"); colorize: Pal.ink-dim;
+        width: 16px; height: 16px; x: parent.width - self.width - 6px; y: (parent.height - self.height) / 2; }
+
+    // Thumb follows the finger while held.
+    Rectangle {
+        width: 40px; height: 40px; border-radius: 20px;
+        background: ta.pressed ? #ffffffe6 : #ffffffb3;
+        x: (parent.width - self.width) / 2 + root.dx * 22px;
+        y: (parent.height - self.height) / 2 + root.dy * 22px;
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        moved => {
+            if self.pressed {
+                root.dx = ((self.mouse-x - root.width / 2) / (root.width / 2)).clamp(-1, 1);
+                root.dy = ((self.mouse-y - root.height / 2) / (root.height / 2)).clamp(-1, 1);
+                root.gimbal-moved(root.dx, -root.dy);
+            }
+        }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                root.dx = ((self.mouse-x - root.width / 2) / (root.width / 2)).clamp(-1, 1);
+                root.dy = ((self.mouse-y - root.height / 2) / (root.height / 2)).clamp(-1, 1);
+                root.gimbal-moved(root.dx, -root.dy);
+            } else if e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel {
+                root.dx = 0;
+                root.dy = 0;
+                root.gimbal-released();
+            }
+        }
+    }
+
+    Text {
+        text: "ARROWS";
+        color: Pal.ink-faint;
+        font-family: Pal.font; font-size: 9px; font-weight: 600; letter-spacing: 0.6px;
+        x: (parent.width - self.preferred-width) / 2;
+        y: parent.height + 2px;
+    }
+}
+
+// ── Record button ─────────────────────────────────────────────────────────────
+
+component RecordButton {
+    in property <bool> is-recording;
+    in property <bool> photo-mode;
+    in property <bool> enabled: true;
+    callback tapped();
+
+    width: 72px;
+    height: 72px;
+    opacity: root.enabled ? 1.0 : 0.4;
+
+    Rectangle {
+        border-radius: 36px;
+        border-width: 3px;
+        border-color: Pal.ring;
+        background: ta.pressed ? #ffffff22 : transparent;
+    }
+    Rectangle {
+        // A red disc; a rounded square while rolling; white for a still.
+        width: root.is-recording ? 30px : 56px;
+        height: self.width;
+        border-radius: root.is-recording ? 6px : self.width / 2;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: root.photo-mode ? Pal.ink : Pal.rec;
+        animate width, border-radius { duration: 120ms; }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.tapped(); }
+    }
+    Text {
+        text: root.photo-mode ? "S" : "SPACE";
+        color: Pal.ink-faint;
+        font-family: Pal.font; font-size: 9px; font-weight: 600; letter-spacing: 0.6px;
+        x: (parent.width - self.preferred-width) / 2;
+        y: parent.height + 4px;
+    }
+}
+
+// ── Mode strip ────────────────────────────────────────────────────────────────
+
+component ModeStrip {
+    in property <[string]> modes;
+    in property <[bool]> available;
+    in property <int> selected;
+    in property <bool> enabled: true;
+    callback selected-changed(int);
+
+    height: 36px;
+
+    Rectangle {
+        width: row.preferred-width;
+        height: parent.height;
+        x: (parent.width - self.width) / 2;
+        row := HorizontalLayout {
+        spacing: 28px;
+        alignment: center;
+
+        for m[i] in root.modes: Rectangle {
+            width: t.preferred-width;
+            t := Text {
+                text: m;
+                color: i == root.selected ? Pal.accent : (root.available[i] ? Pal.ink-dim : Pal.ink-faint);
+                font-family: Pal.font;
+                font-size: 15px;
+                font-weight: i == root.selected ? 700 : 600;
+                letter-spacing: 0.6px;
+                vertical-alignment: center;
+                height: parent.height;
+            }
+            TouchArea {
+                enabled: root.enabled && root.available[i];
+                clicked => { root.selected-changed(i); }
+            }
+        }
+        }
+    }
+}
+
+// ── Bottom bar ────────────────────────────────────────────────────────────────
+
+component BottomBar {
+    in property <bool> is-recording;
+    in property <bool> photo-mode;
+    in property <bool> enabled;
+    in property <[string]> modes;
+    in property <[bool]> modes-available;
+    in property <int> mode-selected;
+
+    callback record-tapped();
+    callback still-tapped();
+    callback flip-tapped();
+    callback recenter-tapped();
+    callback gallery-tapped();
+    callback orientation-tapped();
+    callback follow-cycle-tapped();
+    callback fullscreen-tapped();
+    callback mode-selected-changed(int);
+    callback gimbal-moved(float, float);
+    callback gimbal-released();
+
+    height: 152px;
+
+    Rectangle { background: Pal.bar; }
+
+    // Left cluster: gallery / flip / orientation, then the stick.
+    HorizontalLayout {
+        x: 12px;
+        y: 8px;
+        height: 100px;
+        spacing: 6px;
+        alignment: start;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 0;
+            HorizontalLayout {
+                spacing: 2px;
+                IconButton {
+                    icon: @image-url("../assets/icons/photo.svg");
+                    key: "G";
+                    tapped => { root.gallery-tapped(); }
+                }
+                IconButton {
+                    icon: @image-url("../assets/icons/flip-vertical.svg");
+                    key: "F";
+                    enabled: root.enabled;
+                    tapped => { root.flip-tapped(); }
+                }
+                IconButton {
+                    icon: @image-url("../assets/icons/device-mobile-rotated.svg");
+                    key: "O";
+                    enabled: root.enabled;
+                    tapped => { root.orientation-tapped(); }
+                }
+            }
+        }
+        Rectangle { width: 8px; }
+        GimbalPad {
+            y: 0;
+            enabled: root.enabled;
+            gimbal-moved(x, y) => { root.gimbal-moved(x, y); }
+            gimbal-released => { root.gimbal-released(); }
+        }
+    }
+
+    // Centre: record.
+    RecordButton {
+        x: (parent.width - self.width) / 2;
+        y: 14px;
+        is-recording: root.is-recording;
+        photo-mode: root.photo-mode;
+        enabled: root.enabled;
+        tapped => { root.record-tapped(); }
+    }
+
+    // Right cluster.
+    Rectangle {
+        width: right-row.preferred-width;
+        x: parent.width - self.width - 12px;
+        y: 8px;
+        height: 100px;
+
+        VerticalLayout {
+            alignment: center;
+            right-row := HorizontalLayout {
+                spacing: 2px;
+                IconButton {
+                    icon: @image-url("../assets/icons/arrows-minimize.svg");
+                    label: "CTR";
+                    key: "C";
+                    enabled: root.enabled;
+                    tapped => { root.recenter-tapped(); }
+                }
+                IconButton {
+                    icon: @image-url("../assets/icons/rotate-360.svg");
+                    label: "FOLLOW";
+                    width: 64px;
+                    enabled: root.enabled;
+                    tapped => { root.follow-cycle-tapped(); }
+                }
+                IconButton {
+                    icon: @image-url("../assets/icons/camera.svg");
+                    label: "STILL";
+                    key: "S";
+                    enabled: root.enabled;
+                    tapped => { root.still-tapped(); }
+                }
+                IconButton {
+                    icon: @image-url("../assets/icons/maximize.svg");
+                    key: "F11";
+                    tapped => { root.fullscreen-tapped(); }
+                }
+            }
+        }
+    }
+
+    ModeStrip {
+        x: 0;
+        y: parent.height - self.height - 6px;
+        width: parent.width;
+        modes: root.modes;
+        available: root.modes-available;
+        selected: root.mode-selected;
+        enabled: root.enabled;
+        selected-changed(i) => { root.mode-selected-changed(i); }
+    }
+}
+
+// ── Phase panel ───────────────────────────────────────────────────────────────
+
+component PhasePanel {
+    in property <string> message;
+    in property <bool>   failed;
+
+    width: t.preferred-width + 56px;
+    height: 64px;
+
+    Rectangle {
+        background: #000000d9;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: root.failed ? #f5222d66 : #ffffff1f;
+    }
+
+    t := Text {
+        text: root.message;
+        color: root.failed ? Pal.warn : Pal.ink;
+        font-family: Pal.font;
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 2.5px;
+        x: (parent.width - self.preferred-width) / 2;
+        y: (parent.height - self.preferred-height) / 2;
+    }
+}
+
+// ── Sheets ────────────────────────────────────────────────────────────────────
+// One panel serves the format picker, the exposure sheet and the settings tabs:
+// rows of a title and a strip of chips. The shell decides what each pick means.
+
+export struct SheetRow {
+    title: string,
+    options: [string],
+    selected: int,
+    enabled: bool,
+}
+
+component Chip {
+    in property <string> text;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    callback tapped();
+
+    width: max(56px, t.preferred-width + 24px);
+    height: 36px;
+
+    Rectangle {
+        border-radius: 8px;
+        background: root.selected ? Pal.accent : (ta.has-hover ? #ffffff1f : #ffffff14);
+        border-width: 1px;
+        border-color: root.selected ? Pal.accent : #ffffff2e;
+    }
+    t := Text {
+        text: root.text;
+        color: root.selected ? #000000 : (root.enabled ? Pal.ink : Pal.ink-faint);
+        font-family: Pal.font;
+        font-size: 13px;
+        font-weight: root.selected ? 700 : 600;
+        x: (parent.width - self.preferred-width) / 2;
+        y: (parent.height - self.preferred-height) / 2;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.tapped(); }
+    }
+}
+
+component SheetPanel {
+    in property <string> title;
+    in property <[string]> tabs;
+    in property <int> tab;
+    in property <[SheetRow]> rows;
+    callback picked(int, int);
+    callback tab-picked(int);
+    callback close();
+
+    property <length> row-h: 56px;
+    property <length> head-h: 60px;
+    height: root.head-h + root.rows.length * root.row-h + 16px;
+
+    Rectangle {
+        background: #121212f5;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: #ffffff1f;
+    }
+
+    // Header: title, tabs, close.
+    Text {
+        text: root.title;
+        color: Pal.ink;
+        font-family: Pal.font;
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        x: 20px;
+        y: (root.head-h - self.preferred-height) / 2;
+    }
+    Rectangle {
+        width: tab-row.preferred-width;
+        height: root.head-h;
+        x: (parent.width - self.width) / 2;
+        y: 0;
+        tab-row := HorizontalLayout {
+            x: 0;
+            y: 0;
+            height: root.head-h;
+            spacing: 4px;
+            alignment: center;
+            for name[i] in root.tabs: Rectangle {
+                width: tt.preferred-width + 28px;
+                height: 32px;
+                y: (root.head-h - self.height) / 2;
+                border-radius: 8px;
+                background: i == root.tab ? #ffffff1f : transparent;
+                tt := Text {
+                    text: name;
+                    color: i == root.tab ? Pal.ink : Pal.ink-dim;
+                    font-family: Pal.font;
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: 1px;
+                    x: (parent.width - self.preferred-width) / 2;
+                    y: (parent.height - self.preferred-height) / 2;
+                }
+                TouchArea { clicked => { root.tab-picked(i); } }
+            }
+        }
+    }
+    IconButton {
+        x: parent.width - self.width - 6px;
+        y: (root.head-h - self.height) / 2;
+        width: 48px; height: 48px;
+        icon: @image-url("../assets/icons/x.svg");
+        icon-size: 20px;
+        tapped => { root.close(); }
+    }
+    Rectangle { x: 16px; y: root.head-h; width: parent.width - 32px; height: 1px; background: #ffffff14; }
+
+    // Rows.
+    for row[i] in root.rows: Rectangle {
+        x: 16px;
+        y: root.head-h + 8px + i * root.row-h;
+        width: parent.width - 32px;
+        height: root.row-h;
+        opacity: row.enabled ? 1.0 : 0.4;
+
+        Text {
+            text: row.title;
+            color: Pal.ink-dim;
+            font-family: Pal.font;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            x: 4px;
+            y: (parent.height - self.preferred-height) / 2;
+            width: 150px;
+        }
+        Flickable {
+            x: 160px;
+            y: (parent.height - self.height) / 2;
+            width: parent.width - 160px;
+            height: 36px;
+            viewport-width: chips.preferred-width;
+            chips := HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                for opt[j] in row.options: Chip {
+                    text: opt;
+                    selected: j == row.selected;
+                    enabled: row.enabled;
+                    tapped => { root.picked(i, j); }
+                }
+            }
+        }
+    }
+}
+
+// ── Library ───────────────────────────────────────────────────────────────────
+// Mimo's album for a laptop: Device / Local, pill filters, thumbnails grouped by
+// day with a download mark and the clip length, and the selection's actions below.
+
+export struct MediaCell {
+    path: string,
+    /// A day header row rather than a tile; `title` is the day.
+    header: bool,
+    title: string,
+    meta: string,
+    x: length,
+    y: length,
+    thumb: image,
+    has-thumb: bool,
+    is-video: bool,
+    starred: bool,
+    cached: bool,
+    selected: bool,
+}
+
+export struct MediaSelection {
+    title: string,
+    meta: string,
+    is-video: bool,
+    starred: bool,
+    cached: bool,
+    deletable: bool,
+    delete-armed: bool,
+    /// -1 when nothing is transferring, else 0…1.
+    progress: float,
+    note: string,
+}
+
+component Pill {
+    in property <string> text;
+    in property <bool> selected;
+    callback tapped();
+    width: t.preferred-width + 40px;
+    height: 40px;
+    Rectangle {
+        border-radius: 20px;
+        background: root.selected ? #e6e6e6 : (ta.has-hover ? #2c2c2c : #1e1e1e);
+    }
+    t := Text {
+        text: root.text;
+        color: root.selected ? #000000 : #d0d0d0;
+        font-family: Pal.font;
+        font-size: 14px;
+        font-weight: 600;
+        x: (parent.width - self.preferred-width) / 2;
+        y: (parent.height - self.preferred-height) / 2;
+    }
+    ta := TouchArea { clicked => { root.tapped(); } }
+}
+
+component TextButton {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> enabled: true;
+    in property <bool> danger: false;
+    in property <bool> accent: false;
+    callback tapped();
+
+    width: t.preferred-width + (root.icon.width > 0 ? 44px : 28px);
+    height: 40px;
+    opacity: root.enabled ? 1.0 : 0.35;
+
+    Rectangle {
+        border-radius: 20px;
+        background: root.accent ? #e6e6e6 : (root.danger ? #f5222d33 : (ta.has-hover ? #2c2c2c : #1e1e1e));
+    }
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
+        alignment: center;
+        if root.icon.width > 0: Image {
+            source: root.icon;
+            colorize: root.accent ? #000000 : (root.danger ? Pal.rec : Pal.ink);
+            width: 18px; height: 18px;
+            y: (parent.height - self.height) / 2;
+        }
+        t := Text {
+            text: root.text;
+            color: root.accent ? #000000 : (root.danger ? Pal.rec : Pal.ink);
+            font-family: Pal.font;
+            font-size: 13px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.tapped(); }
+    }
+}
+
+component LibraryPage {
+    in property <[string]> tabs;
+    in property <int> tab;
+    in property <bool> local;
+    in property <string> sort-label;
+    in property <string> status;
+    in property <[MediaCell]> cells;
+    in property <length> content-height;
+    in property <length> cell-w;
+    in property <length> cell-h;
+    in property <MediaSelection> selection;
+    in property <bool> has-selection;
+
+    callback back();
+    callback source-tapped(bool);
+    callback tab-picked(int);
+    callback sort-tapped();
+    callback refresh();
+    callback cell-tapped(int);
+    callback play();
+    callback download();
+    callback favorite();
+    callback delete();
+
+    property <length> head-h: 128px;
+    property <length> foot-h: 88px;
+    property <length> inset: 24px;
+
+    Rectangle { x: 0; y: 0; width: parent.width; height: parent.height; background: #000000; }
+
+    // Header: back, Device / Local, the filters, and the tools on the right.
+    Rectangle {
+        x: 0; y: 0; width: parent.width; height: root.head-h;
+        IconButton {
+            x: 8px; y: 8px;
+            icon: @image-url("../assets/icons/arrow-left.svg");
+            key: "ESC";
+            tapped => { root.back(); }
+        }
+        Text {
+            text: "Device";
+            color: root.local ? #8a8a8a : Pal.ink;
+            font-family: Pal.font; font-size: 30px; font-weight: 700;
+            x: 72px; y: 14px;
+            TouchArea { clicked => { root.source-tapped(false); } }
+        }
+        Text {
+            text: "Local";
+            color: root.local ? Pal.ink : #8a8a8a;
+            font-family: Pal.font; font-size: 30px; font-weight: 700;
+            x: 200px; y: 14px;
+            TouchArea { clicked => { root.source-tapped(true); } }
+        }
+        Rectangle {
+            width: tab-row.preferred-width;
+            height: 40px;
+            x: 72px; y: 72px;
+            tab-row := HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+                for name[i] in root.tabs: Pill {
+                    text: name;
+                    selected: i == root.tab;
+                    tapped => { root.tab-picked(i); }
+                }
+            }
+        }
+        Rectangle {
+            width: right-row.preferred-width;
+            height: 56px;
+            x: parent.width - self.width - 12px; y: 8px;
+            right-row := HorizontalLayout {
+                spacing: 6px;
+                alignment: center;
+                TextButton {
+                    y: 8px;
+                    text: root.sort-label;
+                    tapped => { root.sort-tapped(); }
+                }
+                IconButton {
+                    icon: @image-url("../assets/icons/refresh.svg");
+                    key: "R";
+                    tapped => { root.refresh(); }
+                }
+            }
+        }
+    }
+
+    // Grid, grouped by day. The shell lays the tiles out; this only draws them.
+    Flickable {
+        x: root.inset;
+        y: root.head-h;
+        width: parent.width - 2 * root.inset;
+        height: parent.height - root.head-h - root.foot-h;
+        viewport-height: max(self.height, root.content-height);
+        for cell[i] in root.cells: Rectangle {
+            x: cell.x;
+            y: cell.y;
+            width: cell.header ? parent.width : root.cell-w;
+            height: cell.header ? 44px : root.cell-h;
+            border-radius: cell.header ? 0 : 6px;
+            background: cell.header ? transparent : #111111;
+            border-width: cell.selected ? 3px : 0;
+            border-color: Pal.accent;
+            clip: true;
+
+            if cell.header: Text {
+                text: cell.title;
+                color: Pal.ink;
+                font-family: Pal.font; font-size: 18px; font-weight: 700;
+                x: 0; y: parent.height - self.preferred-height - 6px;
+            }
+
+            if !cell.header && cell.has-thumb: Image {
+                source: cell.thumb;
+                width: parent.width; height: parent.height;
+                image-fit: cover;
+            }
+            if !cell.header && !cell.has-thumb: Image {
+                source: cell.is-video ? @image-url("../assets/icons/video.svg") : @image-url("../assets/icons/photo.svg");
+                colorize: Pal.ink-faint;
+                width: 28px; height: 28px;
+                x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            }
+            // Not on this machine yet: Mimo's download mark.
+            if !cell.header && !cell.cached: Image {
+                source: @image-url("../assets/icons/download.svg");
+                colorize: Pal.ink;
+                width: 20px; height: 20px; x: 10px; y: 10px;
+            }
+            if !cell.header && cell.starred: Image {
+                source: @image-url("../assets/icons/star-filled.svg");
+                colorize: Pal.accent;
+                width: 18px; height: 18px; x: parent.width - self.width - 10px; y: 10px;
+            }
+            if !cell.header && cell.is-video: HorizontalLayout {
+                x: 10px; y: parent.height - 30px; height: 20px;
+                spacing: 6px;
+                alignment: start;
+                Image {
+                    source: @image-url("../assets/icons/video.svg");
+                    colorize: Pal.ink;
+                    width: 18px; height: 18px;
+                    y: (parent.height - self.height) / 2;
+                }
+                Text {
+                    text: cell.meta;
+                    color: Pal.ink;
+                    font-family: Pal.font; font-size: 13px; font-weight: 600;
+                    vertical-alignment: center;
+                }
+            }
+            if !cell.header: TouchArea { clicked => { root.cell-tapped(i); } }
+        }
+    }
+
+    // Footer: the selection's actions, or the status.
+    Rectangle {
+        x: 0; y: parent.height - root.foot-h; width: parent.width;
+        height: root.foot-h;
+        background: #0a0a0a;
+
+        if !root.has-selection: Text {
+            text: root.status;
+            color: #8a8a8a;
+            font-family: Pal.font; font-size: 13px; font-weight: 600;
+            x: root.inset; y: (parent.height - self.preferred-height) / 2;
+        }
+
+        if root.has-selection: VerticalLayout {
+            x: root.inset; y: 0; height: parent.height;
+            width: parent.width * 0.42;
+            alignment: center;
+            spacing: 4px;
+            Text {
+                text: root.selection.title;
+                color: Pal.ink;
+                font-family: Pal.font; font-size: 15px; font-weight: 700;
+                overflow: elide;
+            }
+            Text {
+                text: root.selection.meta + (root.selection.note != "" ? "  ·  " + root.selection.note : "");
+                color: #8a8a8a;
+                font-family: Pal.font; font-size: 12px; font-weight: 600;
+                overflow: elide;
+            }
+            if root.selection.progress >= 0: Rectangle {
+                height: 4px; width: 260px; border-radius: 2px; background: #ffffff24;
+                Rectangle {
+                    width: parent.width * root.selection.progress; height: parent.height;
+                    border-radius: 2px; background: Pal.accent;
+                }
+            }
+        }
+
+        if root.has-selection: Rectangle {
+            width: actions.preferred-width;
+            height: parent.height;
+            x: parent.width - self.width - root.inset;
+            actions := HorizontalLayout {
+                spacing: 8px;
+                alignment: center;
+                TextButton {
+                    y: (root.foot-h - self.height) / 2;
+                    text: root.selection.is-video ? "Play" : "View";
+                    icon: @image-url("../assets/icons/player-play.svg");
+                    accent: true;
+                    tapped => { root.play(); }
+                }
+                TextButton {
+                    y: (root.foot-h - self.height) / 2;
+                    text: root.selection.cached ? "Saved" : "Download";
+                    icon: @image-url("../assets/icons/download.svg");
+                    enabled: !root.selection.cached;
+                    tapped => { root.download(); }
+                }
+                IconButton {
+                    y: (root.foot-h - self.height) / 2;
+                    icon: root.selection.starred ? @image-url("../assets/icons/heart-filled.svg") : @image-url("../assets/icons/heart.svg");
+                    tint: root.selection.starred ? Pal.rec : Pal.ink;
+                    tapped => { root.favorite(); }
+                }
+                TextButton {
+                    y: (root.foot-h - self.height) / 2;
+                    text: root.selection.delete-armed ? "Confirm delete" : "";
+                    icon: @image-url("../assets/icons/trash.svg");
+                    danger: true;
+                    enabled: root.selection.deletable;
+                    tapped => { root.delete(); }
+                }
+            }
+        }
+    }
+}
+
+// ── Player ────────────────────────────────────────────────────────────────────
+// Mimo's player: back, info, the rendition as the title, download; a time pill, a
+// filmstrip scrubber, the tools, then heart · pause · trash.
+
+export struct PlayerView {
+    title: string,
+    tag: string,
+    info: string,
+    show-info: bool,
+    position-label: string,
+    duration-label: string,
+    progress: float,
+    playing: bool,
+    starred: bool,
+    cached: bool,
+    deletable: bool,
+    delete-armed: bool,
+    lut-on: bool,
+    zebra-on: bool,
+    peaking-on: bool,
+    /// A still: no transport, the picture is the whole screen.
+    is-photo: bool,
+}
+
+component Tool {
+    in property <image> icon;
+    in property <string> text;
+    in property <bool> on;
+    callback tapped();
+    width: 96px;
+    height: 72px;
+    Rectangle {
+        width: 44px; height: 44px; border-radius: 22px;
+        x: (parent.width - self.width) / 2; y: 0;
+        background: root.on ? Pal.accent : (ta.has-hover ? #ffffff1f : transparent);
+        Image {
+            source: root.icon;
+            colorize: root.on ? #000000 : Pal.ink;
+            width: 26px; height: 26px;
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        }
+    }
+    Text {
+        text: root.text;
+        color: #d0d0d0;
+        font-family: Pal.font; font-size: 13px; font-weight: 600;
+        x: (parent.width - self.preferred-width) / 2; y: 50px;
+    }
+    ta := TouchArea { clicked => { root.tapped(); } }
+}
+
+component PlayerPage {
+    in property <PlayerView> view;
+    in property <[image]> strip;
+    callback back();
+    callback info();
+    callback download();
+    callback toggle();
+    callback seek(float);
+    callback screenshot();
+    callback lut();
+    callback zebra();
+    callback peaking();
+    callback favorite();
+    callback delete();
+
+    property <length> bar-h: 64px;
+    property <length> foot-h: 262px;
+    property <length> strip-h: 64px;
+
+    // Header.
+    Rectangle {
+        x: 0; y: 0; width: parent.width;
+        height: root.bar-h;
+        background: #000000b3;
+        IconButton {
+            x: 8px; y: (parent.height - self.height) / 2;
+            icon: @image-url("../assets/icons/arrow-left.svg");
+            key: "ESC";
+            tapped => { root.back(); }
+        }
+        IconButton {
+            x: 64px; y: (parent.height - self.height) / 2;
+            icon: @image-url("../assets/icons/info-circle.svg");
+            tint: root.view.show-info ? Pal.accent : Pal.ink;
+            tapped => { root.info(); }
+        }
+        Text {
+            text: root.view.tag;
+            color: #d0d0d0;
+            font-family: Pal.font; font-size: 17px; font-weight: 600;
+            x: (parent.width - self.preferred-width) / 2;
+            y: (parent.height - self.preferred-height) / 2;
+        }
+        IconButton {
+            x: parent.width - self.width - 8px; y: (parent.height - self.height) / 2;
+            icon: @image-url("../assets/icons/download.svg");
+            tint: root.view.cached ? Pal.online : Pal.ink;
+            enabled: !root.view.cached;
+            tapped => { root.download(); }
+        }
+    }
+
+    if root.view.show-info: Rectangle {
+        x: 16px; y: root.bar-h + 12px;
+        width: it.preferred-width + 28px; height: it.preferred-height + 20px;
+        border-radius: 10px;
+        background: #000000b3;
+        it := Text {
+            text: root.view.title + "\n" + root.view.info;
+            color: Pal.ink;
+            font-family: Pal.font; font-size: 13px; font-weight: 600;
+            x: 14px; y: 10px;
+        }
+    }
+
+    // Transport and tools.
+    if !root.view.is-photo: Rectangle {
+        x: 0; y: parent.height - root.foot-h; width: parent.width;
+        height: root.foot-h;
+        background: #000000b3;
+
+        // Time pill.
+        Rectangle {
+            width: tp.preferred-width + 28px; height: 32px;
+            x: (parent.width - self.width) / 2; y: 6px;
+            border-radius: 16px;
+            background: #000000b3;
+            tp := HorizontalLayout {
+                alignment: center;
+                spacing: 6px;
+                Text {
+                    text: root.view.position-label;
+                    color: Pal.ink;
+                    font-family: Pal.font; font-size: 15px; font-weight: 700;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: "/  " + root.view.duration-label;
+                    color: #9a9a9a;
+                    font-family: Pal.font; font-size: 15px; font-weight: 600;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Filmstrip: frames across the clip, the playhead over them.
+        film := Rectangle {
+            x: 24px; y: 46px;
+            width: parent.width - 48px; height: root.strip-h;
+            background: #111111;
+            border-radius: 4px;
+            clip: true;
+            for frame[i] in root.strip: Image {
+                source: frame;
+                x: i * film.width / max(1, root.strip.length);
+                y: 0;
+                width: film.width / max(1, root.strip.length);
+                height: parent.height;
+                image-fit: cover;
+            }
+            Rectangle {
+                x: parent.width * root.view.progress - 2px;
+                y: 0; width: 4px; height: parent.height;
+                background: Pal.ink;
+            }
+            TouchArea {
+                pointer-event(e) => {
+                    if e.kind == PointerEventKind.down {
+                        root.seek((self.mouse-x / film.width).clamp(0, 1));
+                    }
+                }
+                moved => {
+                    if self.pressed {
+                        root.seek((self.mouse-x / film.width).clamp(0, 1));
+                    }
+                }
+            }
+        }
+
+        // Tools.
+        Rectangle {
+            width: tools.preferred-width; height: 72px;
+            x: (parent.width - self.width) / 2; y: 122px;
+            tools := HorizontalLayout {
+                spacing: 8px;
+                Tool { icon: @image-url("../assets/icons/camera.svg"); text: "Screenshot"; tapped => { root.screenshot(); } }
+                Tool { icon: @image-url("../assets/icons/contrast-2.svg"); text: "LUT"; on: root.view.lut-on; tapped => { root.lut(); } }
+                Tool { icon: @image-url("../assets/icons/wave-sine.svg"); text: "Zebra"; on: root.view.zebra-on; tapped => { root.zebra(); } }
+                Tool { icon: @image-url("../assets/icons/aperture.svg"); text: "Peaking"; on: root.view.peaking-on; tapped => { root.peaking(); } }
+            }
+        }
+
+        // Heart · pause · trash.
+        IconButton {
+            x: 24px; y: parent.height - self.height - 4px;
+            icon: root.view.starred ? @image-url("../assets/icons/heart-filled.svg") : @image-url("../assets/icons/heart.svg");
+            tint: root.view.starred ? Pal.rec : Pal.ink;
+            icon-size: 28px;
+            tapped => { root.favorite(); }
+        }
+        IconButton {
+            x: (parent.width - self.width) / 2; y: parent.height - self.height - 4px;
+            icon: root.view.playing ? @image-url("../assets/icons/player-pause.svg") : @image-url("../assets/icons/player-play.svg");
+            icon-size: 32px;
+            key: "SPACE";
+            tapped => { root.toggle(); }
+        }
+        IconButton {
+            x: parent.width - self.width - 24px; y: parent.height - self.height - 4px;
+            icon: @image-url("../assets/icons/trash.svg");
+            tint: root.view.delete-armed ? Pal.rec : Pal.ink;
+            label: root.view.delete-armed ? "CONFIRM" : "";
+            icon-size: 28px;
+            enabled: root.view.deletable;
+            tapped => { root.delete(); }
+        }
+    }
+
+    // A still keeps the heart and the trash under the picture.
+    if root.view.is-photo: Rectangle {
+        x: 0; y: parent.height - 72px; width: parent.width; height: 72px;
+        background: #000000b3;
+        IconButton {
+            x: 24px; y: (parent.height - self.height) / 2;
+            icon: root.view.starred ? @image-url("../assets/icons/heart-filled.svg") : @image-url("../assets/icons/heart.svg");
+            tint: root.view.starred ? Pal.rec : Pal.ink;
+            icon-size: 28px;
+            tapped => { root.favorite(); }
+        }
+        IconButton {
+            x: parent.width - self.width - 24px; y: (parent.height - self.height) / 2;
+            icon: @image-url("../assets/icons/trash.svg");
+            tint: root.view.delete-armed ? Pal.rec : Pal.ink;
+            label: root.view.delete-armed ? "CONFIRM" : "";
+            icon-size: 28px;
+            enabled: root.view.deletable;
+            tapped => { root.delete(); }
+        }
+    }
+}
+
+// ── Root overlay ──────────────────────────────────────────────────────────────
+
+export component HudOverlay inherits Window {
+    // Exposure readouts.
+    in property <string> shutter: "";
+    in property <string> iso: "";
+    in property <string> ev: "";
+    in property <string> wb: "";
+
+    // Top bar.
+    in property <string> follow-label: "ON";
+    in property <string> format-label: "";
+    in property <string> expo-label: "AUTO";
+    in property <string> link-state: "LINKING";
+    in property <bool>   is-recording: false;
+    in property <string> rec-elapsed: "";
+    in property <bool>   controls-enabled: true;
+
+    // Status column.
+    in property <string> battery-text: "";
+    in property <int>    battery-percent: 100;
+    in property <string> storage-text: "";
+
+    // Phase overlay.
+    in property <string> phase-message: "";
+    in property <bool>   phase-failed: false;
+    /// Seconds left on the take countdown; empty when none is running.
+    in property <string> countdown: "";
+    in property <string> fps-text: "";
+    /// The body's timecode, shown in the top bar when the operator asks for it.
+    in property <string> timecode: "";
+    /// Rule-of-thirds lines over the picture.
+    in property <bool> grid-on: false;
+    /// A programmed move's readout, shown in the top bar while a take runs.
+    in property <string> move-text: "";
+
+    // Which screen is up: 0 viewfinder, 1 library, 2 player, 3 photo.
+    in property <int> screen: 0;
+    in property <[string]> library-tabs: ["All", "Photos", "Videos", "Favorites"];
+    in property <int> library-tab: 0;
+    in property <bool> library-local: false;
+    in property <string> library-sort: "Newest";
+    in property <string> library-status: "";
+    in property <[MediaCell]> library-cells: [];
+    in property <length> library-content-height: 0;
+    in property <length> library-cell-w: 220px;
+    in property <length> library-cell-h: 124px;
+    in property <MediaSelection> library-selection;
+    in property <bool> library-has-selection: false;
+    in property <PlayerView> player;
+    in property <[image]> player-strip: [];
+
+    // The open sheet, if any: its title, tabs and rows come from the shell.
+    in property <bool> sheet-open: false;
+    in property <string> sheet-title: "";
+    in property <[string]> sheet-tabs: [];
+    in property <int> sheet-tab: 0;
+    in property <[SheetRow]> sheet-rows: [];
+
+    // Zoom.
+    in-out property <float> zoom-value: 1.0;
+    in property <string>    zoom-label: "1.0×";
+
+    // Modes. Pano and Livestream are shown but unavailable.
+    in property <[string]> modes: ["TIMELAPSE", "SLOWMOTION", "LOW-LIGHT", "VIDEO", "PHOTO", "PANO", "LIVESTREAM"];
+    in property <[bool]> modes-available: [true, true, true, true, true, false, false];
+    in property <int> mode-selected: 3;
+    in property <bool> photo-mode: false;
+
+    // Where the picture sits in the window, so side chrome can park in the gutters.
+    in property <length> fit-x: 0;
+    in property <length> fit-y: 0;
+    in property <length> fit-width: root.width;
+    in property <length> fit-height: root.height;
+
+    // Callbacks.
+    callback record-tapped();
+    callback still-tapped();
+    callback flip-tapped();
+    callback recenter-tapped();
+    callback zoom-changed(float);
+    callback gimbal-moved(float, float);
+    callback gimbal-released();
+    callback menu-tapped();
+    callback follow-tapped();
+    callback format-tapped();
+    callback expo-tapped();
+    callback exit-tapped();
+    callback gallery-tapped();
+    callback orientation-tapped();
+    callback follow-cycle-tapped();
+    callback fullscreen-tapped();
+    callback mode-selected-changed(int);
+    callback sheet-picked(int, int);
+    callback sheet-tab-picked(int);
+    callback sheet-closed();
+    callback library-back();
+    callback library-tab-picked(int);
+    callback library-sort-tapped();
+    callback library-refresh();
+    callback library-cell-tapped(int);
+    callback library-play();
+    callback library-download();
+    callback library-favorite();
+    callback library-delete();
+    callback library-source-tapped(bool);
+    callback player-back();
+    callback player-toggle();
+    callback player-seek(float);
+    callback player-info();
+    callback player-download();
+    callback player-screenshot();
+    callback player-lut();
+    callback player-zebra();
+    callback player-peaking();
+    callback player-favorite();
+    callback player-delete();
+
+    background: transparent;
+
+    property <length> top-h: 56px;
+    property <length> bottom-h: 152px;
+    // Picture area not covered by the bars.
+    property <length> mid-top: max(root.top-h, root.fit-y);
+    property <length> mid-bottom: min(root.height - root.bottom-h, root.fit-y + root.fit-height);
+    property <length> left-gutter: root.fit-x;
+    property <length> right-gutter: root.width - root.fit-x - root.fit-width;
+
+    if root.screen == 0 && root.grid-on: Rectangle {
+        x: root.fit-x; y: root.fit-y; width: root.fit-width; height: root.fit-height;
+        Rectangle { x: parent.width / 3; width: 1px; height: parent.height; background: #ffffff59; }
+        Rectangle { x: parent.width * 2 / 3; width: 1px; height: parent.height; background: #ffffff59; }
+        Rectangle { y: parent.height / 3; height: 1px; width: parent.width; background: #ffffff59; }
+        Rectangle { y: parent.height * 2 / 3; height: 1px; width: parent.width; background: #ffffff59; }
+    }
+
+    if root.screen == 0: TopBar {
+        x: 0; y: 0; width: parent.width;
+        timecode: root.timecode;
+        move-text: root.move-text;
+        follow-label: root.follow-label;
+        format-label: root.format-label;
+        expo-label: root.expo-label;
+        link-state: root.link-state;
+        is-recording: root.is-recording;
+        rec-elapsed: root.rec-elapsed;
+        enabled: root.controls-enabled;
+        menu-tapped => { root.menu-tapped(); }
+        follow-tapped => { root.follow-tapped(); }
+        format-tapped => { root.format-tapped(); }
+        expo-tapped => { root.expo-tapped(); }
+        exit-tapped => { root.exit-tapped(); }
+    }
+
+    if root.screen == 0: ZoomDial {
+        x: root.fit-x + (root.fit-width - self.width) / 2;
+        y: root.mid-top + 10px;
+        value <=> root.zoom-value;
+        label: root.zoom-label;
+        enabled: root.controls-enabled;
+        changed(v) => { root.zoom-changed(v); }
+    }
+
+    if root.screen == 0: ExposureColumn {
+        // Park in the left gutter when there is one wide enough, else over the picture edge.
+        x: root.left-gutter >= self.width + 24px ? (root.left-gutter - self.width) / 2 : root.fit-x + 16px;
+        y: root.mid-top + (root.mid-bottom - root.mid-top - self.height) / 2;
+        shutter: root.shutter;
+        iso: root.iso;
+        ev: root.ev;
+        wb: root.wb;
+    }
+
+    if root.screen == 0: StatusColumn {
+        x: root.right-gutter >= self.width + 24px
+            ? root.width - root.right-gutter + (root.right-gutter - self.width) / 2
+            : root.fit-x + root.fit-width - self.width - 16px;
+        y: root.mid-top + (root.mid-bottom - root.mid-top - self.height) / 2;
+        link-state: root.link-state;
+        battery-text: root.battery-text;
+        battery-percent: root.battery-percent;
+        storage-text: root.storage-text;
+        fps-text: root.fps-text;
+    }
+
+    if root.screen == 0: BottomBar {
+        x: 0; y: parent.height - self.height; width: parent.width;
+        is-recording: root.is-recording;
+        photo-mode: root.photo-mode;
+        enabled: root.controls-enabled;
+        modes: root.modes;
+        modes-available: root.modes-available;
+        mode-selected: root.mode-selected;
+        record-tapped => { root.record-tapped(); }
+        still-tapped => { root.still-tapped(); }
+        flip-tapped => { root.flip-tapped(); }
+        recenter-tapped => { root.recenter-tapped(); }
+        gallery-tapped => { root.gallery-tapped(); }
+        orientation-tapped => { root.orientation-tapped(); }
+        follow-cycle-tapped => { root.follow-cycle-tapped(); }
+        fullscreen-tapped => { root.fullscreen-tapped(); }
+        mode-selected-changed(i) => { root.mode-selected-changed(i); }
+        gimbal-moved(x, y) => { root.gimbal-moved(x, y); }
+        gimbal-released => { root.gimbal-released(); }
+    }
+
+    if root.screen == 0 && root.countdown != "": CountdownPanel {
+        x: root.fit-x + (root.fit-width - self.width) / 2;
+        y: root.mid-top + (root.mid-bottom - root.mid-top - self.height) / 2;
+        seconds: root.countdown;
+    }
+
+    if root.screen == 0 && root.phase-message != "": PhasePanel {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        message: root.phase-message;
+        failed: root.phase-failed;
+    }
+
+    if root.screen == 0 && root.sheet-open: Rectangle {
+        // A scrim: a tap outside the panel closes it, and nothing under it is a control.
+        background: #00000059;
+        TouchArea { clicked => { root.sheet-closed(); } }
+        SheetPanel {
+            width: min(920px, root.width - 48px);
+            x: (parent.width - self.width) / 2;
+            y: root.top-h + 16px;
+            title: root.sheet-title;
+            tabs: root.sheet-tabs;
+            tab: root.sheet-tab;
+            rows: root.sheet-rows;
+            picked(i, j) => { root.sheet-picked(i, j); }
+            tab-picked(i) => { root.sheet-tab-picked(i); }
+            close => { root.sheet-closed(); }
+        }
+    }
+
+    if root.screen == 1: LibraryPage {
+        width: parent.width; height: parent.height;
+        tabs: root.library-tabs;
+        tab: root.library-tab;
+        local: root.library-local;
+        sort-label: root.library-sort;
+        status: root.library-status;
+        cells: root.library-cells;
+        content-height: root.library-content-height;
+        cell-w: root.library-cell-w;
+        cell-h: root.library-cell-h;
+        selection: root.library-selection;
+        has-selection: root.library-has-selection;
+        back => { root.library-back(); }
+        source-tapped(local) => { root.library-source-tapped(local); }
+        tab-picked(i) => { root.library-tab-picked(i); }
+        sort-tapped => { root.library-sort-tapped(); }
+        refresh => { root.library-refresh(); }
+        cell-tapped(i) => { root.library-cell-tapped(i); }
+        play => { root.library-play(); }
+        download => { root.library-download(); }
+        favorite => { root.library-favorite(); }
+        delete => { root.library-delete(); }
+    }
+
+    if root.screen == 2 || root.screen == 3: PlayerPage {
+        width: parent.width; height: parent.height;
+        view: root.player;
+        strip: root.player-strip;
+        back => { root.player-back(); }
+        info => { root.player-info(); }
+        download => { root.player-download(); }
+        toggle => { root.player-toggle(); }
+        seek(p) => { root.player-seek(p); }
+        screenshot => { root.player-screenshot(); }
+        lut => { root.player-lut(); }
+        zebra => { root.player-zebra(); }
+        peaking => { root.player-peaking(); }
+        favorite => { root.player-favorite(); }
+        delete => { root.player-delete(); }
+    }
+}

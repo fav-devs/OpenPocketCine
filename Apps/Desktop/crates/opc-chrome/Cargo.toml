@@ -1,0 +1,23 @@
+[package]
+name = "opc-chrome"
+description = "Viewfinder chrome rendered by Slint's software renderer."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+opc-camera  = { path = "../opc-camera" }
+opc-ui      = { path = "../opc-ui" }
+
+# Software renderer only — no native window system, no event loop.
+slint = { version = "1.10", default-features = false, features = ["renderer-software", "software-renderer-systemfonts", "compat-1-2", "std"] }
+
+[build-dependencies]
+slint-build = "1.10"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+png = "0.17"

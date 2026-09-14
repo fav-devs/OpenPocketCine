@@ -162,6 +162,39 @@ private func cameraFrame(kind: Int32, seq: UInt16, arguments: Arguments) -> Duml
     case OPC_CAM_EXIT_PLAYBACK:
         return Commands.exitPlayback(seq: seq)
 
+    case OPC_CAM_SET_EXPO_MODE:
+        guard let mode = ExpoMode(rawValue: arguments.byte(0)) else { return nil }
+        return Commands.setExpoMode(mode, seq: seq)
+    case OPC_CAM_SET_AUDIO_CHANNEL:
+        guard let channel = AudioChannel(rawValue: arguments.byte(0)) else { return nil }
+        return Commands.setAudioChannel(channel, seq: seq)
+    case OPC_CAM_SET_VOCAL_BOOST:
+        guard let boost = VocalBoost(rawValue: arguments.byte(0)) else { return nil }
+        return Commands.setVocalBoost(boost, seq: seq)
+
+    case OPC_CAM_MEDIA_LIST:
+        return Commands.mediaList(
+            counter: arguments.byte(0), cursor: UInt32(truncatingIfNeeded: arguments.int(1)),
+            seq: seq)
+    case OPC_CAM_MEDIA_LIST_TRIGGER:
+        return Commands.mediaListTrigger(seq: seq)
+    case OPC_CAM_MEDIA_DELETE:
+        return Commands.deleteMedia(
+            handle: UInt32(truncatingIfNeeded: arguments.int(0)),
+            counter: UInt32(truncatingIfNeeded: arguments.int(1)), seq: seq)
+    case OPC_CAM_MEDIA_FAVORITE:
+        return Commands.setMediaFavorite(
+            handle: UInt32(truncatingIfNeeded: arguments.int(0)), on: arguments.int(2) != 0,
+            counter: UInt32(truncatingIfNeeded: arguments.int(1)), seq: seq)
+    case OPC_CAM_PLAYBACK_SPECIAL:
+        return Commands.pocket3PlaybackEntry(step: arguments.int(0), seq: seq)
+    case OPC_CAM_GIMBAL_TIMED_TARGET:
+        // Tenths on the wire in, degrees and seconds to the builder, which holds the
+        // reach and duration rules and answers nil for anything outside them.
+        return Commands.gimbalTimedTarget(
+            yawDeg: Double(arguments.int(0)) / 10, nativePitchDeg: Double(arguments.int(1)) / 10,
+            duration: Double(arguments.int(2)) / 10, seq: seq)
+
     default:
         return nil
     }

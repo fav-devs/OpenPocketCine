@@ -42,12 +42,34 @@ mod sys {
         }
     }
 
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct OpcFileInfo {
+        pub width: i32,
+        pub height: i32,
+        pub fps_num: i32,
+        pub fps_den: i32,
+        pub duration_ms: i64,
+    }
+
+    pub const OPC_FILE_END: i32 = 3;
+
     extern "C" {
         pub fn opc_decoder_create(codec: i32) -> *mut c_void;
         pub fn opc_decoder_destroy(decoder: *mut c_void);
         pub fn opc_decoder_send(decoder: *mut c_void, data: *const u8, length: usize) -> i32;
         pub fn opc_decoder_receive(decoder: *mut c_void, out: *mut OpcDecodedFrame) -> i32;
         pub fn opc_decoder_flush(decoder: *mut c_void);
+
+        pub fn opc_file_open(path: *const std::ffi::c_char) -> *mut c_void;
+        pub fn opc_file_close(reader: *mut c_void);
+        pub fn opc_file_info(reader: *mut c_void, out: *mut OpcFileInfo) -> i32;
+        pub fn opc_file_next(
+            reader: *mut c_void,
+            out: *mut OpcDecodedFrame,
+            pts_ms: *mut i64,
+        ) -> i32;
+        pub fn opc_file_seek(reader: *mut c_void, position_ms: i64) -> i32;
     }
 }
 
@@ -171,6 +193,71 @@ impl OwnedPicture {
         }
     }
 
+    /// A black picture, for a screen with nothing to show under the chrome.
+    pub fn black(width: u32, height: u32) -> Self {
+        let (cw, ch) = (width.div_ceil(2), height.div_ceil(2));
+        Self {
+            width,
+            height,
+            is_keyframe: true,
+            luma: vec![16; (width * height) as usize],
+            chroma_blue: vec![128; (cw * ch) as usize],
+            chroma_red: vec![128; (cw * ch) as usize],
+        }
+    }
+
+    /// A still, converted to the 4:2:0 the feed pipeline takes so it gets the same
+    /// grade and assists as a live picture. BT.709 limited range, like the camera.
+    pub fn from_rgba(width: u32, height: u32, rgba: &[u8]) -> Self {
+        let (cw, ch) = (width.div_ceil(2), height.div_ceil(2));
+        let mut luma = vec![16u8; (width * height) as usize];
+        let mut cb = vec![128u8; (cw * ch) as usize];
+        let mut cr = vec![128u8; (cw * ch) as usize];
+        let at = |x: u32, y: u32| {
+            let i = ((y * width + x) * 4) as usize;
+            (
+                f32::from(rgba[i]),
+                f32::from(rgba[i + 1]),
+                f32::from(rgba[i + 2]),
+            )
+        };
+        for y in 0..height {
+            for x in 0..width {
+                let (r, g, b) = at(x, y);
+                let value = 16.0 + (0.1826 * r + 0.6142 * g + 0.0620 * b);
+                luma[(y * width + x) as usize] = value.round().clamp(16.0, 235.0) as u8;
+            }
+        }
+        for y in 0..ch {
+            for x in 0..cw {
+                let (mut r, mut g, mut b, mut n) = (0.0, 0.0, 0.0, 0.0);
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let (sx, sy) = (x * 2 + dx, y * 2 + dy);
+                    if sx < width && sy < height {
+                        let (pr, pg, pb) = at(sx, sy);
+                        r += pr;
+                        g += pg;
+                        b += pb;
+                        n += 1.0;
+                    }
+                }
+                let (r, g, b) = (r / n, g / n, b / n);
+                let blue = 128.0 + (-0.1006 * r - 0.3386 * g + 0.4392 * b);
+                let red = 128.0 + (0.4392 * r - 0.3989 * g - 0.0403 * b);
+                cb[(y * cw + x) as usize] = blue.round().clamp(16.0, 240.0) as u8;
+                cr[(y * cw + x) as usize] = red.round().clamp(16.0, 240.0) as u8;
+            }
+        }
+        Self {
+            width,
+            height,
+            is_keyframe: true,
+            luma,
+            chroma_blue: cb,
+            chroma_red: cr,
+        }
+    }
+
     /// Borrows it back as a `Picture` the renderer can take.
     pub fn picture(&self) -> Picture<'_> {
         Picture {
@@ -286,3 +373,126 @@ impl Drop for Decoder {
 // FFmpeg decoder state has no thread affinity and `&mut self` gates every call, so the
 // decoder may move between threads but is never shared without a lock.
 unsafe impl Send for Decoder {}
+
+/// What a clip on disk says about itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FileInfo {
+    pub width: u32,
+    pub height: u32,
+    pub fps_num: u32,
+    pub fps_den: u32,
+    pub duration_ms: i64,
+}
+
+impl FileInfo {
+    pub fn fps(&self) -> f64 {
+        if self.fps_den == 0 {
+            0.0
+        } else {
+            f64::from(self.fps_num) / f64::from(self.fps_den)
+        }
+    }
+}
+
+/// A clip on disk, decoded picture by picture: the media player's source.
+#[derive(Debug)]
+pub struct FileReader {
+    handle: *mut c_void,
+    info: FileInfo,
+}
+
+impl FileReader {
+    pub fn open(path: &std::path::Path) -> Result<Self, DecodeError> {
+        let c_path = std::ffi::CString::new(path.to_string_lossy().as_bytes())
+            .map_err(|_| DecodeError::Send)?;
+        // Safety: the shim returns null rather than a partly opened reader.
+        let handle = unsafe { sys::opc_file_open(c_path.as_ptr()) };
+        if handle.is_null() {
+            return Err(DecodeError::Unavailable(Codec::H264));
+        }
+        let mut raw = sys::OpcFileInfo::default();
+        // Safety: the handle is live and `raw` is a live record.
+        let status = unsafe { sys::opc_file_info(handle, &mut raw) };
+        if status < 0 {
+            // Safety: opened above, closed exactly once here.
+            unsafe { sys::opc_file_close(handle) };
+            return Err(DecodeError::Receive);
+        }
+        Ok(Self {
+            handle,
+            info: FileInfo {
+                width: raw.width.max(0) as u32,
+                height: raw.height.max(0) as u32,
+                fps_num: raw.fps_num.max(0) as u32,
+                fps_den: raw.fps_den.max(0) as u32,
+                duration_ms: raw.duration_ms.max(0),
+            },
+        })
+    }
+
+    pub fn info(&self) -> FileInfo {
+        self.info
+    }
+
+    /// The next picture and its presentation time, or `None` at the end of the clip.
+    pub fn next_picture(&mut self) -> Result<Option<(OwnedPicture, i64)>, DecodeError> {
+        let mut raw = sys::OpcDecodedFrame::default();
+        let mut pts_ms = 0i64;
+        // Safety: the handle is live; `raw` and `pts_ms` are live records.
+        let status = unsafe { sys::opc_file_next(self.handle, &mut raw, &mut pts_ms) };
+        match status {
+            sys::OPC_FILE_END => return Ok(None),
+            sys::OPC_DECODE_FRAME => {}
+            status if status < 0 => return Err(DecodeError::Receive),
+            _ => return Ok(None),
+        }
+        if raw.format != sys::OPC_DECODE_FORMAT_YUV420P || raw.stride[1] != raw.stride[2] {
+            return Err(DecodeError::UnsupportedFormat);
+        }
+        if raw.width <= 0 || raw.height <= 0 || raw.plane.iter().any(|plane| plane.is_null()) {
+            return Err(DecodeError::Receive);
+        }
+        let height = raw.height as usize;
+        let chroma_height = height.div_ceil(2);
+        let luma_stride = raw.stride[0].max(0) as usize;
+        let chroma_stride = raw.stride[1].max(0) as usize;
+        // Safety: FFmpeg guarantees `stride * height` readable bytes per plane, and the
+        // copy below ends the borrow before the next call reuses the frame.
+        let picture = unsafe {
+            Picture {
+                width: raw.width as u32,
+                height: raw.height as u32,
+                is_keyframe: raw.is_keyframe != 0,
+                luma: std::slice::from_raw_parts(raw.plane[0], luma_stride * height),
+                chroma_blue: std::slice::from_raw_parts(
+                    raw.plane[1],
+                    chroma_stride * chroma_height,
+                ),
+                chroma_red: std::slice::from_raw_parts(raw.plane[2], chroma_stride * chroma_height),
+                luma_stride,
+                chroma_stride,
+            }
+        };
+        Ok(Some((OwnedPicture::copy_from(&picture), pts_ms)))
+    }
+
+    /// Jumps to the keyframe at or before `position_ms`.
+    pub fn seek(&mut self, position_ms: i64) -> Result<(), DecodeError> {
+        // Safety: the handle is live.
+        let status = unsafe { sys::opc_file_seek(self.handle, position_ms.max(0)) };
+        if status < 0 {
+            return Err(DecodeError::Send);
+        }
+        Ok(())
+    }
+}
+
+impl Drop for FileReader {
+    fn drop(&mut self) {
+        // Safety: opened by `opc_file_open` and closed exactly once.
+        unsafe { sys::opc_file_close(self.handle) }
+    }
+}
+
+// Same contract as `Decoder`: no thread affinity, `&mut self` on every call.
+unsafe impl Send for FileReader {}

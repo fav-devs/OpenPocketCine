@@ -23,6 +23,8 @@ use crate::{softap, CameraError, Command};
 /// enough that a 40 Hz pump keeps its cadence.
 const READ_TIMEOUT: Duration = Duration::from_millis(5);
 const READ_BUFFER: usize = 4096;
+/// The camera ignores `0x09/0xa8` when it follows subscriptions in the same burst.
+const SUBSCRIBE_SETTLE: f64 = 0.150;
 
 /// What happened while polling.
 #[derive(Debug, Clone, PartialEq)]
@@ -95,6 +97,8 @@ pub struct CameraSession {
     depacketizer: Depacketizer,
     health: FeedHealth,
     watchdog: Watchdog,
+    /// A pending enable after the subscription writes have reached the camera.
+    enable_not_before: Option<f64>,
     status: StatusDecoder,
     started: Instant,
     buffer: Vec<u8>,
@@ -119,14 +123,7 @@ impl CameraSession {
         session_id: u16,
         base_seq: u16,
     ) -> Result<Self, SessionError> {
-        // Bind an ephemeral local port, always. The camera's own port is the remote only.
-        let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-        let local = socket.local_addr()?.port();
-        if !softap::may_bind_local_port(0) {
-            return Err(SessionError::ForbiddenLocalPort(local));
-        }
-        socket.set_read_timeout(Some(READ_TIMEOUT))?;
-        socket.connect(remote)?;
+        let socket = Self::open_socket(remote)?;
 
         let started = Instant::now();
         Ok(Self {
@@ -142,10 +139,39 @@ impl CameraSession {
             depacketizer: Depacketizer::new(),
             health: FeedHealth::new(),
             watchdog: Watchdog::new(),
+            enable_not_before: None,
             status: StatusDecoder::new(None),
             started,
             buffer: vec![0; READ_BUFFER],
         })
+    }
+
+    /// Opens the camera flow on a new ephemeral client port. The camera's :9004 is
+    /// remote-only; keeping a wedged Windows socket through recovery leaves video on
+    /// the old five-tuple even while telemetry appears healthy.
+    fn open_socket(remote: SocketAddr) -> Result<UdpSocket, SessionError> {
+        let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
+        let local = socket.local_addr()?.port();
+        if !softap::may_bind_local_port(0) {
+            return Err(SessionError::ForbiddenLocalPort(local));
+        }
+        socket.set_read_timeout(Some(READ_TIMEOUT))?;
+        socket.connect(remote)?;
+        Ok(socket)
+    }
+
+    /// Recreates the local half of the UDP flow while Wi-Fi remains associated.
+    fn reopen_datalink(&mut self, now: f64) -> Result<(), SessionError> {
+        self.socket = Self::open_socket(self.remote)?;
+        self.duml_seq = 0;
+        self.udp_seq = self.base_seq;
+        self.command_counter = 0;
+        self.sequencer = Sequencer::new(now);
+        self.pump = AckPump::new(self.base_seq);
+        self.depacketizer.reset();
+        self.enable_not_before = None;
+        self.health.note_datalink_rebuilt(now);
+        Ok(())
     }
 
     /// The port this datalink is actually sending from.
@@ -222,7 +248,15 @@ impl CameraSession {
 
         let now = self.now();
         for due in self.sequencer.tick(now) {
+            if due == Outgoing::EnableLiveView && self.enable_not_before.is_some_and(|at| now < at)
+            {
+                continue;
+            }
             self.dispatch(due)?;
+        }
+        if self.enable_not_before.is_some_and(|at| now >= at) {
+            self.enable_not_before = None;
+            self.dispatch(Outgoing::EnableLiveView)?;
         }
         if self.sequencer.phase() == Phase::Unreachable {
             events.push(SessionEvent::Unreachable);
@@ -247,14 +281,14 @@ impl CameraSession {
                 self.socket.send(&datagram)?;
                 self.health.note_enable(now);
             }
-            Recovery::ReopenDatalink => {
-                self.depacketizer.reset();
-                self.sequencer.restart(now);
-                self.health.note_datalink_rebuilt(now);
+            Recovery::ReopenDatalink | Recovery::FullRejoin => {
+                // The desktop shell already owns a live SoftAP connection. Until its
+                // BLE reconnect runner exists, a full rejoin must at least reopen UDP
+                // instead of leaving the last frame frozen forever.
+                self.reopen_datalink(now)?;
             }
-            // A wedged decoder and a full rejoin are the shell's to carry out: one owns
-            // the decoder, the other owns Bluetooth.
-            Recovery::RebuildDecoder | Recovery::FullRejoin => {}
+            // A wedged decoder is the shell's to carry out.
+            Recovery::RebuildDecoder => {}
         }
         events.push(SessionEvent::Recovering(action));
         Ok(())
@@ -276,6 +310,14 @@ impl CameraSession {
                         io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                     ) =>
                 {
+                    self.buffer = scratch;
+                    None
+                }
+                // Windows can report WSA_IO_PENDING (997) or WSAEINVAL (10022) from a
+                // timed synchronous UDP receive while the camera changes its stream.
+                // Neither invalidates the socket; treat both as an empty poll so the
+                // watchdog can reopen the datalink if needed.
+                Err(error) if matches!(error.raw_os_error(), Some(997 | 10022)) => {
                     self.buffer = scratch;
                     None
                 }
@@ -308,9 +350,14 @@ impl CameraSession {
             let opening = self.sequencer.phase() == Phase::Handshaking;
             self.sequencer.note_handshake_reply(now);
             if opening {
+                // Match the phone spine: establish app presence and gimbal state before
+                // subscribing. Some bodies acknowledge telemetry without opening video
+                // until this registration burst has arrived.
+                self.send_registration()?;
                 // Ask for the pushes the HUD needs before anything else is queued: the
                 // camera only sends its available-value lists to a subscriber.
                 self.send_subscriptions()?;
+                self.enable_not_before = Some(now + SUBSCRIBE_SETTLE);
                 events.push(SessionEvent::Opened);
             }
             return Ok(());
@@ -351,6 +398,16 @@ impl CameraSession {
     }
 
     /// Subscribes to the status streams the HUD reads.
+    fn send_registration(&mut self) -> Result<(), SessionError> {
+        for command in [Command::AppPresence, Command::GimbalInit] {
+            let datagram = self.command_datagram(command)?;
+            self.socket.send(&datagram)?;
+            self.send_ack()?;
+        }
+        Ok(())
+    }
+
+    /// Subscribes to the status streams the HUD reads.
     fn send_subscriptions(&mut self) -> Result<(), SessionError> {
         for (index, key) in subscribe_keys().into_iter().enumerate() {
             let payload = transport::subscribe(&key, index as u32 + 1, self.duml_seq)?;
@@ -369,6 +426,15 @@ impl CameraSession {
             datagram.extend_from_slice(&payload);
             self.socket.send(&datagram)?;
         }
+        self.send_ack()?;
+        Ok(())
+    }
+
+    /// Registration is a short burst; each write gets an immediate window ACK, matching
+    /// the phone driver, before the regular 40 Hz pump takes over.
+    fn send_ack(&mut self) -> Result<(), SessionError> {
+        let datagram = self.pump.datagram(self.session_id)?;
+        self.socket.send(&datagram)?;
         Ok(())
     }
 

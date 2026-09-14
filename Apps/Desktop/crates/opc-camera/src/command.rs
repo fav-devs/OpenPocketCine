@@ -89,6 +89,43 @@ pub enum Command {
         frame_rate: u8,
     },
     SetFov(u8),
+    /// `0x01` auto, `0x04` manual. No GET; `cam_expo_param` echoes it.
+    SetExpoMode(u8),
+    /// `0x01` mono, `0x02` stereo, `0x03` spatial.
+    SetAudioChannel(u8),
+    /// `0x00` off, `0x01` on.
+    SetVocalBoost(u8),
+
+    // Media.
+    /// `0x00/0x26`. Counter 1 lists the card, 2 the internal store; the cursor is the
+    /// newest marker (`0x00000001` / `0x40000001`) or a video handle to page older.
+    MediaList {
+        counter: u8,
+        cursor: u32,
+    },
+    /// The `4a040e10` trigger sent between the two list queries of a page.
+    MediaListTrigger,
+    /// `0x00/0x28`. Irreversible; the shell sends a handle only when the fit vouched for it.
+    MediaDelete {
+        handle: u32,
+        counter: u32,
+    },
+    /// `0x02/0xBF`.
+    MediaFavorite {
+        handle: u32,
+        counter: u32,
+        on: bool,
+    },
+    /// `0x01/0x01` Pocket 3 playback entry, step 1 or 2.
+    PlaybackSpecial(u8),
+    /// `0x04/0x14` absolute timed target: yaw and native pitch in 0.1°, duration in
+    /// tenths of a second. The core refuses one outside the reach or the 0.1–25.5 s
+    /// window.
+    GimbalTimedTarget {
+        yaw_tenth: i32,
+        native_pitch_tenth: i32,
+        duration_tenths: u8,
+    },
 
     // Reads.
     ParamGet(u16),
@@ -218,6 +255,53 @@ impl Command {
             Self::GetWifiPassword => (sys::OPC_CAM_GET_WIFI_PASSWORD, vec![], vec![]),
             Self::EnterPlayback => (sys::OPC_CAM_ENTER_PLAYBACK, vec![], vec![]),
             Self::ExitPlayback => (sys::OPC_CAM_EXIT_PLAYBACK, vec![], vec![]),
+            Self::SetExpoMode(mode) => {
+                (sys::OPC_CAM_SET_EXPO_MODE, ints(&[i32::from(mode)]), vec![])
+            }
+            Self::SetAudioChannel(channel) => (
+                sys::OPC_CAM_SET_AUDIO_CHANNEL,
+                ints(&[i32::from(channel)]),
+                vec![],
+            ),
+            Self::SetVocalBoost(boost) => (
+                sys::OPC_CAM_SET_VOCAL_BOOST,
+                ints(&[i32::from(boost)]),
+                vec![],
+            ),
+            Self::MediaList { counter, cursor } => (
+                sys::OPC_CAM_MEDIA_LIST,
+                ints(&[i32::from(counter), cursor as i32]),
+                vec![],
+            ),
+            Self::MediaListTrigger => (sys::OPC_CAM_MEDIA_LIST_TRIGGER, vec![], vec![]),
+            Self::MediaDelete { handle, counter } => (
+                sys::OPC_CAM_MEDIA_DELETE,
+                ints(&[handle as i32, counter as i32]),
+                vec![],
+            ),
+            Self::MediaFavorite {
+                handle,
+                counter,
+                on,
+            } => (
+                sys::OPC_CAM_MEDIA_FAVORITE,
+                ints(&[handle as i32, counter as i32, i32::from(on)]),
+                vec![],
+            ),
+            Self::PlaybackSpecial(step) => (
+                sys::OPC_CAM_PLAYBACK_SPECIAL,
+                ints(&[i32::from(step)]),
+                vec![],
+            ),
+            Self::GimbalTimedTarget {
+                yaw_tenth,
+                native_pitch_tenth,
+                duration_tenths,
+            } => (
+                sys::OPC_CAM_GIMBAL_TIMED_TARGET,
+                ints(&[yaw_tenth, native_pitch_tenth, i32::from(duration_tenths)]),
+                vec![],
+            ),
         }
     }
 

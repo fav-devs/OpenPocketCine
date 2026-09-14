@@ -52,6 +52,13 @@ pub struct Status {
     pub available_colors: Vec<u8>,
     pub timecode: Option<String>,
     pub firmware: Option<String>,
+    /// The gimbal's last `0x04/0x05` attitude in 0.1°: yaw, display tilt (look-up
+    /// positive), and the native absolute pitch timed targets take.
+    pub gimbal_yaw_tenth: Option<i16>,
+    pub gimbal_pitch_tenth: Option<i16>,
+    pub gimbal_native_pitch_tenth: Option<i16>,
+    /// Counts attitude pushes, so a shell can tell a fresh reading from a held one.
+    pub gimbal_attitude_seq: u32,
 }
 
 impl Status {
@@ -82,6 +89,66 @@ impl Status {
         self.shutter_denominator
             .map(|denominator| format!("1/{denominator}"))
     }
+
+    /// EV as the operator reads it: `-0.3`, `+1.0`.
+    pub fn ev_label(&self) -> Option<String> {
+        self.ev_thirds
+            .map(|thirds| format!("{:+.1}", f64::from(thirds) / 3.0))
+    }
+
+    /// The format chip: `1080P·60`. Resolution and rate are shown when the body has
+    /// reported them; nothing is guessed.
+    pub fn format_label(&self) -> String {
+        let resolution = self.video_resolution.map(resolution_name);
+        let rate = self.video_frame_rate.and_then(frame_rate_fps);
+        match (resolution, rate) {
+            (Some(resolution), Some(rate)) => format!("{resolution}·{rate}"),
+            (Some(resolution), None) => resolution.to_string(),
+            (None, Some(rate)) => format!("{rate} FPS"),
+            (None, None) => String::new(),
+        }
+    }
+
+    /// Recording time left on the card as `h:mm:ss`, or the free space when the body
+    /// has not said how long that is.
+    pub fn remaining_label(&self) -> String {
+        if self.record_remaining > 0 {
+            let seconds = self.record_remaining;
+            let (hours, minutes, seconds) = (seconds / 3600, (seconds / 60) % 60, seconds % 60);
+            return format!("{hours}:{minutes:02}:{seconds:02}");
+        }
+        format!("{} GB", self.storage_free_mb / 1024)
+    }
+}
+
+/// The size half of a video format, from the body's `0x02/0x18` catalogue.
+pub fn resolution_name(code: u8) -> &'static str {
+    match code {
+        0x0A | 0x0C | 0x42 | 0x69 => "1080P",
+        0x2D | 0x43 | 0x5F => "2.7K",
+        0x10 | 0x67 | 0x7D => "4K",
+        0x6A => "2160P",
+        0x6B | 0x6C => "3K",
+        _ => "",
+    }
+}
+
+/// Frames per second for a frame-rate index, from the Osmosis table.
+pub fn frame_rate_fps(index: u8) -> Option<u32> {
+    Some(match index {
+        0x01 => 24,
+        0x02 => 25,
+        0x03 => 30,
+        0x04 => 48,
+        0x05 => 50,
+        0x06 => 60,
+        0x07 => 120,
+        0x08 => 240,
+        0x0A => 100,
+        0x0B => 96,
+        0x1D => 15,
+        _ => return None,
+    })
 }
 
 fn optional(value: i32) -> Option<i32> {
@@ -188,6 +255,12 @@ impl StatusDecoder {
             focus_track: optional_byte(raw.focus_track),
             storage_free_mb: raw.storage_free_mb,
             storage_total_mb: raw.storage_total_mb,
+            gimbal_yaw_tenth: (raw.gimbal_attitude_seq > 0).then_some(raw.gimbal_yaw_tenth as i16),
+            gimbal_pitch_tenth: (raw.gimbal_attitude_seq > 0)
+                .then_some(raw.gimbal_pitch_tenth as i16),
+            gimbal_native_pitch_tenth: (raw.gimbal_attitude_seq > 0)
+                .then_some(raw.gimbal_native_pitch_tenth as i16),
+            gimbal_attitude_seq: raw.gimbal_attitude_seq.max(0) as u32,
             zoom_hundredths: optional(raw.zoom_hundredths),
             available_shutter: list(&raw.available_shutter, raw.available_shutter_count),
             available_iso: list(&raw.available_iso, raw.available_iso_count)

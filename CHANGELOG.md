@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+- Desktop: the viewfinder chrome is a DJI Mimo replica for a landscape laptop
+  (Outfit type, Tabler icons, every button with its key hint), with format,
+  exposure and settings sheets, and a media library — the card listed through
+  the core's decoder with the Pocket 3's `0x01/0x01` playback entry, thumbnails
+  and files over `/v2`, star and delete, and the 720p proxy played through the
+  feed pipeline so the assists work on it. The Camera tab gains the gimbal
+  ramp, the Assist tab a LUT row fed by the official cubes and a `.cube`
+  drop folder, and the countdown length. `K` opens programmed moves: A, B
+  and C from the live pose, per-leg durations, exact legs on native timed
+  targets with the approach, hold and missing-sector guard. Unqualified on a
+  physical body.
+
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,
   inactive scenes and old control callbacks cannot continue driving. Manual

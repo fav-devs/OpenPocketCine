@@ -6,8 +6,16 @@
 //! decided by code a test can drive with a fake clock, no camera and no GPU.
 
 use std::collections::VecDeque;
+use std::time::Instant;
 
 use opc_camera::{Command, Status};
+use opc_chrome::{Chrome, ChromeIntent, ChromeState, Screen};
+use opc_media::MediaFile;
+
+use crate::library::{Library, MediaAction, Player};
+use crate::luts::{LutChoice, LutMenu};
+use crate::moves::{MoveEngine, Program, Waypoint};
+use crate::sheets::{self, Pick, Prefs, SheetKind, Slot};
 use opc_render::{letterbox, GradeOptions, Peaking, PeakingSense, Rgba, Zebra};
 use opc_ui::{
     next_frame_rate, next_resolution, Action, Controls, Countdown, Drag, Fit, Hud, Key, Phase,
@@ -15,7 +23,6 @@ use opc_ui::{
 };
 
 /// How long before a timed take starts rolling.
-const COUNTDOWN: f64 = 3.0;
 /// The stick is re-sent while held. The gimbal moves until it is told to stop, so this
 /// is a keepalive, not the thing that makes it move.
 const STICK_REPEAT: f64 = 0.2;
@@ -26,6 +33,8 @@ const STICK_REPEAT: f64 = 0.2;
 const BOX_CONFIRM: f64 = 1.5;
 /// Frames older than this stop counting towards the rate shown.
 const FPS_WINDOW: f64 = 1.0;
+const ZOOM_MIN: f64 = 1.0;
+const ZOOM_MAX: f64 = 6.0;
 
 /// What the window is asked to do.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +45,63 @@ pub enum Intent {
     Still,
     /// Close.
     Quit,
+    /// Toggle the window between fullscreen and windowed.
+    ToggleFullscreen,
+    /// Something for the media browser: a fetch, a screen change, the player.
+    Media(MediaAction),
+}
+
+/// The gimbal's live mode, as commanded. The body's GET cannot tell FPV from Tilt
+/// locked, so the shell keeps what it last asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GimbalMode {
+    Follow,
+    TiltLocked,
+    Fpv,
+}
+
+impl GimbalMode {
+    /// The SET frames for a mode, in the order the mobile shells send them.
+    pub fn commands(self) -> Vec<Command> {
+        match self {
+            Self::Follow => vec![Command::GimbalFollow, Command::GimbalTiltLock(0)],
+            Self::TiltLocked => vec![Command::GimbalFollow, Command::GimbalTiltLock(1)],
+            Self::Fpv => vec![Command::GimbalFpv],
+        }
+    }
+
+    /// Mimo's order when the FOLLOW button cycles.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Follow => Self::TiltLocked,
+            Self::TiltLocked => Self::Fpv,
+            Self::Fpv => Self::Follow,
+        }
+    }
+}
+
+/// Shooting-mode codes behind the mode strip, by [`opc_chrome::MODES`] index. `None` is a
+/// mode the strip shows but this shell cannot select (Pano, Livestream).
+const MODE_CODES: [Option<u8>; 7] = [
+    Some(0x02), // TIMELAPSE
+    Some(0x00), // SLOWMOTION
+    Some(0x28), // LOW-LIGHT (SuperNight)
+    Some(0x01), // VIDEO
+    Some(0x17), // PHOTO (Pocket 4; Nano's 0x05 reads the same)
+    None,       // PANO
+    None,       // LIVESTREAM
+];
+
+/// The strip index for a shooting-mode code the body reported. Unknown codes read as
+/// VIDEO rather than moving the highlight somewhere the operator did not tap.
+fn mode_index(code: Option<i32>) -> usize {
+    match code {
+        Some(0x02) => 0,
+        Some(0x00) => 1,
+        Some(0x28) => 2,
+        Some(0x17) | Some(0x05) => 4,
+        _ => 3,
+    }
 }
 
 /// What a finger did — winit's touch phases, without winit, so the rule about which
@@ -95,6 +161,7 @@ pub struct Shell {
     stick: Stick,
     hud: Hud,
     toggles: Toggles,
+    chrome_renderer: Option<Chrome>,
     /// A box being dragged out right now.
     drag: Option<Drag>,
     /// A box already sent, and when it stops being drawn.
@@ -102,13 +169,17 @@ pub struct Shell {
     /// The finger drawing the box, if one is. A second finger must not take over a box
     /// somebody is halfway through drawing.
     finger: Option<u64>,
+    /// A touch that landed in a control. It cannot become a tracking drag.
+    control_finger: Option<u64>,
     window: (u32, u32),
+    /// Intents fired by Slint controls (buttons, slider) since last tick.
+    chrome_pending_intents: Vec<Intent>,
     source: Option<(u32, u32)>,
     /// Tracking boxes are numbered so the camera can tell one request from the next.
     next_track_id: u16,
     chrome_visible: bool,
     /// The window has to be told to load or drop the cube, which is not a per-frame job.
-    lut_pending: Option<bool>,
+    lut_pending: Option<LutRequest>,
     stick_sent_at: f64,
     presented: VecDeque<f64>,
     /// The rasterised chrome, kept until something it draws changes.
@@ -117,6 +188,45 @@ pub struct Shell {
     /// The second the countdown last showed, so a ticking number redraws and a still one
     /// does not.
     drawn_second: Option<u32>,
+    gimbal_mode: GimbalMode,
+    /// The on-screen joystick is being held, so a cancelled gesture must rest the stick.
+    pad_held: bool,
+    /// The sheet over the picture, if one is open, and which settings tab it shows.
+    sheet: Option<SheetKind>,
+    sheet_tab: usize,
+    prefs: Prefs,
+    /// The body's model id for commands that encode per model, or -1 when unknown.
+    model_id: i32,
+    screen: Screen,
+    library: Library,
+    player: Option<Player>,
+    /// Delete and favourite carry a running index the camera does not police.
+    media_counter: u32,
+    /// The stick's ease, when the ramp is on: the filtered throw and its clock.
+    ramp: opc_ui::RampFilter,
+    ramp_ticked_at: f64,
+    /// The on-screen pad's throw while it is held, right and up positive.
+    pad_target: (f64, f64),
+    lut_menu: LutMenu,
+    lut_choice: LutChoice,
+    /// Programmed moves: the points, the engine while a take runs, and the clock
+    /// that says how fresh the last attitude is.
+    program: Program,
+    move_engine: Option<MoveEngine>,
+    move_countdown: Option<Countdown>,
+    attitude_seq: u32,
+    attitude_at: f64,
+    last_now: f64,
+    move_ticked_at: f64,
+}
+
+/// What the window must do about the cube, once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LutRequest {
+    /// Keep the loaded cube and switch it on or off.
+    Toggle(bool),
+    /// Load this cube and switch it on (or off, for `Off`).
+    Load(LutChoice),
 }
 
 impl Default for Shell {
@@ -127,15 +237,21 @@ impl Default for Shell {
 
 impl Shell {
     pub fn new() -> Self {
+        let chrome_renderer = Chrome::new(Instant::now())
+            .map_err(|e| eprintln!("Slint chrome init failed: {e}"))
+            .ok();
         Self {
             controls: Controls::new(),
             stick: Stick::default(),
             hud: Hud::default(),
             toggles: Toggles::default(),
+            chrome_renderer,
             drag: None,
             committed: None,
             finger: None,
+            control_finger: None,
             window: (0, 0),
+            chrome_pending_intents: Vec::new(),
             source: None,
             next_track_id: 1,
             chrome_visible: true,
@@ -144,6 +260,28 @@ impl Shell {
             presented: VecDeque::new(),
             chrome: None,
             chrome_stale: true,
+            gimbal_mode: GimbalMode::Follow,
+            pad_held: false,
+            sheet: None,
+            sheet_tab: 0,
+            prefs: Prefs::default(),
+            model_id: -1,
+            screen: Screen::Viewfinder,
+            library: Library::default(),
+            player: None,
+            media_counter: 0,
+            ramp: opc_ui::RampFilter::default(),
+            ramp_ticked_at: 0.0,
+            pad_target: (0.0, 0.0),
+            lut_menu: LutMenu::default(),
+            lut_choice: LutChoice::Off,
+            program: Program::default(),
+            move_engine: None,
+            move_countdown: None,
+            attitude_seq: 0,
+            attitude_at: f64::NEG_INFINITY,
+            last_now: 0.0,
+            move_ticked_at: 0.0,
             drawn_second: None,
         }
     }
@@ -151,6 +289,11 @@ impl Shell {
     /// Starts with the cube already on, for `--lut`.
     pub fn with_grade(mut self, graded: bool) -> Self {
         self.toggles.grade = graded;
+        self
+    }
+
+    pub fn with_model(mut self, model_id: Option<i32>) -> Self {
+        self.set_model(model_id);
         self
     }
 
@@ -164,8 +307,36 @@ impl Shell {
 
     /// Whether the cube should be loaded or dropped, once. The window does that between
     /// frames because it waits for the device to go idle.
-    pub fn take_lut_change(&mut self) -> Option<bool> {
+    pub fn take_lut_change(&mut self) -> Option<LutRequest> {
         self.lut_pending.take()
+    }
+
+    /// The names the LUT row offers, found by the window.
+    pub fn set_lut_menu(&mut self, menu: LutMenu) {
+        self.lut_menu = menu;
+        self.chrome_stale = true;
+    }
+
+    pub fn lut_choice(&self) -> &LutChoice {
+        &self.lut_choice
+    }
+
+    /// The ramp setting, as the sheet would set it. For tests that do not want to
+    /// find the chip by coordinate.
+    pub fn set_ramp_for_test(&mut self, ramp: u8) {
+        self.apply_pick(Pick::Ramp(ramp));
+    }
+
+    pub fn set_point_for_test(&mut self, slot: Slot) {
+        self.apply_pick(Pick::SetPoint(slot));
+    }
+
+    pub fn set_leg_for_test(&mut self, slot: Slot, seconds: f64) {
+        self.apply_pick(Pick::LegDuration(slot, seconds));
+    }
+
+    pub fn start_move_for_test(&mut self) -> Vec<Intent> {
+        self.apply_pick(Pick::MoveStart)
     }
 
     pub fn phase(&self) -> &Phase {
@@ -189,8 +360,116 @@ impl Shell {
         if let Some(hundredths) = status.zoom_hundredths {
             self.controls.set_zoom(f64::from(hundredths) / 100.0);
         }
+        // A new attitude push is what makes a pose fresh enough to dispatch against.
+        if status.gimbal_attitude_seq != self.attitude_seq {
+            self.attitude_seq = status.gimbal_attitude_seq;
+            self.attitude_at = self.last_now;
+        }
         self.hud.status = status;
         self.chrome_stale = true;
+    }
+
+    /// The body's live pose, when it has reported one.
+    pub fn live_pose(&self) -> Option<Waypoint> {
+        Waypoint::from_status(&self.hud.status)
+    }
+
+    pub fn program(&self) -> &Program {
+        &self.program
+    }
+
+    pub fn move_running(&self) -> bool {
+        self.move_engine
+            .as_ref()
+            .is_some_and(MoveEngine::is_running)
+            || self.move_countdown.is_some()
+    }
+
+    /// What the top bar says about a take, or nothing.
+    fn move_text(&self, now: f64) -> String {
+        if let Some(countdown) = self.move_countdown {
+            return format!("MOVE · STARTING IN {}", countdown.remaining(now));
+        }
+        self.move_engine
+            .as_ref()
+            .map_or_else(String::new, MoveEngine::readout)
+    }
+
+    /// Start pressed on the moves sheet: a 3-2-1 like the phones, then the approach.
+    fn move_start(&mut self, now: f64) -> Vec<Intent> {
+        if self.program.a.is_none() || self.program.b.is_none() || self.live_pose().is_none() {
+            return Vec::new();
+        }
+        self.move_engine = None;
+        self.move_countdown = Some(Countdown::start(now, 3.0));
+        self.close_sheet();
+        Vec::new()
+    }
+
+    fn move_stop(&mut self) -> Vec<Intent> {
+        self.move_countdown = None;
+        let mut intents = Vec::new();
+        if let Some(engine) = self.move_engine.as_mut() {
+            if engine.is_running() {
+                engine.cancel();
+                intents.push(Intent::Send(Command::GimbalTimedStop));
+            }
+        }
+        self.chrome_stale = true;
+        intents
+    }
+
+    /// One frame of a running take.
+    fn move_tick(&mut self, now: f64) -> Vec<Intent> {
+        let mut intents = Vec::new();
+        if let Some(countdown) = self.move_countdown {
+            if countdown.remaining(now) != (countdown.remaining(now - 0.05)) {
+                self.chrome_stale = true;
+            }
+            if countdown.is_done(now) {
+                self.move_countdown = None;
+                let Some(live) = self.live_pose() else {
+                    self.chrome_stale = true;
+                    return intents;
+                };
+                match MoveEngine::start(&self.program, live) {
+                    Ok(engine) => {
+                        self.move_engine = Some(engine);
+                        self.move_ticked_at = now;
+                    }
+                    Err(reason) => {
+                        self.hud.phase = self.hud.phase.clone();
+                        self.library.status = reason;
+                        self.chrome_stale = true;
+                        return intents;
+                    }
+                }
+            } else {
+                return intents;
+            }
+        }
+        let Some(engine) = self.move_engine.as_mut() else {
+            return intents;
+        };
+        if !engine.is_running() {
+            return intents;
+        }
+        let dt = now - self.move_ticked_at;
+        if dt < 0.02 {
+            return intents;
+        }
+        self.move_ticked_at = now;
+        let live = Waypoint::from_status(&self.hud.status);
+        let age = now - self.attitude_at;
+        let output = engine.tick(dt.min(0.12), live, age.max(0.0));
+        if let Some((target, duration)) = output.target {
+            intents.push(Intent::Send(target.timed_target(duration)));
+        }
+        if output.stop {
+            intents.push(Intent::Send(Command::GimbalTimedStop));
+        }
+        self.chrome_stale = true;
+        intents
     }
 
     pub fn set_window(&mut self, width: u32, height: u32) {
@@ -198,6 +477,143 @@ impl Shell {
             self.window = (width, height);
             self.chrome_stale = true;
             self.chrome = None;
+            // Slint hit-tests against its own window size, so a tap before the first
+            // frame has drawn must still land on the right control.
+            if let Some(cr) = self.chrome_renderer.as_mut() {
+                cr.resize(width, height);
+            }
+        }
+    }
+
+    /// The body's model id, when the link knows it. Colour modes encode per model.
+    pub fn set_model(&mut self, model_id: Option<i32>) {
+        self.model_id = model_id.unwrap_or(-1);
+    }
+
+    /// Which sheet is open, if any.
+    pub fn sheet(&self) -> Option<SheetKind> {
+        self.sheet
+    }
+
+    /// Opens a sheet, or closes it when it is the one already open.
+    pub fn toggle_sheet(&mut self, kind: SheetKind) {
+        self.sheet = if self.sheet == Some(kind) {
+            None
+        } else {
+            Some(kind)
+        };
+        self.chrome_stale = true;
+    }
+
+    pub fn close_sheet(&mut self) {
+        if self.sheet.take().is_some() {
+            self.chrome_stale = true;
+        }
+    }
+
+    /// The desktop-side settings, as the sheets show them.
+    pub fn prefs(&self) -> Prefs {
+        self.prefs
+    }
+
+    fn sheet_context(&self) -> sheets::Context<'_> {
+        sheets::Context {
+            status: &self.hud.status,
+            prefs: self.prefs,
+            toggles: self.toggles,
+            gimbal_mode: self.gimbal_mode,
+            model_id: self.model_id,
+            luts: &self.lut_menu,
+            lut_choice: &self.lut_choice,
+            program: &self.program,
+            live_pose: self.live_pose(),
+            move_running: self.move_running(),
+        }
+    }
+
+    /// Carries out a chip tap on the open sheet.
+    fn apply_pick(&mut self, pick: Pick) -> Vec<Intent> {
+        self.chrome_stale = true;
+        match pick {
+            Pick::Send(commands) => commands.into_iter().map(Intent::Send).collect(),
+            Pick::Zebra => self.act(Action::ToggleZebra, 0.0),
+            Pick::Peaking => self.act(Action::TogglePeaking, 0.0),
+            Pick::Grade => self.act(Action::ToggleGrade, 0.0),
+            Pick::Mirror => self.act(Action::ToggleMirror, 0.0),
+            Pick::Grid(on) => {
+                self.prefs.grid = on;
+                Vec::new()
+            }
+            Pick::Timecode(on) => {
+                self.prefs.timecode = on;
+                Vec::new()
+            }
+            Pick::GimbalMode(mode) => {
+                self.gimbal_mode = mode;
+                mode.commands().into_iter().map(Intent::Send).collect()
+            }
+            Pick::AudioChannel(channel) => {
+                self.prefs.audio_channel = channel;
+                vec![Intent::Send(Command::SetAudioChannel(channel))]
+            }
+            Pick::VocalBoost(boost) => {
+                self.prefs.vocal_boost = boost;
+                vec![Intent::Send(Command::SetVocalBoost(boost))]
+            }
+            Pick::Fov(fov) => {
+                self.prefs.fov = fov;
+                vec![Intent::Send(Command::SetFov(fov))]
+            }
+            Pick::GimbalSpeed(speed) => {
+                self.prefs.gimbal_speed = speed;
+                vec![Intent::Send(Command::GimbalSpeed(speed))]
+            }
+            Pick::Ramp(ramp) => {
+                self.prefs.ramp = ramp;
+                self.ramp.reset();
+                Vec::new()
+            }
+            Pick::Countdown(seconds) => {
+                self.prefs.countdown_seconds = seconds;
+                Vec::new()
+            }
+            Pick::Lut(choice) => {
+                self.toggles.grade = choice != LutChoice::Off;
+                self.lut_choice = choice.clone();
+                self.lut_pending = Some(LutRequest::Load(choice));
+                self.refresh_assists();
+                Vec::new()
+            }
+            Pick::SetPoint(slot) => {
+                let pose = self.live_pose().filter(Waypoint::is_reachable);
+                match slot {
+                    Slot::A => self.program.a = pose,
+                    Slot::B => self.program.b = pose,
+                    Slot::C => self.program.c = pose,
+                }
+                Vec::new()
+            }
+            Pick::ClearPoint(slot) => {
+                match slot {
+                    Slot::A => self.program.a = None,
+                    Slot::B => self.program.b = None,
+                    Slot::C => self.program.c = None,
+                }
+                Vec::new()
+            }
+            Pick::LegDuration(slot, seconds) => {
+                match slot {
+                    Slot::A => self.program.duration_ab = seconds,
+                    _ => self.program.duration_bc = seconds,
+                }
+                Vec::new()
+            }
+            Pick::MoveStart => {
+                let now = self.last_now;
+                self.move_start(now)
+            }
+            Pick::MoveStop => self.move_stop(),
+            Pick::Nothing => Vec::new(),
         }
     }
 
@@ -247,9 +663,22 @@ impl Shell {
 
     /// A key went down.
     pub fn press(&mut self, key: Key, now: f64) -> Vec<Intent> {
+        self.last_now = self.last_now.max(now);
+        if key == Key::Escape && self.sheet.is_some() {
+            self.close_sheet();
+            return Vec::new();
+        }
+        if self.screen != Screen::Viewfinder {
+            return self.press_on_screen(key);
+        }
+        if key == Key::Char('g') || key == Key::Char('G') {
+            return self.open_library();
+        }
         if self.stick.set(key, true) {
-            self.stick_sent_at = now;
-            return vec![Intent::Send(self.stick.command())];
+            // Manual control cancels the path, as on the phones.
+            let mut intents = self.move_stop();
+            intents.extend(self.stick_changed(now));
+            return intents;
         }
         let Some(action) = self.controls.press(key) else {
             return Vec::new();
@@ -260,10 +689,65 @@ impl Shell {
     /// A key came up. Only the stick cares.
     pub fn release(&mut self, key: Key, now: f64) -> Vec<Intent> {
         if self.stick.set(key, false) {
+            return self.stick_changed(now);
+        }
+        Vec::new()
+    }
+
+    /// The keys' throw changed. Without a ramp the new throw goes out at once; with
+    /// one, the filter starts moving toward it and `tick` sends each step.
+    fn stick_changed(&mut self, now: f64) -> Vec<Intent> {
+        if self.prefs.ramp_tau() <= 0.0 {
             self.stick_sent_at = now;
             return vec![Intent::Send(self.stick.command())];
         }
+        // One nominal frame of ease, so the first send is already a fraction of the
+        // throw rather than the whole of it.
+        self.ramp_ticked_at = self.ramp_ticked_at.max(now - 0.04);
+        self.ramp_step(now)
+    }
+
+    /// The throw the operator is asking for right now, keys or pad.
+    fn stick_target(&self) -> (f64, f64) {
+        if self.pad_held {
+            self.pad_target
+        } else {
+            self.stick.target()
+        }
+    }
+
+    /// One step of the ramp toward the target; sends when the throw moved.
+    fn ramp_step(&mut self, now: f64) -> Vec<Intent> {
+        let tau = self.prefs.ramp_tau();
+        let dt = (now - self.ramp_ticked_at).clamp(0.0, 0.2);
+        self.ramp_ticked_at = now;
+        let (tx, ty) = self.stick_target();
+        let before = self.ramp;
+        let (mut x, mut y) = self.ramp.tick(tx, ty, tau, dt);
+        if tx == 0.0 && ty == 0.0 && self.ramp.is_settled_at_rest() {
+            self.ramp.reset();
+            x = 0.0;
+            y = 0.0;
+        } else if (x - tx).abs() < 0.01 && (y - ty).abs() < 0.01 {
+            // Close enough: land on the throw itself, so a held key reaches full.
+            self.ramp.x = tx;
+            self.ramp.y = ty;
+            x = tx;
+            y = ty;
+        }
+        let moved = (x - before.x).abs() > 0.005 || (y - before.y).abs() > 0.005;
+        let rested_now = x == 0.0 && y == 0.0 && (before.x != 0.0 || before.y != 0.0);
+        if moved || rested_now {
+            self.stick_sent_at = now;
+            return vec![Intent::Send(opc_ui::stick_command(x, y))];
+        }
         Vec::new()
+    }
+
+    /// Whether the ramp still has somewhere to go.
+    fn ramp_busy(&self) -> bool {
+        let (tx, ty) = self.stick_target();
+        (self.ramp.x - tx).abs() > 0.005 || (self.ramp.y - ty).abs() > 0.005
     }
 
     fn act(&mut self, action: Action, now: f64) -> Vec<Intent> {
@@ -277,7 +761,10 @@ impl Shell {
                 // operator reaches for when the shot is not ready.
                 self.hud.countdown = match self.hud.countdown {
                     Some(_) => None,
-                    None => Some(Countdown::start(now, COUNTDOWN)),
+                    None => Some(Countdown::start(
+                        now,
+                        f64::from(self.prefs.countdown_seconds),
+                    )),
                 };
                 Vec::new()
             }
@@ -298,12 +785,24 @@ impl Shell {
             }
             Action::ToggleGrade => {
                 self.toggles.grade = !self.toggles.grade;
-                self.lut_pending = Some(self.toggles.grade);
+                self.lut_pending = Some(LutRequest::Toggle(self.toggles.grade));
                 self.refresh_assists();
                 Vec::new()
             }
             Action::ToggleChrome => {
                 self.chrome_visible = !self.chrome_visible;
+                Vec::new()
+            }
+            Action::ToggleSettings => {
+                self.toggle_sheet(SheetKind::Settings);
+                Vec::new()
+            }
+            Action::ToggleExposure => {
+                self.toggle_sheet(SheetKind::Exposure);
+                Vec::new()
+            }
+            Action::ToggleMoves => {
+                self.toggle_sheet(SheetKind::Moves);
                 Vec::new()
             }
             Action::ClearTracking => {
@@ -392,14 +891,28 @@ impl Shell {
     /// touch, so this is the only way a finger reaches the picture.
     pub fn touch(&mut self, id: u64, phase: TouchPhase, x: f64, y: f64, now: f64) -> Vec<Intent> {
         let mine = self.finger == Some(id);
+        let control_mine = self.control_finger == Some(id);
         match phase {
-            TouchPhase::Started if self.finger.is_none() => {
+            TouchPhase::Started if self.finger.is_none() && self.control_finger.is_none() => {
+                if let Some(intents) = self.control_down(x, y, now) {
+                    self.control_finger = Some(id);
+                    return intents;
+                }
                 self.pointer_down(x, y);
                 // Claimed only if a box actually started. A finger that landed on a
                 // letterbox bar must not lock out the next one that lands on the shot.
                 if self.drag.is_some() {
                     self.finger = Some(id);
                 }
+            }
+            TouchPhase::Moved if control_mine => return self.control_moved(x, y),
+            TouchPhase::Ended if control_mine => {
+                self.control_finger = None;
+                return self.control_up(x, y, now);
+            }
+            TouchPhase::Cancelled if control_mine => {
+                self.control_finger = None;
+                return self.control_cancel();
             }
             TouchPhase::Moved if mine => self.pointer_moved(x, y),
             TouchPhase::Ended if mine => {
@@ -427,15 +940,546 @@ impl Shell {
         }
     }
 
-    /// The clock moved on: fires the countdown and keeps the stick alive.
+    /// Maps what the Slint controls fired since the last call onto shell intents. Called
+    /// after every pointer event and every render, so a tap answers on the spot rather
+    /// than on the next frame.
+    fn take_chrome_intents(&mut self) -> Vec<Intent> {
+        let mut fired = Vec::new();
+        let Some(cr) = self.chrome_renderer.as_ref() else {
+            return fired;
+        };
+        let intents = cr.drain_intents();
+        for intent in intents {
+            match intent {
+                ChromeIntent::RecordToggle => {
+                    fired.push(Intent::Send(if self.hud.status.is_recording {
+                        Command::RecordStop
+                    } else {
+                        Command::RecordStart
+                    }));
+                }
+                ChromeIntent::TakeStill => fired.push(Intent::Send(Command::ShootPhoto)),
+                ChromeIntent::GimbalFlip => fired.push(Intent::Send(Command::GimbalFlip)),
+                ChromeIntent::GimbalRecenter => {
+                    fired.push(Intent::Send(Command::GimbalRecenter));
+                }
+                ChromeIntent::ZoomSet(v) => {
+                    let z = (v as f64).clamp(ZOOM_MIN, ZOOM_MAX);
+                    self.controls.set_zoom(z);
+                    self.chrome_stale = true;
+                    fired.push(Intent::Send(Command::ZoomFactor(z)));
+                }
+                ChromeIntent::GimbalMoved { x, y } => {
+                    // The pad reports right and up positive, the same axes as the keys.
+                    self.pad_held = true;
+                    self.pad_target = (f64::from(x), f64::from(y));
+                    if self.prefs.ramp_tau() > 0.0 {
+                        // A pointer event carries no clock: step one nominal frame.
+                        let now = self.ramp_ticked_at + 0.04;
+                        fired.extend(self.ramp_step(now));
+                    } else {
+                        fired.push(Intent::Send(opc_ui::stick_command(
+                            f64::from(x),
+                            f64::from(y),
+                        )));
+                    }
+                }
+                ChromeIntent::GimbalReleased => {
+                    self.pad_held = false;
+                    self.pad_target = (0.0, 0.0);
+                    if self.prefs.ramp_tau() > 0.0 && self.stick.is_resting() {
+                        // The ramp eases the stick back; the ticks send the steps.
+                        let now = self.ramp_ticked_at + 0.04;
+                        fired.extend(self.ramp_step(now));
+                    } else {
+                        fired.push(Intent::Send(Command::GimbalStick {
+                            axis0: 1024,
+                            axis1: 1024,
+                        }));
+                    }
+                }
+                ChromeIntent::FollowToggle => {
+                    // ON is Follow; OFF is the tilt-locked follow the body offers.
+                    self.gimbal_mode = if self.gimbal_mode == GimbalMode::Follow {
+                        GimbalMode::TiltLocked
+                    } else {
+                        GimbalMode::Follow
+                    };
+                    self.chrome_stale = true;
+                    fired.extend(self.gimbal_mode.commands().into_iter().map(Intent::Send));
+                }
+                ChromeIntent::FollowCycle => {
+                    self.gimbal_mode = self.gimbal_mode.next();
+                    self.chrome_stale = true;
+                    fired.extend(self.gimbal_mode.commands().into_iter().map(Intent::Send));
+                }
+                ChromeIntent::ModeSelected(index) => {
+                    if let Some(code) = MODE_CODES.get(index).copied().flatten() {
+                        fired.push(Intent::Send(Command::SetShootingMode(code)));
+                    }
+                }
+                ChromeIntent::OpenFormat => self.toggle_sheet(SheetKind::Format),
+                ChromeIntent::OpenExposure => self.toggle_sheet(SheetKind::Exposure),
+                ChromeIntent::OpenMenu => self.toggle_sheet(SheetKind::Settings),
+                ChromeIntent::SheetClose => self.close_sheet(),
+                ChromeIntent::SheetTab(tab) => {
+                    self.sheet_tab = tab;
+                    self.chrome_stale = true;
+                }
+                ChromeIntent::SheetPick { row, option } => {
+                    let pick = self.sheet.and_then(|kind| {
+                        sheets::build(kind, self.sheet_tab, self.sheet_context())
+                            .pick(row, option)
+                            .cloned()
+                    });
+                    if let Some(pick) = pick {
+                        fired.extend(self.apply_pick(pick));
+                    }
+                }
+                ChromeIntent::Exit => fired.push(Intent::Quit),
+                ChromeIntent::OpenGallery => fired.extend(self.open_library()),
+                ChromeIntent::LibraryBack => fired.extend(self.close_library()),
+                ChromeIntent::LibraryTab(index) => {
+                    if let Some(tab) = opc_media::LibraryTab::ALL.get(index) {
+                        self.library.tab = *tab;
+                        self.chrome_stale = true;
+                    }
+                }
+                ChromeIntent::LibrarySortNext => {
+                    self.library.sort = self.library.sort.next();
+                    self.chrome_stale = true;
+                }
+                ChromeIntent::LibraryRefresh => {
+                    fired.extend(self.press_on_screen(Key::Char('r')));
+                }
+                ChromeIntent::LibrarySelect(index) => {
+                    self.library.select_index(index);
+                    self.chrome_stale = true;
+                }
+                ChromeIntent::LibraryPlay => fired.extend(self.library_open_selected()),
+                ChromeIntent::LibraryDownload => {
+                    if let Some(file) = self.library.selected_file().cloned() {
+                        self.library.progress.insert(file.path.clone(), (0, None));
+                        self.chrome_stale = true;
+                        fired.push(Intent::Media(MediaAction::Download(file)));
+                    }
+                }
+                ChromeIntent::LibraryFavorite => {
+                    let counter = self.next_media_counter();
+                    if let Some(command) = self.library.toggle_favorite(counter) {
+                        fired.push(Intent::Send(command));
+                    }
+                    self.chrome_stale = true;
+                }
+                ChromeIntent::LibraryDelete => {
+                    let counter = self.next_media_counter();
+                    if let Some(command) = self.library.delete_tapped(counter) {
+                        fired.push(Intent::Send(command));
+                    }
+                    self.chrome_stale = true;
+                }
+                ChromeIntent::LibrarySource(local) => {
+                    self.library.local = local;
+                    self.library.selected = None;
+                    self.chrome_stale = true;
+                }
+                ChromeIntent::PlayerBack => fired.extend(self.close_player()),
+                ChromeIntent::PlayerToggle => fired.extend(self.player_toggle()),
+                ChromeIntent::PlayerInfo => {
+                    if let Some(player) = self.player.as_mut() {
+                        player.show_info = !player.show_info;
+                        self.chrome_stale = true;
+                    }
+                }
+                ChromeIntent::PlayerDownload => {
+                    if let Some(file) = self.player.as_ref().map(|p| p.file.clone()) {
+                        self.library.progress.insert(file.path.clone(), (0, None));
+                        fired.push(Intent::Media(MediaAction::Download(file)));
+                    }
+                }
+                ChromeIntent::PlayerScreenshot => fired.push(Intent::Still),
+                ChromeIntent::PlayerLut => fired.extend(self.act(Action::ToggleGrade, 0.0)),
+                ChromeIntent::PlayerZebra => fired.extend(self.act(Action::ToggleZebra, 0.0)),
+                ChromeIntent::PlayerPeaking => {
+                    fired.extend(self.act(Action::TogglePeaking, 0.0));
+                }
+                ChromeIntent::PlayerFavorite => {
+                    if self.player_select() {
+                        let counter = self.next_media_counter();
+                        if let Some(command) = self.library.toggle_favorite(counter) {
+                            fired.push(Intent::Send(command));
+                        }
+                        self.chrome_stale = true;
+                    }
+                }
+                ChromeIntent::PlayerDelete => {
+                    if self.player_select() {
+                        let counter = self.next_media_counter();
+                        if let Some(command) = self.library.delete_tapped(counter) {
+                            fired.push(Intent::Send(command));
+                            // The clip is gone: back to the grid.
+                            fired.extend(self.close_player());
+                        }
+                        self.chrome_stale = true;
+                    }
+                }
+                ChromeIntent::PlayerSeek(fraction) => {
+                    if let Some(player) = self.player.as_mut() {
+                        let position = (f64::from(fraction).clamp(0.0, 1.0)
+                            * player.duration_ms as f64)
+                            as i64;
+                        player.position_ms = position;
+                        self.chrome_stale = true;
+                        fired.push(Intent::Media(MediaAction::PlayerSeek(position)));
+                    }
+                }
+                ChromeIntent::FullscreenToggle => fired.push(Intent::ToggleFullscreen),
+                // Surfaces that do not exist on the desktop yet.
+                ChromeIntent::OrientationToggle => {}
+            }
+        }
+        fired
+    }
+
+    // ── Screens ──────────────────────────────────────────────────────────────
+
+    pub fn screen(&self) -> Screen {
+        self.screen
+    }
+
+    pub fn library(&self) -> &Library {
+        &self.library
+    }
+
+    pub fn library_mut(&mut self) -> &mut Library {
+        self.chrome_stale = true;
+        &mut self.library
+    }
+
+    pub fn player(&self) -> Option<&Player> {
+        self.player.as_ref()
+    }
+
+    fn next_media_counter(&mut self) -> u32 {
+        self.media_counter = self.media_counter.wrapping_add(1);
+        self.media_counter
+    }
+
+    /// The gallery button, or `G`: the library comes up over the picture.
+    pub fn open_library(&mut self) -> Vec<Intent> {
+        if self.screen == Screen::Library {
+            return Vec::new();
+        }
+        self.close_sheet();
+        self.screen = Screen::Library;
+        self.player = None;
+        self.library.listing = true;
+        self.library.status.clear();
+        self.chrome_stale = true;
+        vec![Intent::Media(MediaAction::OpenLibrary)]
+    }
+
+    pub fn close_library(&mut self) -> Vec<Intent> {
+        if self.screen == Screen::Viewfinder {
+            return Vec::new();
+        }
+        self.screen = Screen::Viewfinder;
+        self.player = None;
+        self.library.delete_armed = None;
+        self.chrome_stale = true;
+        vec![Intent::Media(MediaAction::CloseLibrary)]
+    }
+
+    /// The window listed a page: append what is new.
+    pub fn library_listed(&mut self, files: Vec<MediaFile>, done: bool) {
+        for file in files {
+            if !self
+                .library
+                .files
+                .iter()
+                .any(|known| known.path == file.path)
+            {
+                self.library.files.push(file);
+            }
+        }
+        self.library.listing = !done;
+        self.chrome_stale = true;
+    }
+
+    pub fn library_status(&mut self, status: impl Into<String>) {
+        self.library.status = status.into();
+        self.library.listing = false;
+        self.chrome_stale = true;
+    }
+
+    /// A thumbnail decoded: the chrome keeps it by path.
+    pub fn library_thumb(&mut self, path: &str, width: u32, height: u32, rgba: &[u8]) {
+        if let Some(cr) = self.chrome_renderer.as_mut() {
+            cr.set_thumb(path, width, height, rgba);
+        }
+        self.chrome_stale = true;
+    }
+
+    pub fn library_progress(&mut self, path: &str, done: u64, total: Option<u64>) {
+        self.library
+            .progress
+            .insert(path.to_string(), (done, total));
+        self.chrome_stale = true;
+    }
+
+    /// A file landed on disk.
+    pub fn library_file_ready(&mut self, path: &str, proxy: bool) {
+        self.library.progress.remove(path);
+        if proxy {
+            self.library.proxies.insert(path.to_string());
+        } else {
+            self.library.cached.insert(path.to_string());
+            self.library
+                .notes
+                .insert(path.to_string(), "Saved to the library folder".to_string());
+        }
+        self.chrome_stale = true;
+    }
+
+    pub fn library_failed(&mut self, path: &str, reason: &str) {
+        self.library.progress.remove(path);
+        self.library
+            .notes
+            .insert(path.to_string(), format!("Could not fetch: {reason}"));
+        self.chrome_stale = true;
+    }
+
+    /// The window opened a clip in the player, or a still in the viewer.
+    pub fn open_player(&mut self, file: MediaFile, duration_ms: i64, proxy: bool, is_photo: bool) {
+        self.screen = if is_photo {
+            Screen::Photo
+        } else {
+            Screen::Player
+        };
+        self.library.delete_armed = None;
+        self.player = Some(Player {
+            file,
+            playing: !is_photo,
+            position_ms: 0,
+            duration_ms,
+            proxy,
+            is_photo,
+            show_info: false,
+        });
+        self.chrome_stale = true;
+    }
+
+    /// Frames across the clip for the filmstrip scrubber.
+    pub fn player_strip(&mut self, path: &str, frames: &[(u32, u32, Vec<u8>)]) {
+        if let Some(cr) = self.chrome_renderer.as_mut() {
+            cr.set_strip(path, frames);
+        }
+        self.chrome_stale = true;
+    }
+
+    /// The player's heart or trash: the clip on screen becomes the selection, so the
+    /// library's own rules apply.
+    fn player_select(&mut self) -> bool {
+        let Some(path) = self.player.as_ref().map(|player| player.file.path.clone()) else {
+            return false;
+        };
+        self.library.selected = Some(path);
+        true
+    }
+
+    pub fn player_position(&mut self, position_ms: i64) {
+        if let Some(player) = self.player.as_mut() {
+            if (player.position_ms / 1000) != (position_ms / 1000) {
+                self.chrome_stale = true;
+            }
+            player.position_ms = position_ms;
+        }
+    }
+
+    /// The clip ran out: the transport shows the end, paused.
+    pub fn player_ended(&mut self) {
+        if let Some(player) = self.player.as_mut() {
+            player.playing = false;
+            player.position_ms = player.duration_ms;
+            self.chrome_stale = true;
+        }
+    }
+
+    fn press_on_screen(&mut self, key: Key) -> Vec<Intent> {
+        match (self.screen, key) {
+            (Screen::Library, Key::Escape) => self.close_library(),
+            (Screen::Library, Key::Char('r' | 'R')) => {
+                self.library.listing = true;
+                self.library.status.clear();
+                self.chrome_stale = true;
+                vec![Intent::Media(MediaAction::Refresh)]
+            }
+            (Screen::Player | Screen::Photo, Key::Escape) => self.close_player(),
+            (Screen::Player, Key::Space) => self.player_toggle(),
+            (_, Key::Char('h' | 'H')) => {
+                self.chrome_visible = !self.chrome_visible;
+                self.chrome_stale = true;
+                Vec::new()
+            }
+            (_, Key::Char('z' | 'Z')) => self.act(Action::ToggleZebra, 0.0),
+            (_, Key::Char('p' | 'P')) => self.act(Action::TogglePeaking, 0.0),
+            (_, Key::Char('l' | 'L')) => self.act(Action::ToggleGrade, 0.0),
+            (_, Key::Char('m' | 'M')) => self.act(Action::ToggleMirror, 0.0),
+            _ => Vec::new(),
+        }
+    }
+
+    fn close_player(&mut self) -> Vec<Intent> {
+        self.player = None;
+        self.screen = Screen::Library;
+        self.chrome_stale = true;
+        vec![Intent::Media(MediaAction::ClosePlayer)]
+    }
+
+    fn player_toggle(&mut self) -> Vec<Intent> {
+        if let Some(player) = self.player.as_mut() {
+            player.playing = !player.playing;
+            self.chrome_stale = true;
+            return vec![Intent::Media(MediaAction::PlayerToggle)];
+        }
+        Vec::new()
+    }
+
+    fn library_open_selected(&mut self) -> Vec<Intent> {
+        let Some(file) = self.library.selected_file().cloned() else {
+            return Vec::new();
+        };
+        self.chrome_stale = true;
+        if file.is_video() {
+            vec![Intent::Media(MediaAction::Play(file))]
+        } else {
+            vec![Intent::Media(MediaAction::Photo(file))]
+        }
+    }
+
+    fn controls_enabled(&self) -> bool {
+        matches!(self.hud.phase, Phase::Live)
+    }
+
+    /// Forward a move to Slint even when the pointer isn't in a control zone.
+    /// This keeps hover states and drag-in-progress updates working correctly.
+    pub fn slint_pointer_moved(&self, x: f64, y: f64) {
+        if let Some(cr) = &self.chrome_renderer {
+            cr.pointer_moved(x as f32, y as f32);
+        }
+    }
+
+    /// Whether this point belongs to a Slint control rather than the tracking-box area.
+    pub fn is_control(&self, x: f64, y: f64) -> bool {
+        if !self.chrome_visible {
+            return false;
+        }
+        // An open sheet owns the window: the scrim around it is a close button. So
+        // does any screen but the viewfinder: there is no picture to draw a box on.
+        if self.sheet.is_some() || self.screen != Screen::Viewfinder {
+            return true;
+        }
+        if let Some(cr) = &self.chrome_renderer {
+            cr.is_over_control(x, y, self.window.0, self.window.1)
+        } else {
+            false
+        }
+    }
+
+    /// Pointer pressed in a control zone: forward to Slint.
+    /// Returns `Some([])` so the caller knows it was claimed (even if no intent fired yet).
+    pub fn control_down(&mut self, x: f64, y: f64, now: f64) -> Option<Vec<Intent>> {
+        self.last_now = self.last_now.max(now);
+        if !self.chrome_visible {
+            return None;
+        }
+        if !self.is_control(x, y) {
+            return None;
+        }
+        if let Some(cr) = &self.chrome_renderer {
+            cr.pointer_pressed(x as f32, y as f32);
+        }
+        self.chrome_stale = true;
+        Some(self.take_chrome_intents())
+    }
+
+    /// Pointer moved while a Slint control is held.
+    pub fn control_moved(&mut self, x: f64, y: f64) -> Vec<Intent> {
+        if let Some(cr) = &self.chrome_renderer {
+            cr.pointer_moved(x as f32, y as f32);
+        }
+        self.take_chrome_intents()
+    }
+
+    /// The window's clock, for the ramp when a pointer event carries none.
+    pub fn note_time(&mut self, now: f64) {
+        if self.ramp_ticked_at < now
+            && !self.ramp_busy()
+            && self.ramp == opc_ui::RampFilter::default()
+        {
+            self.ramp_ticked_at = now;
+        }
+    }
+
+    /// Pointer released over a control zone.
+    pub fn control_up(&mut self, x: f64, y: f64, now: f64) -> Vec<Intent> {
+        self.last_now = self.last_now.max(now);
+        if let Some(cr) = &self.chrome_renderer {
+            cr.pointer_released(x as f32, y as f32);
+        }
+        self.chrome_stale = true;
+        self.take_chrome_intents()
+    }
+
+    /// Focus lost or gesture cancelled. Slint drops its pressed state, and a joystick
+    /// that was being held rests the camera at once: a stick left thrown by a palm or a
+    /// window that lost focus is a gimbal that keeps moving.
+    pub fn control_cancel(&mut self) -> Vec<Intent> {
+        if let Some(cr) = &self.chrome_renderer {
+            cr.pointer_cancel();
+        }
+        let mut intents = self.take_chrome_intents();
+        if self.pad_held {
+            self.pad_held = false;
+            self.chrome_stale = true;
+            intents.push(Intent::Send(Command::GimbalStick {
+                axis0: 1024,
+                axis1: 1024,
+            }));
+        }
+        intents
+    }
+
+    /// The clock moved on: fires the countdown, keeps the stick alive, and
+    /// returns any intents fired by Slint controls since last tick.
     pub fn tick(&mut self, now: f64) -> Vec<Intent> {
+        self.last_now = self.last_now.max(now);
         let mut intents = Vec::new();
+        // Drain intents queued by Slint button callbacks.
+        intents.append(&mut self.chrome_pending_intents);
+        intents.extend(self.move_tick(now));
         if self.hud.countdown_fired(now) {
             self.hud.countdown = None;
             self.chrome_stale = true;
             intents.push(Intent::Send(Command::RecordStart));
         }
-        if !self.stick.is_resting() && now - self.stick_sent_at >= STICK_REPEAT {
+        if self.prefs.ramp_tau() > 0.0 {
+            // The ramp steps at 25 Hz while it moves, and keeps a held throw alive.
+            let held = self.stick_target() != (0.0, 0.0);
+            if (self.ramp_busy()
+                || !self.ramp.is_settled_at_rest()
+                || self.ramp != opc_ui::RampFilter::default())
+                && now - self.ramp_ticked_at >= 0.04
+            {
+                intents.extend(self.ramp_step(now));
+            } else if held && now - self.stick_sent_at >= STICK_REPEAT {
+                self.stick_sent_at = now;
+                intents.push(Intent::Send(opc_ui::stick_command(
+                    self.ramp.x,
+                    self.ramp.y,
+                )));
+            }
+        } else if !self.stick.is_resting() && now - self.stick_sent_at >= STICK_REPEAT {
             self.stick_sent_at = now;
             intents.push(Intent::Send(self.stick.command()));
         }
@@ -469,13 +1513,119 @@ impl Shell {
             if let Some((rectangle, _)) = self.committed {
                 self.hud.drag = Some(rectangle);
             }
-            let canvas = self.hud.draw(self.window.0, self.window.1, now);
+
+            let controls_enabled = self.controls_enabled();
+            let sheet = self
+                .sheet
+                .map(|kind| sheets::build(kind, self.sheet_tab, self.sheet_context()).sheet);
+            let timecode = if self.prefs.timecode {
+                self.hud.status.timecode.clone().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let grid_on = self.prefs.grid;
+            let move_text = self.move_text(now);
+            let screen = self.screen;
+            let grid_width = self.window.0 as f32;
+            let library = (screen == Screen::Library).then(|| self.library.state(grid_width));
+            if screen == Screen::Library {
+                for file in self.library.thumbs_wanted() {
+                    self.chrome_pending_intents
+                        .push(Intent::Media(MediaAction::Thumb(file)));
+                }
+            }
+            let player = self
+                .player
+                .as_ref()
+                .map(|player| player.state(&self.library, self.toggles));
+            let mut canvas = if let Some(cr) = self.chrome_renderer.as_mut() {
+                let status = &self.hud.status;
+                let link_state = self.hud.connection_chip();
+                let zoom = self.controls.zoom();
+                let battery_pct = status.battery_percent.unwrap_or(0);
+                let fit = self.hud.fit.unwrap_or(opc_ui::Fit {
+                    x: 0.0,
+                    y: 0.0,
+                    width: f64::from(self.window.0),
+                    height: f64::from(self.window.1),
+                });
+                let mode = mode_index(status.shooting_mode);
+                let state = ChromeState {
+                    phase: &self.hud.phase,
+                    shutter: status.shutter_label().unwrap_or_default(),
+                    iso: status.iso.map(|iso| iso.to_string()).unwrap_or_default(),
+                    ev: status.ev_label().unwrap_or_default(),
+                    wb: status
+                        .white_balance_kelvin
+                        .filter(|value| *value > 0)
+                        .map(|kelvin| format!("{kelvin}K"))
+                        .unwrap_or_default(),
+                    link_state,
+                    is_recording: status.is_recording,
+                    rec_elapsed: status.elapsed_label(),
+                    follow_on: self.gimbal_mode == GimbalMode::Follow,
+                    format_label: status.format_label(),
+                    expo_label: match status.expo_mode {
+                        Some(0x04) => "M".to_string(),
+                        _ => "AUTO".to_string(),
+                    },
+                    battery_text: format!("{battery_pct}%"),
+                    battery_percent: battery_pct,
+                    storage_text: status.remaining_label(),
+                    zoom: zoom as f32,
+                    zoom_label: format!("{:.1}×", zoom),
+                    mode,
+                    photo_mode: mode == 4,
+                    controls_enabled,
+                    fit: (
+                        fit.x.max(0.0) as u32,
+                        fit.y.max(0.0) as u32,
+                        fit.width.max(0.0) as u32,
+                        fit.height.max(0.0) as u32,
+                    ),
+                    countdown: second,
+                    fps_shown: self.hud.fps,
+                    timecode,
+                    grid_on,
+                    move_text,
+                    sheet,
+                    screen,
+                    library,
+                    player,
+                };
+                cr.render(&state, self.window.0, self.window.1)
+            } else {
+                // Fallback: old CPU canvas (Slint unavailable).
+                self.hud.draw(self.window.0, self.window.1, now)
+            };
+
+            // Draw tracking box on top.
+            if let Some((x, y, bw, bh)) = self.hud.drag {
+                let fit = self.hud.fit.unwrap_or(opc_ui::Fit {
+                    x: 0.0,
+                    y: 0.0,
+                    width: f64::from(self.window.0),
+                    height: f64::from(self.window.1),
+                });
+                canvas.stroke(
+                    (fit.x + x * fit.width) as i64,
+                    (fit.y + y * fit.height) as i64,
+                    (bw * fit.width) as u32,
+                    (bh * fit.height) as u32,
+                    2,
+                    opc_ui::canvas::TRACKING,
+                );
+            }
+
             self.chrome = Some(Rgba {
                 width: canvas.width,
                 height: canvas.height,
                 pixels: canvas.pixels,
             });
             self.chrome_stale = false;
+            // Anything a Slint control fired while its state was pushed.
+            let fired = self.take_chrome_intents();
+            self.chrome_pending_intents.extend(fired);
         }
         self.chrome.as_ref()
     }

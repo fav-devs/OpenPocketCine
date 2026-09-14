@@ -18,17 +18,127 @@ BLE transport lands; the state machine behind it is already in `opc-camera`.
 The picture fills the window, keeping its proportions — a 16:9 feed in a window the
 operator dragged square gets bars, not narrow faces. Framing is what a viewfinder is for.
 
-The chrome is one strip along the top, one along the bottom, and nothing in the middle
-unless something is wrong:
+The chrome is a DJI Mimo replica laid out for a landscape laptop, rendered by Slint
+(`opc-chrome`, Outfit type, Tabler icons) into a transparent overlay the shell composites
+over the picture:
 
-- **Top left** — ISO, shutter, EV, white balance, zoom.
-- **Top right** — a red lamp and the running time, while the body is rolling.
-- **Bottom left** — the frame rate the body is shooting, the rate actually reaching the
-  screen, battery, storage, and which assists are on.
+- **Top bar** — menu, gimbal follow `ON`/`OFF`, the format chip (`1080P·60`), the
+  exposure mode chip (`AUTO`/`M`), the link state in the middle with a red `REC` badge
+  and running time while the body is rolling, and exit at the far right.
+- **Zoom ruler** — a dotted ruler under the top bar that slides beneath a fixed ring;
+  drag it to zoom, the label under it is the truth.
+- **Exposure plate** (left) — shutter, `ISO`, `EV` and `WB` readouts. A field the camera
+  has not reported is absent rather than guessed.
+- **Status plate** (right) — Wi-Fi, battery (red at 20 %), card time left, and the rate
+  actually reaching the screen.
+- **Bottom bar** — gallery, flip and orientation next to the joystick on the left; the
+  record button in the middle (a red disc, a red square while rolling, white in photo
+  mode); `CTR`, `FOLLOW`, `STILL` and fullscreen on the right; and the mode strip
+  (`TIMELAPSE · SLOWMOTION · LOW-LIGHT · VIDEO · PHOTO · PANO · LIVESTREAM`) with the
+  active mode in Mimo yellow and Pano / Livestream greyed out.
 - **Middle** — only a phase message (`WAITING FOR LIVE VIEW`, `APPROVE ON THE CAMERA`,
-  `RECOVERING FEED`), or a countdown, or a failure.
+  `RECOVERING FEED`), the take countdown, or a failure.
 
-`H` hides all of it.
+Three sheets open over the picture and close on `Esc`, the `×`, or a tap outside:
+
+- **Format** (the format chip) — the resolutions and frame rates the body listed, and
+  nothing else. Picking a size keeps the rate when that size offers it.
+- **Exposure** (`AUTO`/`M` chip, or `E`) — `Auto`/`Manual`, then ISO and shutter for
+  manual, ISO max and EV for auto. The rows the mode does not use are drawn greyed, the
+  way Mimo shows them.
+- **Settings** (`⋮`, or `Tab`) — three tabs. **Camera:** focus mode, white balance
+  presets, colour profile (from the body's own list), field of view, gimbal mode,
+  speed and **ramp** (Off / Soft / Medium, the phones' first-order ease on the stick,
+  applied to the arrow keys and the on-screen pad alike). **Audio:** channel and vocal
+  boost; wind and directional audio are shown greyed because they live in a DSP blob
+  the desktop cannot read yet. **Assist:** thirds grid, overexposure alert (zebra),
+  focus peaking, the **LUT** row (Off, the core's official Rec.709 cubes, then every
+  `.cube` the operator dropped into the LUT folder the row names), mirror, the timecode
+  in the top bar, and the `T` countdown length (3, 5 or 10 s).
+
+A chip lights up when the camera confirms the value, not when it is tapped; a setting
+the body never reports (audio channel, field of view, gimbal speed) is kept as last
+commanded.
+
+## Programmed moves
+
+`K` opens the Moves sheet: **Set here** captures the body's live pose into A, B or an
+optional C (the sheet shows the live pan and tilt as the camera reports them), the
+`A → B` and `B → C` rows pick each leg's duration, and **Start** counts 3-2-1, closes
+the sheet and runs the take with a readout in the top bar. **Stop**, any arrow key,
+or the pad cancels it with a native stop.
+
+The engine is the core's `GimbalMoveEngine` transcribed (`opc-monitor/moves.rs`) minus
+smoothing at B and pause / resume: the approach to A in steps under 120° at 120°/s,
+a two-second hold, one native timed target (`0x04/0x14`) per exact leg, legs over 180°
+or 25.5 s split into native parts along the reachable arc, every target checked
+against attitude no older than 300 ms so the firmware can never take the route
+through the missing sector, and a final check that the camera stopped within 0.15°.
+A late boundary dispatch (over 40 ms, the window's draw loop being no scheduler)
+stops the take. Attitude reaches the desktop as the `0x04/0x05` yaw, display tilt and
+native pitch the facade now reads out with every status. Timing and positional
+accuracy are unqualified on a body; see `docs/programmed-moves.md`.
+
+## The library
+
+The gallery button, or `G`, opens Mimo's album over the picture: **Device** (the card)
+or **Local** (only what is on this machine), `All · Photos · Videos · Favorites` pills,
+a sort chip (`Newest · Oldest · Name · Rating`) and Refresh. Tiles are grouped under
+day headers (`Today`, then the date), carry Mimo's download mark until the original is
+on disk, the clip length, and a star for favourites; there are no file names on the
+grid. Tapping a tile fills the bar along the bottom with its name, duration, size and
+resolution, and the actions:
+
+- **PLAY** fetches the 720p `.LRF` proxy to the cache and opens the player on it; the
+  original is the fallback when there is no proxy. **VIEW** does the same for a still.
+- **DOWNLOAD** fetches the original into the library folder, with a progress bar.
+- **STAR** flips the favourite locally and tells the camera when the record carries a
+  handle to tell it with.
+- **DELETE** arms on the first tap and sends on the second. Only a handle the core's
+  base + step fit vouched for ever goes out; a shared or unfitted handle greys the
+  button. A delete is irreversible.
+
+Listing follows the phones' sequence and the Osmosis notes for the bodies that need
+them: enter playback (`0x02/0x0c`, three tries), fall through to the Pocket 3's
+`0x01/0x01` entry at 20 Hz when the body refuses, wait 1.7 s for the store to mount,
+then list the internal store, the trigger, and the card, and collect until the camera
+goes quiet. Older pages walk the oldest video handle down while playback holds; a body
+that never enters still lists its newest page. The catalogue itself is decoded by the
+Swift core through the facade — no manifest byte is read in Rust — and the last list
+and the local stars are kept per camera under the platform cache folder, so the
+library opens instantly next time.
+
+Closing the library exits playback until the body's playback bit clears and then asks
+for live view again, the same loop the phones run.
+
+## The player
+
+The proxy plays through the feed pipeline, so the LUT, zebra, peaking and mirror keys
+work on it exactly as on live view. The page is Mimo's: back, an info button that
+shows the clip's name and figures, the rendition as the title (`Low-Res` for the
+proxy), a download button for the original; below, the time pill, a filmstrip scrubber
+of eight frames decoded from the clip with the playhead over it, the tools
+(Screenshot writes the graded frame with `S`; LUT, Zebra and Peaking toggle), and
+heart · pause · trash. `Space` pauses, `Esc` goes back to the library; trash arms on
+the first tap and deletes on the second. A still is converted to the same 4:2:0
+path, so it is graded too. Playback is from the file on disk, never streamed from
+`/v2`: the camera parks `moov` at the end and serves no extension, which no player
+copes with.
+
+Every button carries its key hint in small type, so a keyboard operator learns the
+bindings from the screen. When the window is wider than the picture, the two plates park
+in the black gutters and leave the shot clean.
+
+Each cluster is a self-contained Slint component with its own anchor, so a later edit
+mode can move them without touching their internals.
+
+`H` hides all of it. To look at the chrome without a camera or a window:
+
+```
+cargo run -p opc-chrome --example snapshot -- <dir>
+```
+
+writes PNGs of the finding, live, recording, failed and wide-window states.
 
 ## Keys
 
@@ -41,6 +151,10 @@ unless something is wrong:
 | `0` | back to wide | `Esc` | close |
 | Drag | track what you drew around | `X` | stop tracking |
 | `[` / `]` | step resolution / frame rate | `H` | hide the chrome |
+| `Tab` | settings | `E` | exposure sheet |
+| `G` | the library | `R` | refresh the list (library) |
+| `K` | programmed moves | | |
+| `F11` | fullscreen (button) | `Esc` | close a sheet first |
 | `Z` | zebra | `P` | peaking |
 | `L` | colour cube | `M` | mirror |
 
@@ -49,10 +163,19 @@ takes one position, not a stream of presses, so the held directions are added up
 as one. The stick is re-sent every 200 ms while held, which is a keepalive rather than
 the thing that makes it move, and it rests the moment the key comes up.
 
-## Touch
+## Pointer controls
 
-A finger drags a tracking box, exactly as the mouse does. That is the whole of it —
-there are no on-screen controls, and the chrome is read-only. Everything else is keys.
+The bars are a desktop operator surface, not scaled-up phone chrome. The record button,
+`STILL`, flip, `CTR` and the mode strip carry the existing typed commands. The gimbal
+follow chip and `FOLLOW` button send the same SET frames as the mobile gimbal sheet
+(`Follow` → `Tilt locked` → `FPV`). The format chip opens the format sheet. The joystick is a **hold** control: pressing or moving it
+sends the matching stick axes and release, cancellation, focus loss, and window close
+send a centred stick immediately. Controls are at least 44 px, and they are greyed and
+disabled while the link is recovering or failed.
+
+A finger drags a tracking box on the unobstructed fitted image, exactly as the mouse
+does. A press that starts in a control stays a control — it can never become tracking.
+Keyboard shortcuts remain available.
 
 Touch is handled explicitly rather than left to the system: once winit registers a window
 for touch, Windows stops synthesising mouse clicks from taps, so without this a finger on

@@ -394,17 +394,26 @@ public enum MediaManifest {
 
     /// Split one collected blob into SD (ctr 1) and internal (ctr 2) when the camera echoed counters.
     public static func decodeStores(assembler: MediaChunkAssembler) -> [MediaFile] {
-        let sdBytes = assembler.assembled(counter: MediaListCommand.sdCounter)
-        let internalBytes = assembler.assembled(counter: MediaListCommand.internalCounter)
+        decodeStores(
+            sd: assembler.assembled(counter: MediaListCommand.sdCounter),
+            internal: assembler.assembled(counter: MediaListCommand.internalCounter),
+            merged: assembler.assembledMerged())
+    }
+
+    /// The same split for a shell that collected the two counters itself — the desktop
+    /// facade. `merged` is every chunk in counter order, used when the counters were not
+    /// echoed or both stores answered with the same list.
+    public static func decodeStores(sd sdBytes: [UInt8], internal internalBytes: [UInt8], merged: [UInt8])
+        -> [MediaFile]
+    {
         let sd = sdBytes.isEmpty ? [] : decode(sdBytes)
         let intern = internalBytes.isEmpty ? [] : decode(internalBytes)
         let sdPaths = Set(sd.map(\.path))
         let inPaths = Set(intern.map(\.path))
         if !sd.isEmpty, !intern.isEmpty, sdPaths == inPaths {
-            return stampStorage(decode(assembler.assembledMerged()), fallback: true)
+            return stampStorage(decode(merged), fallback: true)
         }
         if sd.isEmpty, intern.isEmpty {
-            let merged = assembler.assembledMerged()
             return merged.isEmpty ? [] : stampStorage(decode(merged), fallback: true)
         }
         var out: [MediaFile] = []

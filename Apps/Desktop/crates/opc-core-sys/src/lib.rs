@@ -244,6 +244,15 @@ pub const OPC_CAM_GET_WIFI_SSID: i32 = 61;
 pub const OPC_CAM_GET_WIFI_PASSWORD: i32 = 62;
 pub const OPC_CAM_ENTER_PLAYBACK: i32 = 63;
 pub const OPC_CAM_EXIT_PLAYBACK: i32 = 64;
+pub const OPC_CAM_SET_EXPO_MODE: i32 = 65;
+pub const OPC_CAM_SET_AUDIO_CHANNEL: i32 = 66;
+pub const OPC_CAM_SET_VOCAL_BOOST: i32 = 67;
+pub const OPC_CAM_MEDIA_LIST: i32 = 68;
+pub const OPC_CAM_MEDIA_LIST_TRIGGER: i32 = 69;
+pub const OPC_CAM_MEDIA_DELETE: i32 = 70;
+pub const OPC_CAM_MEDIA_FAVORITE: i32 = 71;
+pub const OPC_CAM_PLAYBACK_SPECIAL: i32 = 72;
+pub const OPC_CAM_GIMBAL_TIMED_TARGET: i32 = 73;
 
 pub const OPC_PKT_HANDSHAKE: u8 = 0x00;
 pub const OPC_PKT_TELEMETRY: u8 = 0x01;
@@ -291,6 +300,10 @@ pub struct OpcCameraStatus {
     pub available_format_count: i32,
     pub available_color_count: i32,
     pub reserved: i32,
+    pub gimbal_yaw_tenth: i32,
+    pub gimbal_pitch_tenth: i32,
+    pub gimbal_native_pitch_tenth: i32,
+    pub gimbal_attitude_seq: i32,
     pub available_shutter: [i32; OPC_STATUS_LIST_CAP],
     pub available_iso: [i32; OPC_STATUS_LIST_CAP],
     pub available_format_resolution: [i32; OPC_STATUS_LIST_CAP],
@@ -658,6 +671,19 @@ extern "C" {
     pub fn opc_status_timecode(handle: *mut c_void, out: *mut u8, capacity: usize) -> i64;
     pub fn opc_status_firmware(handle: *mut c_void, out: *mut u8, capacity: usize) -> i64;
     pub fn opc_status_subscribe_keys(out: *mut u8, capacity: usize) -> i64;
+
+    /// Decodes a catalogue page (counter 1 blob, counter 2 blob, every chunk merged) to a
+    /// JSON array of media records. Reports the size needed like every other emitter.
+    pub fn opc_media_decode(
+        sd: *const u8,
+        sd_count: usize,
+        internal: *const u8,
+        internal_count: usize,
+        merged: *const u8,
+        merged_count: usize,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
 }
 
 /// Reads a NUL-terminated string out of one of the fixed character fields.
@@ -714,11 +740,12 @@ mod layout {
     #[test]
     fn the_status_record_matches_the_header_file() {
         assert_eq!(OPC_STATUS_LIST_CAP, 32);
-        assert_eq!(size_of::<OpcCameraStatus>(), 768);
-        assert_eq!(offset_of!(OpcCameraStatus, available_shutter), 128);
+        assert_eq!(size_of::<OpcCameraStatus>(), 784);
+        assert_eq!(offset_of!(OpcCameraStatus, gimbal_yaw_tenth), 128);
+        assert_eq!(offset_of!(OpcCameraStatus, available_shutter), 144);
         assert_eq!(
             offset_of!(OpcCameraStatus, available_color),
-            128 + 4 * 32 * 4
+            144 + 4 * 32 * 4
         );
     }
 
