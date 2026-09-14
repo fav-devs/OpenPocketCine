@@ -509,6 +509,27 @@ extern "C" {
     pub fn opc_lut_map(handle: *mut c_void, red: f32, green: f32, blue: f32, out: *mut f32) -> i32;
     pub fn opc_lut_builtin_names(out: *mut u8, capacity: usize) -> i64;
 
+    /// A false-colour lattice as a cube handle: `paint` non-zero for the zone colours,
+    /// zero for the weight. Null for a scale the core does not know.
+    pub fn opc_false_color_cube(scale: i32, color_mode: i32, iso: i32, paint: i32) -> *mut c_void;
+    /// Writes four floats: zebra highlight, midtone centre and half-width on the feed's
+    /// axis, and the peaking gate scale.
+    pub fn opc_assist_scalars(
+        color_mode: i32,
+        iso: i32,
+        highlight_ire: f32,
+        midtone_ire: f32,
+        out: *mut f32,
+    ) -> i32;
+    /// The scale's legend, one `label<TAB>r<TAB>g<TAB>b` line per zone.
+    pub fn opc_false_color_legend(
+        scale: i32,
+        color_mode: i32,
+        iso: i32,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+
     pub fn opc_camera_command(
         kind: i32,
         seq: u16,

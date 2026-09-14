@@ -9,14 +9,17 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use opc_camera::{Command, Status};
-use opc_chrome::{Chrome, ChromeIntent, ChromeState, Screen};
+use opc_chrome::{AssistChip, Chrome, ChromeIntent, ChromeState, Overlays, Screen};
 use opc_media::MediaFile;
 
+use crate::assists::{
+    guide_rect, AssistOptions, AssistTool, ZebraSteps, ZEBRA_HIGHLIGHT_STEPS, ZEBRA_MIDTONE_STEPS,
+};
 use crate::library::{Library, MediaAction, Player};
 use crate::luts::{LutChoice, LutMenu};
 use crate::moves::{MoveEngine, Program, Waypoint};
 use crate::sheets::{self, Pick, Prefs, SheetKind, Slot};
-use opc_render::{letterbox, GradeOptions, Peaking, PeakingSense, Rgba, Zebra};
+use opc_render::{letterbox, AssistScalars, FalseColorScale, GradeOptions, Peaking, Rgba, Zebra};
 use opc_ui::{
     next_frame_rate, next_resolution, Action, Controls, Countdown, Drag, Fit, Hud, Key, Phase,
     Stick,
@@ -122,20 +125,38 @@ pub struct Toggles {
     pub peaking: bool,
     pub grade: bool,
     pub mirror: bool,
+    pub false_color: bool,
+    pub grid: bool,
+    pub guides: bool,
+    pub cross: bool,
 }
 
 impl Toggles {
-    fn options(self) -> GradeOptions {
+    /// What the feed pass paints. The zebra thresholds are the operator's IRE put on
+    /// the feed's axis by the core; without the core linked they are read as a plain
+    /// fraction, which is right for Rec.709 and generous for log.
+    fn options(self, assists: &AssistOptions, scalars: Option<AssistScalars>) -> GradeOptions {
+        let zebra = assists.zebra;
+        let (highlight, midtone) = match scalars {
+            Some(scalars) => (scalars.highlight, (scalars.midtone, scalars.midtone_half)),
+            None => (
+                zebra.highlight_ire / 100.0,
+                (zebra.midtone_ire / 100.0, 0.05),
+            ),
+        };
         GradeOptions {
             mirror: self.mirror,
             zebra: self.zebra.then(|| Zebra {
-                highlight_color: [1.0, 1.0, 1.0, 1.0],
-                ..Zebra::highlight(0.94)
+                highlight: zebra.highlight_on.then_some(highlight),
+                midtone: zebra.midtone_on.then_some(midtone),
+                highlight_color: zebra.highlight_color.rgba(),
+                midtone_color: zebra.midtone_color.rgba(),
             }),
             peaking: self.peaking.then(|| Peaking {
-                sense: PeakingSense::default(),
-                color: [1.0, 0.0, 0.0, 1.0],
+                sense: assists.peaking_sense,
+                color: assists.peaking_color.rgba(),
             }),
+            false_color: self.false_color,
             ..GradeOptions::default()
         }
     }
@@ -145,6 +166,7 @@ impl Toggles {
             ("LUT", self.grade),
             ("ZEB", self.zebra),
             ("PEAK", self.peaking),
+            ("FALSE", self.false_color),
             ("MIR", self.mirror),
         ]
         .into_iter()
@@ -178,8 +200,14 @@ pub struct Shell {
     /// Tracking boxes are numbered so the camera can tell one request from the next.
     next_track_id: u16,
     chrome_visible: bool,
-    /// The window has to be told to load or drop the cube, which is not a per-frame job.
-    lut_pending: Option<LutRequest>,
+    /// The window has to be told to load or drop cubes, which is not a per-frame job.
+    lut_pending: VecDeque<LutRequest>,
+    /// Every assist tool's options.
+    assists: AssistOptions,
+    /// The assist toolbar is showing under the top bar.
+    assist_bar: bool,
+    /// Which false-colour lattices the window was last asked to load.
+    false_color_key: Option<FalseColorKey>,
     stick_sent_at: f64,
     presented: VecDeque<f64>,
     /// The rasterised chrome, kept until something it draws changes.
@@ -227,6 +255,16 @@ pub enum LutRequest {
     Toggle(bool),
     /// Load this cube and switch it on (or off, for `Off`).
     Load(LutChoice),
+    /// Load the false-colour lattices for this scale, colour mode and ISO, or drop them.
+    FalseColor(Option<FalseColorKey>),
+}
+
+/// Which false-colour lattices the window should hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FalseColorKey {
+    pub scale: FalseColorScale,
+    pub color_mode: i32,
+    pub iso: i32,
 }
 
 impl Default for Shell {
@@ -255,7 +293,10 @@ impl Shell {
             source: None,
             next_track_id: 1,
             chrome_visible: true,
-            lut_pending: None,
+            lut_pending: VecDeque::new(),
+            assists: AssistOptions::default(),
+            assist_bar: false,
+            false_color_key: None,
             stick_sent_at: f64::NEG_INFINITY,
             presented: VecDeque::new(),
             chrome: None,
@@ -302,13 +343,186 @@ impl Shell {
     }
 
     pub fn grade_options(&self) -> GradeOptions {
-        self.toggles.options()
+        self.toggles.options(&self.assists, self.scalars())
     }
 
-    /// Whether the cube should be loaded or dropped, once. The window does that between
-    /// frames because it waits for the device to go idle.
+    /// Every tool's options, as the sheets set them.
+    pub fn assists(&self) -> AssistOptions {
+        self.assists
+    }
+
+    /// The assist toolbar is showing.
+    pub fn assist_bar_open(&self) -> bool {
+        self.assist_bar
+    }
+
+    /// Whether `tool` is on, as its chip shows it.
+    pub fn tool_on(&self, tool: AssistTool) -> bool {
+        sheets::tool_on(tool, self.toggles)
+    }
+
+    /// Whether a cube should be loaded or dropped, once each. The window does that
+    /// between frames because it waits for the device to go idle.
     pub fn take_lut_change(&mut self) -> Option<LutRequest> {
-        self.lut_pending.take()
+        self.lut_pending.pop_front()
+    }
+
+    /// The body's colour mode and ISO, as the core's assist calls want them.
+    fn color_axis(&self) -> (i32, i32) {
+        let status = &self.hud.status;
+        (
+            i32::from(status.color_mode.unwrap_or(0x3F)),
+            status.iso.unwrap_or(0),
+        )
+    }
+
+    /// The zebra thresholds on the feed's axis, from the core. `None` without it.
+    #[cfg(opc_core_linked)]
+    fn scalars(&self) -> Option<AssistScalars> {
+        let (color_mode, iso) = self.color_axis();
+        let zebra = self.assists.zebra;
+        opc_render::assist_scalars(color_mode, iso, zebra.highlight_ire, zebra.midtone_ire)
+    }
+
+    #[cfg(not(opc_core_linked))]
+    fn scalars(&self) -> Option<AssistScalars> {
+        None
+    }
+
+    /// Where each zebra chip lands on the feed, for the sheet's 0–255 labels.
+    #[cfg(opc_core_linked)]
+    fn zebra_steps(&self) -> ZebraSteps {
+        let (color_mode, iso) = self.color_axis();
+        let native = |ire: f32| {
+            opc_render::assist_scalars(color_mode, iso, ire, ire)
+                .map_or(ire / 100.0, |scalars| scalars.highlight)
+        };
+        ZebraSteps {
+            highlight: ZEBRA_HIGHLIGHT_STEPS.map(native),
+            midtone: ZEBRA_MIDTONE_STEPS.map(native),
+        }
+    }
+
+    #[cfg(not(opc_core_linked))]
+    fn zebra_steps(&self) -> ZebraSteps {
+        let _ = (ZEBRA_HIGHLIGHT_STEPS, ZEBRA_MIDTONE_STEPS);
+        ZebraSteps::default()
+    }
+
+    /// The false-colour key: one swatch per zone, from the core. Empty without it.
+    #[cfg(opc_core_linked)]
+    fn legend(&self) -> Vec<opc_chrome::LegendBand> {
+        let (color_mode, iso) = self.color_axis();
+        opc_render::false_color_legend(self.assists.false_color.scale, color_mode, iso)
+            .into_iter()
+            .map(|band| opc_chrome::LegendBand {
+                label: band.label,
+                rgb: band.rgb,
+            })
+            .collect()
+    }
+
+    #[cfg(not(opc_core_linked))]
+    fn legend(&self) -> Vec<opc_chrome::LegendBand> {
+        Vec::new()
+    }
+
+    /// Which lattices false colour wants right now, or none while it is off.
+    fn false_color_wanted(&self) -> Option<FalseColorKey> {
+        let (color_mode, iso) = self.color_axis();
+        self.toggles.false_color.then_some(FalseColorKey {
+            scale: self.assists.false_color.scale,
+            color_mode,
+            iso,
+        })
+    }
+
+    /// Asks the window for new lattices when the scale, colour mode or ISO moved.
+    fn sync_false_color(&mut self) {
+        let wanted = self.false_color_wanted();
+        if wanted != self.false_color_key {
+            self.false_color_key = wanted;
+            self.lut_pending.push_back(LutRequest::FalseColor(wanted));
+        }
+    }
+
+    /// A toolbar chip tapped: the tool flips, and whatever it paints follows.
+    fn tap_tool(&mut self, tool: AssistTool) -> Vec<Intent> {
+        self.chrome_stale = true;
+        match tool {
+            AssistTool::Lut => return self.act(Action::ToggleGrade, 0.0),
+            AssistTool::Peak => return self.act(Action::TogglePeaking, 0.0),
+            AssistTool::Zebra => return self.act(Action::ToggleZebra, 0.0),
+            AssistTool::Mirror => return self.act(Action::ToggleMirror, 0.0),
+            AssistTool::False => {
+                self.toggles.false_color = !self.toggles.false_color;
+                self.sync_false_color();
+            }
+            AssistTool::Guides => self.toggles.guides = !self.toggles.guides,
+            AssistTool::Grid => self.toggles.grid = !self.toggles.grid,
+            AssistTool::Cross => self.toggles.cross = !self.toggles.cross,
+            AssistTool::Wave
+            | AssistTool::Parade
+            | AssistTool::Histo
+            | AssistTool::Vector
+            | AssistTool::Lights
+            | AssistTool::Nd
+            | AssistTool::Audio => {}
+        }
+        self.refresh_assists();
+        Vec::new()
+    }
+
+    /// The toolbar's chips, in the phones' order.
+    fn assist_chips(&self) -> Vec<AssistChip> {
+        AssistTool::TOOLBAR
+            .iter()
+            .map(|tool| AssistChip {
+                label: tool.label().to_string(),
+                on: self.tool_on(*tool),
+                available: tool.available(),
+                group: tool.group(),
+            })
+            .collect()
+    }
+
+    /// What is drawn over the picture, at the fitted rectangle.
+    fn overlays(&self) -> Overlays {
+        let fit = self.hud.fit.unwrap_or(opc_ui::Fit {
+            x: 0.0,
+            y: 0.0,
+            width: f64::from(self.window.0),
+            height: f64::from(self.window.1),
+        });
+        let feed = (
+            fit.x as f32,
+            fit.y as f32,
+            fit.width as f32,
+            fit.height as f32,
+        );
+        let grid = self.assists.grid;
+        let guides = self.assists.guides;
+        Overlays {
+            grid_thirds: self.toggles.grid && grid.thirds,
+            grid_phi: self.toggles.grid && grid.phi,
+            grid_diagonal: self.toggles.grid && grid.diagonal,
+            guides: if self.toggles.guides {
+                guides
+                    .frames()
+                    .into_iter()
+                    .map(|aspect| guide_rect(feed, aspect.ratio()))
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            guide_mask: guides.mask,
+            crosshair: self.toggles.cross,
+            legend: if self.toggles.false_color && self.assists.false_color.reference {
+                self.legend()
+            } else {
+                Vec::new()
+            },
+        }
     }
 
     /// The names the LUT row offers, found by the window.
@@ -319,6 +533,12 @@ impl Shell {
 
     pub fn lut_choice(&self) -> &LutChoice {
         &self.lut_choice
+    }
+
+    /// Any chip, as the sheet would pick it. For tests that do not want to find the
+    /// chip by coordinate.
+    pub fn pick_for_test(&mut self, pick: Pick) -> Vec<Intent> {
+        self.apply_pick(pick)
     }
 
     /// The ramp setting, as the sheet would set it. For tests that do not want to
@@ -367,6 +587,8 @@ impl Shell {
         }
         self.hud.status = status;
         self.chrome_stale = true;
+        // A colour-mode or ISO change moves the false-colour zones.
+        self.sync_false_color();
     }
 
     /// The body's live pose, when it has reported one.
@@ -528,6 +750,8 @@ impl Shell {
             program: &self.program,
             live_pose: self.live_pose(),
             move_running: self.move_running(),
+            assists: self.assists,
+            zebra_steps: self.zebra_steps(),
         }
     }
 
@@ -541,7 +765,70 @@ impl Shell {
             Pick::Grade => self.act(Action::ToggleGrade, 0.0),
             Pick::Mirror => self.act(Action::ToggleMirror, 0.0),
             Pick::Grid(on) => {
-                self.prefs.grid = on;
+                self.toggles.grid = on;
+                self.refresh_assists();
+                Vec::new()
+            }
+            Pick::Assist(tool) => self.tap_tool(tool),
+            Pick::FalseColorScale(scale) => {
+                self.assists.false_color.scale = scale;
+                self.sync_false_color();
+                Vec::new()
+            }
+            Pick::FalseColorReference(on) => {
+                self.assists.false_color.reference = on;
+                Vec::new()
+            }
+            Pick::PeakingColor(color) => {
+                self.assists.peaking_color = color;
+                Vec::new()
+            }
+            Pick::PeakingSense(sense) => {
+                self.assists.peaking_sense = sense;
+                Vec::new()
+            }
+            Pick::ZebraUnits(ire) => {
+                self.assists.zebra.ire_units = ire;
+                Vec::new()
+            }
+            Pick::ZebraHighlightOn(on) => {
+                self.assists.zebra.highlight_on = on;
+                Vec::new()
+            }
+            Pick::ZebraHighlightIre(ire) => {
+                self.assists.zebra.highlight_ire = ire;
+                Vec::new()
+            }
+            Pick::ZebraHighlightColor(paint) => {
+                self.assists.zebra.highlight_color = paint;
+                Vec::new()
+            }
+            Pick::ZebraMidtoneOn(on) => {
+                self.assists.zebra.midtone_on = on;
+                Vec::new()
+            }
+            Pick::ZebraMidtoneIre(ire) => {
+                self.assists.zebra.midtone_ire = ire;
+                Vec::new()
+            }
+            Pick::ZebraMidtoneColor(paint) => {
+                self.assists.zebra.midtone_color = paint;
+                Vec::new()
+            }
+            Pick::GridLine(line, on) => {
+                self.assists.grid.set(line, on);
+                Vec::new()
+            }
+            Pick::GuideFamily(family) => {
+                self.assists.guides.family = family;
+                Vec::new()
+            }
+            Pick::GuideAspect(aspect) => {
+                self.assists.guides.toggle(aspect);
+                Vec::new()
+            }
+            Pick::GuideMask(on) => {
+                self.assists.guides.mask = on;
                 Vec::new()
             }
             Pick::Timecode(on) => {
@@ -579,8 +866,9 @@ impl Shell {
             }
             Pick::Lut(choice) => {
                 self.toggles.grade = choice != LutChoice::Off;
+                self.refresh_assists();
                 self.lut_choice = choice.clone();
-                self.lut_pending = Some(LutRequest::Load(choice));
+                self.lut_pending.push_back(LutRequest::Load(choice));
                 self.refresh_assists();
                 Vec::new()
             }
@@ -785,7 +1073,8 @@ impl Shell {
             }
             Action::ToggleGrade => {
                 self.toggles.grade = !self.toggles.grade;
-                self.lut_pending = Some(LutRequest::Toggle(self.toggles.grade));
+                self.lut_pending
+                    .push_back(LutRequest::Toggle(self.toggles.grade));
                 self.refresh_assists();
                 Vec::new()
             }
@@ -803,6 +1092,10 @@ impl Shell {
             }
             Action::ToggleMoves => {
                 self.toggle_sheet(SheetKind::Moves);
+                Vec::new()
+            }
+            Action::ToggleAssists => {
+                self.assist_bar = !self.assist_bar;
                 Vec::new()
             }
             Action::ClearTracking => {
@@ -1021,6 +1314,20 @@ impl Shell {
                 ChromeIntent::OpenFormat => self.toggle_sheet(SheetKind::Format),
                 ChromeIntent::OpenExposure => self.toggle_sheet(SheetKind::Exposure),
                 ChromeIntent::OpenMenu => self.toggle_sheet(SheetKind::Settings),
+                ChromeIntent::AssistBarToggle => {
+                    self.assist_bar = !self.assist_bar;
+                    self.chrome_stale = true;
+                }
+                ChromeIntent::AssistTap(index) => {
+                    if let Some(tool) = AssistTool::TOOLBAR.get(index) {
+                        fired.extend(self.tap_tool(*tool));
+                    }
+                }
+                ChromeIntent::AssistConfigure(index) => {
+                    if let Some(tool) = AssistTool::TOOLBAR.get(index) {
+                        self.toggle_sheet(SheetKind::Assist(*tool));
+                    }
+                }
                 ChromeIntent::SheetClose => self.close_sheet(),
                 ChromeIntent::SheetTab(tab) => {
                     self.sheet_tab = tab;
@@ -1523,7 +1830,8 @@ impl Shell {
             } else {
                 String::new()
             };
-            let grid_on = self.prefs.grid;
+            let overlays = self.overlays();
+            let assist_bar = self.assist_bar.then(|| self.assist_chips());
             let move_text = self.move_text(now);
             let screen = self.screen;
             let grid_width = self.window.0 as f32;
@@ -1586,7 +1894,8 @@ impl Shell {
                     countdown: second,
                     fps_shown: self.hud.fps,
                     timecode,
-                    grid_on,
+                    overlays,
+                    assist_bar,
                     move_text,
                     sheet,
                     screen,

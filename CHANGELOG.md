@@ -15,8 +15,12 @@ All notable changes to this project are documented here. The format is based on
   ramp, the Assist tab a LUT row fed by the official cubes and a `.cube`
   drop folder, and the countdown length. `K` opens programmed moves: A, B
   and C from the live pose, per-leg durations, exact legs on native timed
-  targets with the approach, hold and missing-sector guard. Unqualified on a
-  physical body.
+  targets with the approach, hold and missing-sector guard. `A` shows the
+  phones' assist toolbar: false colour (the core's CineStop / EL Zone / IRE /
+  Limits lattices, now built in `OpenPocketViewCore` for every shell, with a
+  reference key), peaking sensitivity and colour, zebra levels and colours on
+  the feed's axis, thirds / phi / diagonal grid, guide frames with a mask, and
+  the crosshair. Unqualified on a physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

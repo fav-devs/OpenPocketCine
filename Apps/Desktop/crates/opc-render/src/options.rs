@@ -95,6 +95,43 @@ impl Default for Peaking {
     }
 }
 
+/// Which false-colour scale to paint, as the core numbers them.
+///
+/// The zones themselves come from the core as two cubes (see [`crate::Lut::false_color`]);
+/// this only names them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FalseColorScale {
+    #[default]
+    Stops,
+    Ire,
+    Limits,
+    ElZone,
+}
+
+impl FalseColorScale {
+    pub const ALL: [Self; 4] = [Self::Stops, Self::ElZone, Self::Ire, Self::Limits];
+
+    /// The ordinal `opc_false_color_cube` takes (`OPC_FALSE_COLOR_*`).
+    pub fn ordinal(self) -> i32 {
+        match self {
+            Self::Stops => 0,
+            Self::Ire => 1,
+            Self::Limits => 2,
+            Self::ElZone => 3,
+        }
+    }
+
+    /// The menu label the phones use.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Stops => "CineStop",
+            Self::Ire => "IRE",
+            Self::Limits => "Limits",
+            Self::ElZone => "EL Zone",
+        }
+    }
+}
+
 /// Everything the feed pipeline needs to know for one frame.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct GradeOptions {
@@ -108,6 +145,8 @@ pub struct GradeOptions {
     pub split_vertical: bool,
     pub zebra: Option<Zebra>,
     pub peaking: Option<Peaking>,
+    /// Paint the false-colour cubes the renderer was last given.
+    pub false_color: bool,
 }
 
 impl GradeOptions {

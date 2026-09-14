@@ -9,6 +9,7 @@ use std::ffi::{c_void, CString};
 use opc_core_sys as sys;
 
 use crate::error::RenderError;
+use crate::options::FalseColorScale;
 
 /// A parsed colour cube, owned by the core.
 #[derive(Debug)]
@@ -40,6 +41,27 @@ impl Lut {
             } else {
                 detail
             }));
+        }
+        Ok(Self { handle })
+    }
+
+    /// One of the two false-colour lattices for `scale` under the body's colour mode
+    /// and ISO: the zone paint, or the weight that says how much of it shows.
+    pub fn false_color(
+        scale: FalseColorScale,
+        color_mode: i32,
+        iso: i32,
+        paint: bool,
+    ) -> Result<Self, RenderError> {
+        // Safety: plain integers in; the core returns null for a scale it does not know.
+        let handle = unsafe {
+            sys::opc_false_color_cube(scale.ordinal(), color_mode, iso, i32::from(paint))
+        };
+        if handle.is_null() {
+            return Err(RenderError::Lut(format!(
+                "The core has no {} false-colour lattice.",
+                scale.label()
+            )));
         }
         Ok(Self { handle })
     }
@@ -118,4 +140,102 @@ pub fn built_in_names() -> Vec<String> {
         .filter(|name| !name.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+/// Zebra thresholds and the peaking gate on the feed's own axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AssistScalars {
+    /// Highlight threshold on the feed's 0…1 codes.
+    pub highlight: f32,
+    /// Midtone band centre and half-width on the same axis.
+    pub midtone: f32,
+    pub midtone_half: f32,
+    /// How much larger a display-referred gradient reads than a log one.
+    pub peaking_gate: f32,
+}
+
+/// Where the operator's IRE thresholds land on the feed for this colour mode and ISO.
+/// `None` when the core refuses, which only a null destination can make it do.
+pub fn assist_scalars(
+    color_mode: i32,
+    iso: i32,
+    highlight_ire: f32,
+    midtone_ire: f32,
+) -> Option<AssistScalars> {
+    let mut out = [0.0_f32; 4];
+    // Safety: `out` has the four slots the core writes.
+    let status = unsafe {
+        sys::opc_assist_scalars(
+            color_mode,
+            iso,
+            highlight_ire,
+            midtone_ire,
+            out.as_mut_ptr(),
+        )
+    };
+    (status == sys::OPC_RELAY_OK).then_some(AssistScalars {
+        highlight: out[0],
+        midtone: out[1],
+        midtone_half: out[2],
+        peaking_gate: out[3],
+    })
+}
+
+/// One zone of a false-colour legend.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegendBand {
+    pub label: String,
+    pub rgb: [f32; 3],
+}
+
+/// The zones a scale paints, darkest first, as the core lists them.
+pub fn false_color_legend(scale: FalseColorScale, color_mode: i32, iso: i32) -> Vec<LegendBand> {
+    // Safety: probing with a null destination only reports the size needed.
+    let needed = unsafe {
+        sys::opc_false_color_legend(scale.ordinal(), color_mode, iso, std::ptr::null_mut(), 0)
+    };
+    if needed <= 0 {
+        return Vec::new();
+    }
+    let mut bytes = vec![0u8; needed as usize];
+    // Safety: `bytes` has exactly the capacity the core just asked for.
+    let written = unsafe {
+        sys::opc_false_color_legend(
+            scale.ordinal(),
+            color_mode,
+            iso,
+            bytes.as_mut_ptr(),
+            bytes.len(),
+        )
+    };
+    if written != needed {
+        return Vec::new();
+    }
+    parse_legend(&String::from_utf8_lossy(&bytes))
+}
+
+/// `label<TAB>r<TAB>g<TAB>b` lines, as the core emits them.
+pub fn parse_legend(text: &str) -> Vec<LegendBand> {
+    text.lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\t');
+            let label = fields.next()?.to_string();
+            let mut channel = || fields.next()?.trim().parse::<f32>().ok();
+            let rgb = [channel()?, channel()?, channel()?];
+            Some(LegendBand { label, rgb })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_legend_line_is_a_label_and_three_channels() {
+        let bands = parse_legend("18%\t0.5\t0.5\t0.5\nclip\t1\t0\t0\nbad line");
+        assert_eq!(bands.len(), 2);
+        assert_eq!(bands[0].label, "18%");
+        assert_eq!(bands[1].rgb, [1.0, 0.0, 0.0]);
+    }
 }

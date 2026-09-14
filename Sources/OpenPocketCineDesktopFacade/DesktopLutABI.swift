@@ -7,7 +7,7 @@ import OpenPocketViewCore
 /// The renderer needs a 3D texture, not a parser. Everything about reading a cube —
 /// the size range, the sample-count check, Resolve's 65³ resample down to 64³ — stays
 /// in `CubeLUT` so the desktop grade matches what the phones show.
-private final class CubeBox {
+final class CubeBox {
     let lut: CubeLUT
 
     init(_ lut: CubeLUT) {
@@ -20,7 +20,7 @@ private func cube(_ handle: UnsafeMutableRawPointer?) -> CubeLUT? {
     return Unmanaged<CubeBox>.fromOpaque(handle).takeUnretainedValue().lut
 }
 
-private func retain(_ lut: CubeLUT) -> UnsafeMutableRawPointer {
+func retainCube(_ lut: CubeLUT) -> UnsafeMutableRawPointer {
     Unmanaged.passRetained(CubeBox(lut)).toOpaque()
 }
 
@@ -45,7 +45,7 @@ func opc_lut_parse(
         return nil
     }
     do {
-        return retain(try CubeLUT.parse(source).colorCube)
+        return retainCube(try CubeLUT.parse(source).colorCube)
     } catch let failure as CubeLUTParseError {
         report(failure.errorDescription ?? "That .cube file could not be read.")
         return nil
@@ -59,7 +59,7 @@ func opc_lut_parse(
 @_cdecl("opc_lut_builtin")
 func opc_lut_builtin(_ name: UnsafePointer<CChar>?, _ size: Int32) -> UnsafeMutableRawPointer? {
     guard let name, let look = BuiltInLook(rawValue: String(cString: name)) else { return nil }
-    return retain(look.cube(size: Int(size)))
+    return retainCube(look.cube(size: Int(size)))
 }
 
 @_cdecl("opc_lut_destroy")
@@ -96,7 +96,7 @@ func opc_lut_resampled(_ handle: UnsafeMutableRawPointer?, _ target: Int32)
     -> UnsafeMutableRawPointer?
 {
     guard let lut = cube(handle) else { return nil }
-    return retain(lut.resampled(to: Int(target)))
+    return retainCube(lut.resampled(to: Int(target)))
 }
 
 /// CPU reference for one sample, so a renderer can be checked against the core.

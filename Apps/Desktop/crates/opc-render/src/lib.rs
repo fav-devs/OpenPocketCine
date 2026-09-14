@@ -20,7 +20,12 @@ mod resources;
 mod still;
 
 pub use error::RenderError;
-pub use lut::{built_in_names, Lut};
+pub use lut::{
+    assist_scalars, built_in_names, false_color_legend, parse_legend, AssistScalars, LegendBand,
+    Lut,
+};
 pub use present::Presented;
-pub use renderer::{letterbox, FeedRenderer, GradeOptions, Peaking, PeakingSense, Rgba, Zebra};
+pub use renderer::{
+    letterbox, FalseColorScale, FeedRenderer, GradeOptions, Peaking, PeakingSense, Rgba, Zebra,
+};
 pub use still::{encode, write_png};

@@ -923,3 +923,147 @@ fn a_take_captures_points_from_the_live_pose_counts_down_and_sends_timed_targets
     assert!(cancel.contains(&Command::GimbalTimedStop), "{cancel:?}");
     assert!(!shell.move_running());
 }
+
+// ── The assist toolbar ───────────────────────────────────────────────────────
+
+/// Where a toolbar chip's centre lands at 1280 × 720: chips are 72 px wide on a 76 px
+/// pitch from 12 px in, with 12 px more per group, in a 44 px strip under the top bar.
+fn chip_centre(index: usize, group: usize) -> (f64, f64) {
+    (
+        12.0 + index as f64 * 76.0 + group as f64 * 12.0 + 36.0,
+        56.0 + 22.0,
+    )
+}
+
+#[test]
+fn a_shows_the_toolbar_and_a_chip_flips_its_tool() {
+    use opc_monitor::AssistTool;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    assert!(!shell.assist_bar_open());
+    assert!(shell.press(Key::Char('a'), 0.0).is_empty());
+    assert!(shell.assist_bar_open());
+    shell.chrome(0.0);
+    // ZEBRA is the fourth chip, in the second group.
+    let (x, y) = chip_centre(3, 1);
+    assert!(shell.is_control(x, y), "the strip is a control, not a box");
+    shell.control_down(x, y, 0.0).expect("chip");
+    assert!(
+        shell.control_up(x, y, 0.0).is_empty(),
+        "assists never reach the camera"
+    );
+    assert!(shell.tool_on(AssistTool::Zebra));
+    assert!(shell.toggles().zebra);
+    // The zoom dial moved down under the strip, and still counts as a control.
+    assert!(shell.is_control(640.0, 56.0 + 44.0 + 30.0));
+    // A greyed scope chip does nothing.
+    let (x, y) = chip_centre(4, 1);
+    shell.control_down(x, y, 0.0);
+    shell.control_up(x, y, 0.0);
+    assert!(!shell.tool_on(AssistTool::Wave));
+    shell.press(Key::Char('a'), 0.0);
+    assert!(!shell.assist_bar_open());
+}
+
+#[test]
+fn false_colour_asks_the_window_for_lattices_once_per_scale_and_colour_mode() {
+    use opc_monitor::sheets::Pick;
+    use opc_monitor::{AssistTool, FalseColorKey, LutRequest};
+    use opc_render::FalseColorScale;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    shell.press(Key::Char('a'), 0.0);
+    shell.chrome(0.0);
+    let (x, y) = chip_centre(2, 0);
+    shell.control_down(x, y, 0.0);
+    shell.control_up(x, y, 0.0);
+    assert!(shell.tool_on(AssistTool::False));
+    assert!(shell.grade_options().false_color);
+    assert_eq!(
+        shell.take_lut_change(),
+        Some(LutRequest::FalseColor(Some(FalseColorKey {
+            scale: FalseColorScale::Stops,
+            color_mode: 0x3F,
+            iso: 0,
+        })))
+    );
+    assert_eq!(shell.take_lut_change(), None, "nothing moved");
+    // The body switching to D-Log moves every zone, so the lattices are rebuilt.
+    let status = Status {
+        color_mode: Some(0x17),
+        iso: Some(400),
+        ..Status::default()
+    };
+    shell.set_status(status.clone());
+    assert_eq!(
+        shell.take_lut_change(),
+        Some(LutRequest::FalseColor(Some(FalseColorKey {
+            scale: FalseColorScale::Stops,
+            color_mode: 0x17,
+            iso: 400,
+        })))
+    );
+    shell.set_status(status);
+    assert_eq!(
+        shell.take_lut_change(),
+        None,
+        "the same status asks for nothing"
+    );
+    shell.pick_for_test(Pick::FalseColorScale(FalseColorScale::ElZone));
+    assert!(matches!(
+        shell.take_lut_change(),
+        Some(LutRequest::FalseColor(Some(FalseColorKey {
+            scale: FalseColorScale::ElZone,
+            ..
+        })))
+    ));
+    shell.pick_for_test(Pick::Assist(AssistTool::False));
+    assert_eq!(shell.take_lut_change(), Some(LutRequest::FalseColor(None)));
+    assert!(!shell.grade_options().false_color);
+}
+
+#[test]
+fn a_chip_long_pressed_opens_its_sheet_and_the_sheet_sets_its_options() {
+    use opc_monitor::assists::{GridLine, ZebraPaint};
+    use opc_monitor::sheets::{Pick, SheetKind};
+    use opc_monitor::AssistTool;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    shell.toggle_sheet(SheetKind::Assist(AssistTool::Zebra));
+    shell.chrome(0.0);
+    // Row 1 is Units: its first chip reads 0-255.
+    let (x, y) = (
+        180.0 + 16.0 + 160.0 + 20.0,
+        56.0 + 16.0 + 60.0 + 8.0 + 56.0 + 28.0,
+    );
+    shell.control_down(x, y, 0.0).expect("chip");
+    assert!(shell.control_up(x, y, 0.0).is_empty());
+    assert!(!shell.assists().zebra.ire_units);
+    assert_eq!(
+        shell.sheet(),
+        Some(SheetKind::Assist(AssistTool::Zebra)),
+        "picking keeps the sheet open"
+    );
+    // The first row is the tool itself: "On" switches zebra on.
+    let (x, y) = (
+        180.0 + 16.0 + 160.0 + 56.0 + 6.0 + 20.0,
+        56.0 + 16.0 + 60.0 + 8.0 + 28.0,
+    );
+    shell.control_down(x, y, 0.0).expect("chip");
+    shell.control_up(x, y, 0.0);
+    assert!(shell.toggles().zebra);
+
+    shell.pick_for_test(Pick::ZebraHighlightIre(90.0));
+    shell.pick_for_test(Pick::ZebraHighlightColor(ZebraPaint::Red));
+    shell.pick_for_test(Pick::ZebraMidtoneOn(false));
+    let zebra = shell.grade_options().zebra.expect("zebra is on");
+    // Without the core linked the IRE is read as a plain fraction of the feed.
+    assert_eq!(zebra.highlight, Some(0.9));
+    assert_eq!(zebra.midtone, None);
+    assert_eq!(zebra.highlight_color, ZebraPaint::Red.rgba());
+
+    shell.pick_for_test(Pick::Assist(AssistTool::Grid));
+    shell.pick_for_test(Pick::GridLine(GridLine::Diagonal, true));
+    assert!(shell.tool_on(AssistTool::Grid));
+    assert!(shell.assists().grid.thirds && shell.assists().grid.diagonal);
+}

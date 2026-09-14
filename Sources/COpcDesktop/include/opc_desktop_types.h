@@ -215,6 +215,12 @@ typedef struct {
 // in tenths of a second (1–255). The core refuses an unreachable or ill-timed one.
 #define OPC_CAM_GIMBAL_TIMED_TARGET 73
 
+/* False-colour scales for opc_false_color_cube / opc_false_color_legend. */
+#define OPC_FALSE_COLOR_STOPS 0
+#define OPC_FALSE_COLOR_IRE 1
+#define OPC_FALSE_COLOR_LIMITS 2
+#define OPC_FALSE_COLOR_EL_ZONE 3
+
 // `DumlTransport.PktType`.
 #define OPC_PKT_HANDSHAKE 0x00
 #define OPC_PKT_TELEMETRY 0x01

@@ -8,6 +8,11 @@
 use opc_camera::{frame_rate_fps, resolution_name, Command, Status};
 use opc_chrome::{SheetRowState, SheetState};
 
+use crate::assists::{
+    sense_label, AssistOptions, AssistTool, FalseColorScale, GridLine, GuideAspect, GuideFamily,
+    PeakingColor, ZebraPaint, ZebraSteps, PEAKING_SENSES, ZEBRA_HIGHLIGHT_STEPS,
+    ZEBRA_MIDTONE_STEPS,
+};
 use crate::luts::{self, LutChoice, LutMenu};
 use crate::moves::{Program, Waypoint};
 use crate::shell::{GimbalMode, Toggles};
@@ -20,6 +25,8 @@ pub enum SheetKind {
     Settings,
     /// Programmed gimbal moves: A, B, C and their durations.
     Moves,
+    /// One assist tool's options, from a long press on its toolbar chip.
+    Assist(AssistTool),
 }
 
 /// Which programmed point a chip is about.
@@ -44,7 +51,6 @@ pub struct Prefs {
     pub fov: u8,
     /// `0x02` slow, `0x01` default, `0x00` fast.
     pub gimbal_speed: u8,
-    pub grid: bool,
     pub timecode: bool,
     /// The stick's first-order follow: 0 off, 1 soft, 2 medium.
     pub ramp: u8,
@@ -70,7 +76,6 @@ impl Default for Prefs {
             vocal_boost: 0x00,
             fov: 0x01,
             gimbal_speed: 0x01,
-            grid: false,
             timecode: false,
             ramp: 0,
             countdown_seconds: 3,
@@ -105,6 +110,25 @@ pub enum Pick {
     LegDuration(Slot, f64),
     MoveStart,
     MoveStop,
+    /// Switch an assist tool on or off, as its toolbar chip would.
+    Assist(AssistTool),
+    FalseColorScale(FalseColorScale),
+    FalseColorReference(bool),
+    PeakingColor(PeakingColor),
+    PeakingSense(opc_render::PeakingSense),
+    /// Read zebra thresholds as IRE (true) or 0–255 (false).
+    ZebraUnits(bool),
+    ZebraHighlightOn(bool),
+    ZebraHighlightIre(f32),
+    ZebraHighlightColor(ZebraPaint),
+    ZebraMidtoneOn(bool),
+    ZebraMidtoneIre(f32),
+    ZebraMidtoneColor(ZebraPaint),
+    GridLine(GridLine, bool),
+    GuideFamily(GuideFamily),
+    /// Toggle one frame; several may be on.
+    GuideAspect(GuideAspect),
+    GuideMask(bool),
     /// A chip that is shown but does nothing here yet.
     Nothing,
 }
@@ -124,6 +148,9 @@ pub struct Context<'a> {
     /// The body's live pose, if it has reported one.
     pub live_pose: Option<Waypoint>,
     pub move_running: bool,
+    pub assists: AssistOptions,
+    /// Where the zebra chips land on the feed, so they can read in 0–255.
+    pub zebra_steps: ZebraSteps,
 }
 
 /// A built sheet: what to draw, and what each chip means.
@@ -193,9 +220,19 @@ impl RowBuilder {
                 options: Vec::new(),
                 selected: None,
                 enabled: true,
+                lit: Vec::new(),
             },
             picks: Vec::new(),
         }
+    }
+
+    /// A chip in a row where more than one may be lit at once.
+    fn option_lit(mut self, label: impl Into<String>, lit: bool, pick: Pick) -> Self {
+        self.row.lit.resize(self.row.options.len(), false);
+        self.row.lit.push(lit);
+        self.row.options.push(label.into());
+        self.picks.push(pick);
+        self
     }
 
     fn option(mut self, label: impl Into<String>, selected: bool, pick: Pick) -> Self {
@@ -242,7 +279,198 @@ pub fn build(kind: SheetKind, tab: usize, context: Context) -> Built {
         SheetKind::Exposure => exposure(context.status),
         SheetKind::Settings => settings(tab, context),
         SheetKind::Moves => moves(context),
+        SheetKind::Assist(tool) => assist(tool, context),
     }
+}
+
+/// Whether a tool is on, as its chip and its sheet's first row show it.
+pub fn tool_on(tool: AssistTool, toggles: Toggles) -> bool {
+    match tool {
+        AssistTool::Lut => toggles.grade,
+        AssistTool::Peak => toggles.peaking,
+        AssistTool::False => toggles.false_color,
+        AssistTool::Zebra => toggles.zebra,
+        AssistTool::Guides => toggles.guides,
+        AssistTool::Grid => toggles.grid,
+        AssistTool::Cross => toggles.cross,
+        AssistTool::Mirror => toggles.mirror,
+        AssistTool::Wave
+        | AssistTool::Parade
+        | AssistTool::Histo
+        | AssistTool::Vector
+        | AssistTool::Lights
+        | AssistTool::Nd
+        | AssistTool::Audio => false,
+    }
+}
+
+/// One tool's options: the phones' long-press panel as rows of chips.
+fn assist(tool: AssistTool, context: Context) -> Built {
+    let assists = context.assists;
+    let on = tool_on(tool, context.toggles);
+    let mut rows = vec![RowBuilder::new(tool.title())
+        .option(
+            "Off",
+            !on,
+            if on {
+                Pick::Assist(tool)
+            } else {
+                Pick::Nothing
+            },
+        )
+        .option(
+            "On",
+            on,
+            if on {
+                Pick::Nothing
+            } else {
+                Pick::Assist(tool)
+            },
+        )
+        .enabled(tool.available())];
+    let on_off = |title: &str, on: bool, pick: fn(bool) -> Pick| {
+        RowBuilder::new(title)
+            .option("Off", !on, pick(false))
+            .option("On", on, pick(true))
+    };
+    match tool {
+        AssistTool::False => {
+            let mut scale = RowBuilder::new("Scale");
+            for candidate in FalseColorScale::ALL {
+                scale = scale.option(
+                    candidate.label(),
+                    assists.false_color.scale == candidate,
+                    Pick::FalseColorScale(candidate),
+                );
+            }
+            rows.push(scale);
+            rows.push(on_off(
+                "Reference Display",
+                assists.false_color.reference,
+                Pick::FalseColorReference,
+            ));
+        }
+        AssistTool::Peak => {
+            let mut sense = RowBuilder::new("Sensitivity");
+            for candidate in PEAKING_SENSES {
+                sense = sense.option(
+                    sense_label(candidate),
+                    assists.peaking_sense == candidate,
+                    Pick::PeakingSense(candidate),
+                );
+            }
+            rows.push(sense);
+            let mut color = RowBuilder::new("Color");
+            for candidate in PeakingColor::ALL {
+                color = color.option(
+                    candidate.label(),
+                    assists.peaking_color == candidate,
+                    Pick::PeakingColor(candidate),
+                );
+            }
+            rows.push(color);
+        }
+        AssistTool::Zebra => {
+            let zebra = assists.zebra;
+            let steps = context.zebra_steps;
+            rows.push(
+                RowBuilder::new("Units")
+                    .option("0-255", !zebra.ire_units, Pick::ZebraUnits(false))
+                    .option("IRE", zebra.ire_units, Pick::ZebraUnits(true)),
+            );
+            rows.push(on_off(
+                "Highlight",
+                zebra.highlight_on,
+                Pick::ZebraHighlightOn,
+            ));
+            let mut highlight = RowBuilder::new("Highlight level").enabled(zebra.highlight_on);
+            for (ire, native) in ZEBRA_HIGHLIGHT_STEPS.into_iter().zip(steps.highlight) {
+                highlight = highlight.option(
+                    zebra.step_label(ire, native),
+                    (zebra.highlight_ire - ire).abs() < 0.5,
+                    Pick::ZebraHighlightIre(ire),
+                );
+            }
+            rows.push(highlight);
+            let mut highlight_color =
+                RowBuilder::new("Highlight color").enabled(zebra.highlight_on);
+            for paint in ZebraPaint::HIGHLIGHT {
+                highlight_color = highlight_color.option(
+                    paint.label(),
+                    zebra.highlight_color == paint,
+                    Pick::ZebraHighlightColor(paint),
+                );
+            }
+            rows.push(highlight_color);
+            rows.push(on_off("Midtone", zebra.midtone_on, Pick::ZebraMidtoneOn));
+            let mut midtone = RowBuilder::new("Midtone level").enabled(zebra.midtone_on);
+            for (ire, native) in ZEBRA_MIDTONE_STEPS.into_iter().zip(steps.midtone) {
+                midtone = midtone.option(
+                    zebra.step_label(ire, native),
+                    (zebra.midtone_ire - ire).abs() < 0.5,
+                    Pick::ZebraMidtoneIre(ire),
+                );
+            }
+            rows.push(midtone);
+            let mut midtone_color = RowBuilder::new("Midtone color").enabled(zebra.midtone_on);
+            for paint in ZebraPaint::MIDTONE {
+                midtone_color = midtone_color.option(
+                    paint.label(),
+                    zebra.midtone_color == paint,
+                    Pick::ZebraMidtoneColor(paint),
+                );
+            }
+            rows.push(midtone_color);
+        }
+        AssistTool::Grid => {
+            let mut lines = RowBuilder::new("Lines");
+            for line in GridLine::ALL {
+                let lit = assists.grid.get(line);
+                lines = lines.option_lit(line.label(), lit, Pick::GridLine(line, !lit));
+            }
+            rows.push(lines);
+        }
+        AssistTool::Guides => {
+            let guides = assists.guides;
+            let mut family = RowBuilder::new("Family");
+            for candidate in GuideFamily::ALL {
+                family = family.option(
+                    candidate.label(),
+                    guides.family == candidate,
+                    Pick::GuideFamily(candidate),
+                );
+            }
+            rows.push(family);
+            let mut frames = RowBuilder::new("Frames");
+            for aspect in guides.family.aspects() {
+                frames = frames.option_lit(
+                    aspect.label(),
+                    guides.is_selected(*aspect),
+                    Pick::GuideAspect(*aspect),
+                );
+            }
+            rows.push(frames);
+            rows.push(on_off("Mask outside frame", guides.mask, Pick::GuideMask));
+        }
+        AssistTool::Lut => {
+            rows.push(RowBuilder::placeholder(
+                "Cube",
+                "Pick the cube under Settings → ASSIST",
+            ));
+        }
+        AssistTool::Cross | AssistTool::Mirror | AssistTool::Audio => {
+            rows.push(RowBuilder::placeholder("Help", tool.help()));
+        }
+        AssistTool::Wave
+        | AssistTool::Parade
+        | AssistTool::Histo
+        | AssistTool::Vector
+        | AssistTool::Lights
+        | AssistTool::Nd => {
+            rows.push(RowBuilder::placeholder("Scope", "Not on the desktop yet"));
+        }
+    }
+    assemble(&tool.title().to_uppercase(), &[], 0, rows)
 }
 
 const LEG_DURATIONS: [f64; 8] = [1.0, 2.0, 4.0, 5.0, 8.0, 15.0, 30.0, 60.0];
@@ -633,8 +861,8 @@ fn assist_rows(context: Context) -> Vec<RowBuilder> {
 
     vec![
         RowBuilder::new("Grid")
-            .option("Off", !prefs.grid, Pick::Grid(false))
-            .option("Thirds", prefs.grid, Pick::Grid(true)),
+            .option("Off", !toggles.grid, Pick::Grid(false))
+            .option("On", toggles.grid, Pick::Grid(true)),
         toggle("Overexposure alert", toggles.zebra, Pick::Zebra),
         toggle("Focus peaking", toggles.peaking, Pick::Peaking),
         lut,
@@ -676,6 +904,8 @@ mod tests {
                 native_pitch: -3.0,
             }),
             move_running: false,
+            assists: AssistOptions::default(),
+            zebra_steps: ZebraSteps::default(),
         }
     }
 

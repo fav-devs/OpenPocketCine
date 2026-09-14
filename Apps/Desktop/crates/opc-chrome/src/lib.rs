@@ -29,7 +29,10 @@ mod generated {
     #![allow(missing_debug_implementations)]
     slint::include_modules!();
 }
-use generated::{HudOverlay, MediaCell, MediaSelection, PlayerView as SlintPlayerView, SheetRow};
+use generated::{
+    AssistChipView, GuideRect, HudOverlay, LegendChip as SlintLegendChip, MediaCell,
+    MediaSelection, PlayerView as SlintPlayerView, SheetRow,
+};
 use slint::ComponentHandle;
 
 // ── Custom RGBA pixel ────────────────────────────────────────────────────────
@@ -171,6 +174,12 @@ pub enum ChromeIntent {
     SheetTab(usize),
     /// The sheet's close button, or a tap on the scrim around it.
     SheetClose,
+    /// The ASSIST button in the top bar: show or hide the toolbar.
+    AssistBarToggle,
+    /// A toolbar chip tapped, by index into the chips the shell passed.
+    AssistTap(usize),
+    /// A toolbar chip long-pressed or right-clicked: open its options.
+    AssistConfigure(usize),
     // The library.
     LibraryBack,
     LibraryTab(usize),
@@ -300,6 +309,63 @@ pub struct SheetRowState {
     pub selected: Option<usize>,
     /// A row the operator cannot use right now is drawn but greyed.
     pub enabled: bool,
+    /// Per-chip lit flags for rows where more than one chip may be on. Empty means
+    /// `selected` alone says which chip is lit.
+    pub lit: Vec<bool>,
+}
+
+/// One chip on the assist toolbar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssistChip {
+    pub label: String,
+    pub on: bool,
+    /// Greyed when the tool is not on the desktop yet.
+    pub available: bool,
+    /// Which cluster the chip sits in; a gap is drawn between clusters.
+    pub group: usize,
+}
+
+/// One zone of the false-colour key.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegendBand {
+    pub label: String,
+    pub rgb: [f32; 3],
+}
+
+/// What is drawn over the picture, in window pixels.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Overlays {
+    pub grid_thirds: bool,
+    pub grid_phi: bool,
+    pub grid_diagonal: bool,
+    /// Aspect frames as `(x, y, width, height)`.
+    pub guides: Vec<(f32, f32, f32, f32)>,
+    /// Darken outside the frames' union.
+    pub guide_mask: bool,
+    pub crosshair: bool,
+    /// The false-colour key; empty hides it.
+    pub legend: Vec<LegendBand>,
+}
+
+impl Overlays {
+    /// The union of the guide frames, as the box the mask leaves clear.
+    fn guide_box(&self) -> (f32, f32, f32, f32) {
+        let mut left = f32::MAX;
+        let mut top = f32::MAX;
+        let mut right = f32::MIN;
+        let mut bottom = f32::MIN;
+        for (x, y, w, h) in &self.guides {
+            left = left.min(*x);
+            top = top.min(*y);
+            right = right.max(x + w);
+            bottom = bottom.max(y + h);
+        }
+        if self.guides.is_empty() {
+            (0.0, 0.0, 0.0, 0.0)
+        } else {
+            (left, top, right - left, bottom - top)
+        }
+    }
 }
 
 /// A sheet over the picture: the format picker, the exposure sheet or the settings.
@@ -364,8 +430,10 @@ pub struct ChromeState<'a> {
     pub fps_shown: u32,
     /// The body's timecode, when the operator wants it in the top bar.
     pub timecode: String,
-    /// Rule-of-thirds lines over the picture.
-    pub grid_on: bool,
+    /// The grid, guides, crosshair and false-colour key over the picture.
+    pub overlays: Overlays,
+    /// The assist toolbar's chips while it is open; `None` keeps it hidden.
+    pub assist_bar: Option<Vec<AssistChip>>,
     /// A programmed move's readout for the top bar, or empty.
     pub move_text: String,
     /// The open sheet, if any.
@@ -378,6 +446,7 @@ pub struct ChromeState<'a> {
 // Layout metrics mirrored from `hud.slint`; `is_over_control` uses them for hit zones.
 const TOP_BAR_H: f64 = 56.0;
 const BOTTOM_BAR_H: f64 = 152.0;
+const ASSIST_BAR_H: f64 = 44.0;
 const ZOOM_DIAL_W: f64 = 320.0;
 const ZOOM_DIAL_H: f64 = 76.0;
 const SIDE_COLUMN_W: f64 = 110.0;
@@ -515,6 +584,24 @@ impl Chrome {
         simple!(on_player_peaking, ChromeIntent::PlayerPeaking);
         simple!(on_player_favorite, ChromeIntent::PlayerFavorite);
         simple!(on_player_delete, ChromeIntent::PlayerDelete);
+        simple!(on_assist_bar_tapped, ChromeIntent::AssistBarToggle);
+        {
+            let q = intents.clone();
+            component.on_assist_tapped(move |i| {
+                if i >= 0 {
+                    q.borrow_mut().push(ChromeIntent::AssistTap(i as usize));
+                }
+            });
+        }
+        {
+            let q = intents.clone();
+            component.on_assist_configure(move |i| {
+                if i >= 0 {
+                    q.borrow_mut()
+                        .push(ChromeIntent::AssistConfigure(i as usize));
+                }
+            });
+        }
         {
             let q = intents.clone();
             component.on_library_source_tapped(move |local| {
@@ -639,16 +726,22 @@ impl Chrome {
         if self.component.get_sheet_open() || self.component.get_screen() != 0 {
             return true;
         }
-        // Top bar and bottom bar (with the mode strip) hold every button.
-        if y <= TOP_BAR_H || y >= h - BOTTOM_BAR_H {
+        // Top bar (with the assist strip under it when open) and bottom bar (with the
+        // mode strip) hold every button.
+        let c = &self.component;
+        let bar = if c.get_assist_open() {
+            ASSIST_BAR_H
+        } else {
+            0.0
+        };
+        if y <= TOP_BAR_H + bar || y >= h - BOTTOM_BAR_H {
             return true;
         }
         // Zoom dial sits under the top bar, centred.
-        let c = &self.component;
         let fit_x = f64::from(c.get_fit_x());
         let fit_w = f64::from(c.get_fit_width());
         let dial_x = fit_x + (fit_w - ZOOM_DIAL_W) / 2.0;
-        if y <= TOP_BAR_H + ZOOM_DIAL_H && (dial_x..=dial_x + ZOOM_DIAL_W).contains(&x) {
+        if y <= TOP_BAR_H + bar + ZOOM_DIAL_H && (dial_x..=dial_x + ZOOM_DIAL_W).contains(&x) {
             return true;
         }
         // Side columns are read-only, but a press there must not start a tracking box.
@@ -725,7 +818,60 @@ impl Chrome {
             .into(),
         );
         c.set_timecode(state.timecode.clone().into());
-        c.set_grid_on(state.grid_on);
+        let overlays = &state.overlays;
+        c.set_grid_thirds(overlays.grid_thirds);
+        c.set_grid_phi(overlays.grid_phi);
+        c.set_grid_diagonal(overlays.grid_diagonal);
+        let guides: Vec<GuideRect> = overlays
+            .guides
+            .iter()
+            .map(|(x, y, w, h)| GuideRect {
+                x: *x,
+                y: *y,
+                w: *w,
+                h: *h,
+            })
+            .collect();
+        c.set_guides(ModelRc::new(VecModel::from(guides)));
+        c.set_guide_mask(overlays.guide_mask);
+        let (bx, by, bw, bh) = overlays.guide_box();
+        c.set_guide_box(GuideRect {
+            x: bx,
+            y: by,
+            w: bw,
+            h: bh,
+        });
+        c.set_crosshair(overlays.crosshair);
+        let legend: Vec<SlintLegendChip> = overlays
+            .legend
+            .iter()
+            .map(|band| SlintLegendChip {
+                label: band.label.clone().into(),
+                color: slint::Color::from_rgb_f32(band.rgb[0], band.rgb[1], band.rgb[2]),
+            })
+            .collect();
+        c.set_legend(ModelRc::new(VecModel::from(legend)));
+        match &state.assist_bar {
+            Some(chips) => {
+                let chips: Vec<AssistChipView> = chips
+                    .iter()
+                    .map(|chip| AssistChipView {
+                        label: chip.label.clone().into(),
+                        on: chip.on,
+                        available: chip.available,
+                        group: chip.group as i32,
+                    })
+                    .collect();
+                c.set_assist_chips(ModelRc::new(VecModel::from(chips)));
+                c.set_assist_open(true);
+            }
+            None => {
+                if c.get_assist_open() {
+                    c.set_assist_open(false);
+                    c.set_assist_chips(ModelRc::new(VecModel::from(Vec::<AssistChipView>::new())));
+                }
+            }
+        }
         c.set_move_text(state.move_text.clone().into());
         c.set_screen(state.screen.index());
 
@@ -822,6 +968,7 @@ impl Chrome {
                         options: strings(&row.options),
                         selected: row.selected.map_or(-1, |i| i as i32),
                         enabled: row.enabled,
+                        lit: ModelRc::new(VecModel::from(row.lit.clone())),
                     })
                     .collect();
                 c.set_sheet_rows(ModelRc::new(VecModel::from(rows)));

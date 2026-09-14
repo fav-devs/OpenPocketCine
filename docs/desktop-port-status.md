@@ -21,7 +21,7 @@ bottom says what the body is set to, and the keyboard drives it.
 | Timer | `T` — 3 seconds, cancellable | `opc-monitor/shell.rs`, `Countdown` |
 | Tracking | Mouse or one-finger drag, `X` to clear | `opc-ui/tracking.rs`, `Shell::touch` |
 | Frame rate, resolution | `[` `]` | `opc-ui/format.rs` |
-| Assists | `Z` `P` `L` `M`, `H` hides the chrome | `opc-monitor/shell.rs`, `Toggles` |
+| Assists | `A` opens the phones' toolbar (long press for options); `Z` `P` `L` `M`, `H` hides the chrome | `opc-monitor/assists.rs`, `shell.rs`, `Toggles` |
 | Sheets | `Tab` settings, `E` exposure, the format chip | `opc-monitor/sheets.rs` |
 | Library | `G`, then the grid; `Space` and `Esc` in the player | `opc-monitor/library.rs`, `media.rs`, `opc-media` |
 
@@ -182,9 +182,10 @@ thing that was drawn around rather than near it.
    its layout and would need to hand back the rectangles it drew so `Shell` can hit-test
    a tap before falling through to a tracking drag. Deliberately left until someone has
    held the laptop, because where the controls should sit is not guessable.
-4. **False colour and the scopes** (milestone 2d). `feed.frag` already samples the limits
-   paint and weight cubes; what is missing is generating them, which
-   `LiveColorScience.falseColorBands` in the core already knows how to do.
+4. **The scopes** (milestone 2d). False colour is in: the core bakes the paint and
+   weight lattices (`FalseColorCube`) and the facade hands them over as cube handles.
+   The scopes need the decoded picture read back on the CPU each frame and a place to
+   draw the plates.
 
 ## Building it
 

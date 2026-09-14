@@ -56,6 +56,22 @@ Three sheets open over the picture and close on `Esc`, the `×`, or a tap outsid
   `.cube` the operator dropped into the LUT folder the row names), mirror, the timecode
   in the top bar, and the `T` countdown length (3, 5 or 10 s).
 
+- **Assist toolbar** (`ASSIST` in the top bar, or `A`) — the phones' fifteen-tool
+  strip under the top bar: `LUT PEAK FALSE | ZEBRA WAVE PARADE | HISTO VECTOR LIGHTS
+  ND | GUIDES GRID CROSS | MIRROR | AUDIO`. A tap flips the tool; a long press or a
+  right click opens its options as a sheet. **False colour** paints the core's
+  CineStop, EL Zone, IRE or Limits lattices for the body's colour mode and ISO (the
+  same two cubes the phones sample), with a reference key along the bottom of the
+  picture. **Peaking** has the phones' sensitivity (Low / Med / High) and stroke
+  colour. **Zebra** has highlight and midtone bands, each with its level (in IRE, or
+  read as 0–255 codes on the feed, which the core converts) and stripe colour; the
+  thresholds land on the feed's own axis per colour mode. **Grid** draws thirds, the
+  phi grid and dotted diagonals in any mix; **Guides** draws the Film or Social
+  aspect frames (several at once) with an optional mask outside them; **Cross** is
+  the centre crosshair. The scopes (waveform, parade, histogram, vectorscope,
+  traffic lights, ND, audio) are drawn greyed until the desktop reads the picture
+  for them.
+
 A chip lights up when the camera confirms the value, not when it is tapped; a setting
 the body never reports (audio channel, field of view, gimbal speed) is kept as last
 commanded.
@@ -153,7 +169,7 @@ writes PNGs of the finding, live, recording, failed and wide-window states.
 | `[` / `]` | step resolution / frame rate | `H` | hide the chrome |
 | `Tab` | settings | `E` | exposure sheet |
 | `G` | the library | `R` | refresh the list (library) |
-| `K` | programmed moves | | |
+| `K` | programmed moves | `A` | the assist toolbar |
 | `F11` | fullscreen (button) | `Esc` | close a sheet first |
 | `Z` | zebra | `P` | peaking |
 | `L` | colour cube | `M` | mirror |

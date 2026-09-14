@@ -22,7 +22,7 @@ use crate::lut::Lut;
 use crate::present::{Presented, Presenter, Surface, SurfaceSource};
 use crate::resources::{transition, DeviceImage, HostBuffer};
 
-pub use crate::options::{GradeOptions, Peaking, PeakingSense, Zebra};
+pub use crate::options::{FalseColorScale, GradeOptions, Peaking, PeakingSense, Zebra};
 
 const COLOR_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
 const PLANE_FORMAT: vk::Format = vk::Format::R8_UNORM;
@@ -183,6 +183,9 @@ pub struct FeedRenderer {
     targets: Option<Targets>,
     lut: Option<DeviceImage>,
     lut_size: u32,
+    /// The false-colour paint and weight lattices, when the shell has asked for them.
+    false_color: Option<(DeviceImage, DeviceImage)>,
+    false_color_size: u32,
     dummy_2d: DeviceImage,
     dummy_3d: DeviceImage,
     /// Descriptor writes need an idle device, so they happen only when something the
@@ -308,6 +311,8 @@ impl FeedRenderer {
             targets: None,
             lut: None,
             lut_size: 0,
+            false_color: None,
+            false_color_size: 0,
             dummy_2d,
             dummy_3d,
             descriptors_dirty: true,
@@ -351,6 +356,56 @@ impl FeedRenderer {
         self.descriptors_dirty = true;
 
         let Some(lut) = lut else { return Ok(()) };
+        let (image, size) = self.upload_cube(lut)?;
+        self.lut = Some(image);
+        self.lut_size = size;
+        Ok(())
+    }
+
+    /// Uploads the false-colour paint and weight lattices, or drops them. They are
+    /// painted only while [`GradeOptions::false_color`] is set, so a scale can stay
+    /// loaded while the operator flicks the assist off and on.
+    pub fn set_false_color(&mut self, cubes: Option<(&Lut, &Lut)>) -> Result<(), RenderError> {
+        if let Some((paint, weight)) = self.false_color.take() {
+            // Safety: as in `set_lut`.
+            unsafe {
+                let _ = self.gpu.device.device_wait_idle();
+                paint.destroy(&self.gpu.device);
+                weight.destroy(&self.gpu.device);
+            }
+        }
+        self.false_color_size = 0;
+        self.descriptors_dirty = true;
+
+        let Some((paint, weight)) = cubes else {
+            return Ok(());
+        };
+        let (paint_image, paint_size) = self.upload_cube(paint)?;
+        let (weight_image, weight_size) = match self.upload_cube(weight) {
+            Ok(uploaded) => uploaded,
+            Err(error) => {
+                // Safety: nothing points at an image no set has seen.
+                unsafe { paint_image.destroy(&self.gpu.device) };
+                return Err(error);
+            }
+        };
+        if paint_size != weight_size {
+            // Safety: as above.
+            unsafe {
+                paint_image.destroy(&self.gpu.device);
+                weight_image.destroy(&self.gpu.device);
+            }
+            return Err(RenderError::Lut(
+                "The false-colour paint and weight lattices differ in size.".to_string(),
+            ));
+        }
+        self.false_color = Some((paint_image, weight_image));
+        self.false_color_size = paint_size;
+        Ok(())
+    }
+
+    /// A cube as a sampled 3D image, ready for a descriptor.
+    fn upload_cube(&self, lut: &Lut) -> Result<(DeviceImage, u32), RenderError> {
         let size = lut.size();
         let components = lut.rgba();
         if size < 2 || components.len() != (size * size * size * 4) as usize {
@@ -396,11 +451,12 @@ impl FeedRenderer {
         });
         // Safety: the submission finished before `one_shot` returned.
         unsafe { staging.destroy(device) };
-        result?;
-
-        self.lut = Some(image);
-        self.lut_size = size;
-        Ok(())
+        if let Err(error) = result {
+            // Safety: the image was never bound.
+            unsafe { image.destroy(device) };
+            return Err(error);
+        }
+        Ok((image, size))
     }
 
     /// Hands the shell's chrome over, to be composited after the stretch.
@@ -447,7 +503,7 @@ impl FeedRenderer {
         let targets = self.targets.as_ref().expect("targets were just prepared");
         let device = &self.gpu.device;
         let pipelines = &self.pipelines;
-        let lut_size = self.lut_size;
+        let cubes = self.cube_sizes();
         let overlay_opacity = self.overlay_opacity;
         self.gpu.one_shot(|command| {
             record_frame(
@@ -457,7 +513,7 @@ impl FeedRenderer {
                 command,
                 picture,
                 options,
-                lut_size,
+                cubes,
                 targets.framebuffers[PASS_OVERLAY],
                 vk::Extent2D {
                     width: display_width,
@@ -542,7 +598,7 @@ impl FeedRenderer {
             command,
             picture,
             options,
-            self.lut_size,
+            self.cube_sizes(),
             framebuffer,
             extent,
             pipeline,
@@ -708,6 +764,10 @@ impl FeedRenderer {
         let linear = self.pipelines.linear;
         let nearest = self.pipelines.nearest;
         let lut_view = self.lut.as_ref().unwrap_or(&self.dummy_3d).view;
+        let (paint_view, weight_view) = self.false_color.as_ref().map_or(
+            (self.dummy_3d.view, self.dummy_3d.view),
+            |(paint, weight)| (paint.view, weight.view),
+        );
         let mask_view = if self.peaking_bound {
             targets.peaking_mask.view
         } else {
@@ -729,8 +789,8 @@ impl FeedRenderer {
         let feed = [
             bind(targets.rgb.view, linear),
             bind(lut_view, linear),
-            bind(self.dummy_3d.view, linear),
-            bind(self.dummy_3d.view, linear),
+            bind(paint_view, linear),
+            bind(weight_view, linear),
             bind(mask_view, nearest),
         ];
         let blit = bind(targets.graded.view, linear);
@@ -824,9 +884,29 @@ impl Drop for FeedRenderer {
             if let Some(lut) = self.lut.take() {
                 lut.destroy(&self.gpu.device);
             }
+            if let Some((paint, weight)) = self.false_color.take() {
+                paint.destroy(&self.gpu.device);
+                weight.destroy(&self.gpu.device);
+            }
             self.dummy_2d.destroy(&self.gpu.device);
             self.dummy_3d.destroy(&self.gpu.device);
             self.pipelines.destroy(&self.gpu.device);
+        }
+    }
+}
+
+/// The lattices bound right now, as the feed pass needs to know them.
+#[derive(Debug, Clone, Copy, Default)]
+struct CubeSizes {
+    lut: u32,
+    false_color: u32,
+}
+
+impl FeedRenderer {
+    fn cube_sizes(&self) -> CubeSizes {
+        CubeSizes {
+            lut: self.lut_size,
+            false_color: self.false_color_size,
         }
     }
 }
@@ -840,7 +920,7 @@ fn record_frame(
     command: vk::CommandBuffer,
     picture: &Picture<'_>,
     options: GradeOptions,
-    lut_size: u32,
+    cubes: CubeSizes,
     target: vk::Framebuffer,
     target_extent: vk::Extent2D,
     target_pipeline: vk::Pipeline,
@@ -968,7 +1048,7 @@ fn record_frame(
         targets.framebuffers[PASS_FEED],
         source,
         pipelines.pipelines[PASS_FEED],
-        &feed_constants(picture, target_extent, options, lut_size),
+        &feed_constants(picture, target_extent, options, cubes),
         None,
     );
 
@@ -1015,14 +1095,19 @@ fn feed_constants(
     picture: &Picture<'_>,
     display: vk::Extent2D,
     options: GradeOptions,
-    lut_size: u32,
+    cubes: CubeSizes,
 ) -> [f32; FEED_CONSTANTS] {
     let mut out = [0.0_f32; FEED_CONSTANTS];
     out[0] = picture.width as f32;
     out[1] = picture.height as f32;
     out[2] = display.width as f32;
     out[3] = display.height as f32;
-    out[4] = lut_size as f32;
+    out[4] = cubes.lut as f32;
+    if options.false_color && cubes.false_color >= 2 {
+        out[5] = cubes.false_color as f32;
+        out[6] = cubes.false_color as f32;
+        out[7] = 1.0;
+    }
     out[8] = f32::from(u8::from(options.split));
     out[9] = f32::from(u8::from(options.split_vertical));
     out[15] = f32::from(u8::from(options.upscale));

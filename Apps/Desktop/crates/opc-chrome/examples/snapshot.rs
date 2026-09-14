@@ -3,8 +3,8 @@
 use std::time::Instant;
 
 use opc_chrome::{
-    CellState, Chrome, ChromeState, LibraryState, PlayerState, Screen, SelectionState,
-    SheetRowState, SheetState,
+    AssistChip, CellState, Chrome, ChromeState, LegendBand, LibraryState, Overlays, PlayerState,
+    Screen, SelectionState, SheetRowState, SheetState,
 };
 use opc_ui::hud::Phase;
 
@@ -66,6 +66,7 @@ fn main() {
         ("wide", Phase::Live, false, (1600, 720)),
         ("sheet", Phase::Live, false, (1280, 720)),
         ("settings", Phase::Live, false, (1280, 720)),
+        ("assists", Phase::Live, false, (1280, 720)),
         ("library", Phase::Live, false, (1280, 720)),
         ("player", Phase::Live, false, (1280, 720)),
     ];
@@ -100,7 +101,75 @@ fn main() {
             countdown: (name == "live").then_some(3),
             fps_shown: 30,
             timecode: "01:02:03:04".into(),
-            grid_on: name == "sheet",
+            overlays: if name == "assists" {
+                let feed = (fit.0 as f32, fit.1 as f32, fit.2 as f32, fit.3 as f32);
+                let frame = |ratio: f32| {
+                    let (fx, fy, fw, fh) = feed;
+                    let (w, h) = if fw / fh > ratio {
+                        (fh * ratio, fh)
+                    } else {
+                        (fw, fw / ratio)
+                    };
+                    (fx + (fw - w) / 2.0, fy + (fh - h) / 2.0, w, h)
+                };
+                Overlays {
+                    grid_thirds: true,
+                    grid_phi: false,
+                    grid_diagonal: true,
+                    guides: vec![frame(2.39), frame(1.0)],
+                    guide_mask: true,
+                    crosshair: true,
+                    legend: [
+                        ("0–4", [0.35, 0.0, 0.5]),
+                        ("5", [0.2, 0.2, 0.9]),
+                        ("10–12", [0.3, 0.5, 1.0]),
+                        ("41–48", [0.2, 0.8, 0.3]),
+                        ("61–70", [0.95, 0.5, 0.75]),
+                        ("92–93", [1.0, 0.85, 0.2]),
+                        ("94–95", [1.0, 0.6, 0.1]),
+                        ("96–98", [1.0, 0.3, 0.1]),
+                        ("99–100", [1.0, 0.0, 0.0]),
+                    ]
+                    .into_iter()
+                    .map(|(label, rgb)| LegendBand {
+                        label: label.into(),
+                        rgb,
+                    })
+                    .collect(),
+                }
+            } else {
+                Overlays {
+                    grid_thirds: name == "sheet",
+                    ..Overlays::default()
+                }
+            },
+            assist_bar: (name == "assists").then(|| {
+                [
+                    ("LUT", true, true, 0),
+                    ("PEAK", false, true, 0),
+                    ("FALSE", true, true, 0),
+                    ("ZEBRA", false, true, 1),
+                    ("WAVE", false, false, 1),
+                    ("PARADE", false, false, 1),
+                    ("HISTO", false, false, 2),
+                    ("VECTOR", false, false, 2),
+                    ("LIGHTS", false, false, 2),
+                    ("ND", false, false, 2),
+                    ("GUIDES", true, true, 3),
+                    ("GRID", true, true, 3),
+                    ("CROSS", true, true, 3),
+                    ("MIRROR", false, true, 4),
+                    ("AUDIO", false, false, 5),
+                ]
+                .into_iter()
+                .map(|(label, on, available, group)| AssistChip {
+                    label: label.into(),
+                    on,
+                    available,
+                    group,
+                })
+                .collect()
+            }),
             move_text: if name == "recording" {
                 "MOVE · A→B 3.2 / 8.0 s".into()
             } else {
@@ -204,6 +273,7 @@ fn main() {
                         options: options.iter().map(|o| o.to_string()).collect(),
                         selected,
                         enabled,
+                        lit: Vec::new(),
                     }
                 };
                 if name == "settings" {

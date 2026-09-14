@@ -158,6 +158,8 @@ component TopBar {
     callback format-tapped();
     callback expo-tapped();
     callback exit-tapped();
+    callback assist-tapped();
+    in property <bool> assist-open;
 
     height: 56px;
 
@@ -196,6 +198,13 @@ component TopBar {
             key: "E";
             enabled: root.enabled;
             tapped => { root.expo-tapped(); }
+        }
+        IconButton {
+            icon: @image-url("../assets/icons/adjustments.svg");
+            label: "ASSIST";
+            key: "A";
+            tint: root.assist-open ? Pal.accent : Pal.ink;
+            tapped => { root.assist-tapped(); }
         }
     }
 
@@ -824,6 +833,100 @@ export struct SheetRow {
     options: [string],
     selected: int,
     enabled: bool,
+    /// Per-chip lit flags for rows where more than one chip may be on; empty otherwise.
+    lit: [bool],
+}
+
+// ── Assist toolbar ────────────────────────────────────────────────────────────
+// The phones' fifteen-tool strip, parked under the top bar. A tap toggles the tool;
+// a long press or a right click opens its options.
+
+export struct AssistChipView {
+    label: string,
+    on: bool,
+    available: bool,
+    group: int,
+}
+
+export struct GuideRect {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+}
+
+export struct LegendChip {
+    label: string,
+    color: color,
+}
+
+component AssistChipButton {
+    in property <AssistChipView> chip;
+    callback tapped();
+    callback configure();
+    property <bool> long: false;
+
+    width: 72px;
+    height: 32px;
+    opacity: root.chip.available ? 1.0 : 0.35;
+
+    Rectangle {
+        border-radius: 8px;
+        background: root.chip.on ? Pal.accent : (ta.has-hover ? #ffffff1f : #ffffff14);
+        border-width: 1px;
+        border-color: root.chip.on ? Pal.accent : #ffffff2e;
+    }
+    Text {
+        text: root.chip.label;
+        color: root.chip.on ? #000000 : Pal.ink;
+        font-family: Pal.font;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        x: (parent.width - self.preferred-width) / 2;
+        y: (parent.height - self.preferred-height) / 2;
+    }
+    ta := TouchArea {
+        enabled: root.chip.available;
+        changed pressed => { if self.pressed { root.long = false; } }
+        clicked => { if !root.long { root.tapped(); } }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
+                root.long = true;
+                root.configure();
+            }
+        }
+    }
+    Timer {
+        interval: 450ms;
+        running: ta.pressed && !root.long;
+        triggered => { root.long = true; root.configure(); }
+    }
+}
+
+component AssistBar {
+    in property <[AssistChipView]> chips;
+    callback tapped(int);
+    callback configure(int);
+
+    height: 44px;
+    Rectangle { background: #000000b3; }
+    Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: #ffffff14; }
+
+    Flickable {
+        x: 0; y: 0;
+        width: parent.width;
+        height: parent.height;
+        viewport-width: max(parent.width, 24px + root.chips.length * 76px + 6 * 12px);
+        viewport-height: parent.height;
+        for chip[i] in root.chips: AssistChipButton {
+            x: 12px + i * 76px + chip.group * 12px;
+            y: 6px;
+            chip: chip;
+            tapped => { root.tapped(i); }
+            configure => { root.configure(i); }
+        }
+    }
 }
 
 component Chip {
@@ -958,7 +1061,7 @@ component SheetPanel {
                 alignment: start;
                 for opt[j] in row.options: Chip {
                     text: opt;
-                    selected: j == row.selected;
+                    selected: j == row.selected || (j < row.lit.length && row.lit[j]);
                     enabled: row.enabled;
                     tapped => { root.picked(i, j); }
                 }
@@ -1572,8 +1675,20 @@ export component HudOverlay inherits Window {
     in property <string> fps-text: "";
     /// The body's timecode, shown in the top bar when the operator asks for it.
     in property <string> timecode: "";
-    /// Rule-of-thirds lines over the picture.
-    in property <bool> grid-on: false;
+    // Overlays on the picture: the grid, guide frames, the crosshair and the false
+    // colour key. The shell decides what is on; the geometry is the fitted picture's.
+    in property <bool> grid-thirds: false;
+    in property <bool> grid-phi: false;
+    in property <bool> grid-diagonal: false;
+    in property <[GuideRect]> guides: [];
+    in property <bool> guide-mask: false;
+    /// The union of the guide frames, for the mask around them.
+    in property <GuideRect> guide-box;
+    in property <bool> crosshair: false;
+    in property <[LegendChip]> legend: [];
+    /// The assist toolbar under the top bar.
+    in property <bool> assist-open: false;
+    in property <[AssistChipView]> assist-chips: [];
     /// A programmed move's readout, shown in the top bar while a take runs.
     in property <string> move-text: "";
 
@@ -1658,6 +1773,9 @@ export component HudOverlay inherits Window {
     callback player-peaking();
     callback player-favorite();
     callback player-delete();
+    callback assist-bar-tapped();
+    callback assist-tapped(int);
+    callback assist-configure(int);
 
     background: transparent;
 
@@ -1668,13 +1786,95 @@ export component HudOverlay inherits Window {
     property <length> mid-bottom: min(root.height - root.bottom-h, root.fit-y + root.fit-height);
     property <length> left-gutter: root.fit-x;
     property <length> right-gutter: root.width - root.fit-x - root.fit-width;
+    property <length> bar-h: root.assist-open ? 44px : 0;
+    property <color> grid-ink: #ffffff59;
+    property <int> diagonal-dots: 64;
 
-    if root.screen == 0 && root.grid-on: Rectangle {
+    // The grid: thirds, the phi grid, and dotted diagonals (the software renderer has no
+    // slanted line, so the diagonals are beads).
+    if root.screen == 0 && root.grid-thirds: Rectangle {
         x: root.fit-x; y: root.fit-y; width: root.fit-width; height: root.fit-height;
-        Rectangle { x: parent.width / 3; width: 1px; height: parent.height; background: #ffffff59; }
-        Rectangle { x: parent.width * 2 / 3; width: 1px; height: parent.height; background: #ffffff59; }
-        Rectangle { y: parent.height / 3; height: 1px; width: parent.width; background: #ffffff59; }
-        Rectangle { y: parent.height * 2 / 3; height: 1px; width: parent.width; background: #ffffff59; }
+        Rectangle { x: parent.width / 3; width: 1px; height: parent.height; background: root.grid-ink; }
+        Rectangle { x: parent.width * 2 / 3; width: 1px; height: parent.height; background: root.grid-ink; }
+        Rectangle { y: parent.height / 3; height: 1px; width: parent.width; background: root.grid-ink; }
+        Rectangle { y: parent.height * 2 / 3; height: 1px; width: parent.width; background: root.grid-ink; }
+    }
+    if root.screen == 0 && root.grid-phi: Rectangle {
+        x: root.fit-x; y: root.fit-y; width: root.fit-width; height: root.fit-height;
+        Rectangle { x: parent.width * 0.382; width: 1px; height: parent.height; background: root.grid-ink; }
+        Rectangle { x: parent.width * 0.618; width: 1px; height: parent.height; background: root.grid-ink; }
+        Rectangle { y: parent.height * 0.382; height: 1px; width: parent.width; background: root.grid-ink; }
+        Rectangle { y: parent.height * 0.618; height: 1px; width: parent.width; background: root.grid-ink; }
+    }
+    if root.screen == 0 && root.grid-diagonal: Rectangle {
+        x: root.fit-x; y: root.fit-y; width: root.fit-width; height: root.fit-height;
+        for i in root.diagonal-dots: Rectangle {
+            x: parent.width * (i + 0.5) / root.diagonal-dots - 1px;
+            y: parent.height * (i + 0.5) / root.diagonal-dots - 1px;
+            width: 2px; height: 2px; border-radius: 1px;
+            background: root.grid-ink;
+        }
+        for i in root.diagonal-dots: Rectangle {
+            x: parent.width * (i + 0.5) / root.diagonal-dots - 1px;
+            y: parent.height - parent.height * (i + 0.5) / root.diagonal-dots - 1px;
+            width: 2px; height: 2px; border-radius: 1px;
+            background: root.grid-ink;
+        }
+    }
+
+    // Guides: aspect frames centred on the picture, and a mask around their union.
+    if root.screen == 0 && root.guide-mask && root.guides.length > 0: Rectangle {
+        x: root.fit-x; y: root.fit-y; width: root.fit-width; height: root.fit-height;
+        Rectangle { x: 0; y: 0; width: parent.width; height: root.guide-box.y - root.fit-y; background: #00000099; }
+        Rectangle { x: 0; y: root.guide-box.y - root.fit-y + root.guide-box.h; width: parent.width; height: parent.height - self.y; background: #00000099; }
+        Rectangle { x: 0; y: root.guide-box.y - root.fit-y; width: root.guide-box.x - root.fit-x; height: root.guide-box.h; background: #00000099; }
+        Rectangle { x: root.guide-box.x - root.fit-x + root.guide-box.w; y: root.guide-box.y - root.fit-y; width: parent.width - self.x; height: root.guide-box.h; background: #00000099; }
+    }
+    if root.screen == 0: Rectangle {
+        x: 0; y: 0; width: parent.width; height: parent.height;
+        for g in root.guides: Rectangle {
+            x: g.x; y: g.y; width: g.w; height: g.h;
+            border-width: 1px;
+            border-color: #ffffffb3;
+            background: transparent;
+        }
+    }
+
+    // The centre crosshair: a 40 px cross, 1.4 px stroke, white at 65%.
+    if root.screen == 0 && root.crosshair: Rectangle {
+        x: root.fit-x + root.fit-width / 2 - 20px;
+        y: root.fit-y + root.fit-height / 2 - 20px;
+        width: 40px; height: 40px;
+        Rectangle { x: 19.3px; y: 0; width: 1.4px; height: 40px; background: #ffffffa6; }
+        Rectangle { x: 0; y: 19.3px; width: 40px; height: 1.4px; background: #ffffffa6; }
+    }
+
+    // The false colour key: one swatch per zone, darkest first, above the bottom bar.
+    if root.screen == 0 && root.legend.length > 0: Rectangle {
+        width: 16px + root.legend.length * 34px;
+        height: 52px;
+        x: root.fit-x + (root.fit-width - self.width) / 2;
+        y: root.mid-bottom - self.height - 12px;
+        background: #000000b3;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: #ffffff1f;
+        for chip[i] in root.legend: Rectangle {
+            x: 8px + i * 34px;
+            y: 6px;
+            width: 30px;
+            height: 40px;
+            Rectangle { x: 0; y: 0; width: 30px; height: 18px; border-radius: 3px; background: chip.color; }
+            Text {
+                text: chip.label;
+                color: Pal.ink-dim;
+                font-family: Pal.font;
+                font-size: 8px;
+                font-weight: 600;
+                x: (parent.width - self.preferred-width) / 2;
+                y: 22px;
+            }
+        }
     }
 
     if root.screen == 0: TopBar {
@@ -1688,16 +1888,25 @@ export component HudOverlay inherits Window {
         is-recording: root.is-recording;
         rec-elapsed: root.rec-elapsed;
         enabled: root.controls-enabled;
+        assist-open: root.assist-open;
         menu-tapped => { root.menu-tapped(); }
         follow-tapped => { root.follow-tapped(); }
         format-tapped => { root.format-tapped(); }
         expo-tapped => { root.expo-tapped(); }
         exit-tapped => { root.exit-tapped(); }
+        assist-tapped => { root.assist-bar-tapped(); }
+    }
+
+    if root.screen == 0 && root.assist-open: AssistBar {
+        x: 0; y: root.top-h; width: parent.width;
+        chips: root.assist-chips;
+        tapped(i) => { root.assist-tapped(i); }
+        configure(i) => { root.assist-configure(i); }
     }
 
     if root.screen == 0: ZoomDial {
         x: root.fit-x + (root.fit-width - self.width) / 2;
-        y: root.mid-top + 10px;
+        y: root.mid-top + root.bar-h + 10px;
         value <=> root.zoom-value;
         label: root.zoom-label;
         enabled: root.controls-enabled;

@@ -57,6 +57,8 @@ struct View {
     pending: Vec<Unit>,
     latest: Option<OwnedPicture>,
     lut: Option<Lut>,
+    /// The false-colour paint and weight lattices, while that assist is on.
+    false_color: Option<(Lut, Lut)>,
     still: PathBuf,
     take_still: bool,
     pointer: (f64, f64),
@@ -93,7 +95,7 @@ impl View {
                 }
             }
         }
-        if let Some(request) = self.shell.take_lut_change() {
+        while let Some(request) = self.shell.take_lut_change() {
             self.apply_lut_request(request);
         }
     }
@@ -102,6 +104,29 @@ impl View {
     /// the renderer. Loading happens here because the built-in looks come from the core.
     fn apply_lut_request(&mut self, request: LutRequest) {
         let on = match request {
+            LutRequest::FalseColor(key) => {
+                self.false_color = key.and_then(|key| {
+                    let paint = Lut::false_color(key.scale, key.color_mode, key.iso, true);
+                    let weight = Lut::false_color(key.scale, key.color_mode, key.iso, false);
+                    match (paint, weight) {
+                        (Ok(paint), Ok(weight)) => Some((paint, weight)),
+                        (Err(error), _) | (_, Err(error)) => {
+                            eprintln!("could not load false colour: {error}");
+                            None
+                        }
+                    }
+                });
+                let cubes = self
+                    .false_color
+                    .as_ref()
+                    .map(|(paint, weight)| (paint, weight));
+                if let Some(renderer) = self.renderer.as_mut() {
+                    if let Err(error) = renderer.set_false_color(cubes) {
+                        eprintln!("could not set false colour: {error}");
+                    }
+                }
+                return;
+            }
             LutRequest::Toggle(on) => on,
             LutRequest::Load(choice) => {
                 let loaded: Result<Option<Lut>, String> = match &choice {
@@ -567,6 +592,7 @@ pub fn run(options: Options) -> Result<(), String> {
         pending: Vec::new(),
         latest: None,
         lut: options.lut,
+        false_color: None,
         still: options.still,
         take_still: false,
         pointer: (0.0, 0.0),

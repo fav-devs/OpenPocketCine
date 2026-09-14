@@ -45,6 +45,8 @@ pub enum Action {
     ToggleSettings,
     ToggleExposure,
     ToggleMoves,
+    /// Show or hide the assist toolbar.
+    ToggleAssists,
     /// Grab the current frame.
     Still,
     Quit,
@@ -127,6 +129,7 @@ impl Controls {
                 'm' => Action::ToggleMirror,
                 'e' => Action::ToggleExposure,
                 'k' => Action::ToggleMoves,
+                'a' => Action::ToggleAssists,
                 's' => Action::Still,
                 _ => return None,
             },
@@ -327,6 +330,7 @@ mod tests {
         let mut controls = Controls::new();
         for (key, expected) in [
             ('z', Action::ToggleZebra),
+            ('a', Action::ToggleAssists),
             ('p', Action::TogglePeaking),
             ('l', Action::ToggleGrade),
             ('m', Action::ToggleMirror),
