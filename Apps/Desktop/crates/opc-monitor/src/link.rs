@@ -11,7 +11,7 @@ use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 
 use opc_camera::DumlFrame;
-use opc_camera::{CameraSession, Command, Recovery, SessionEvent, Status};
+use opc_camera::{CameraSession, Command, Recovery, SessionEvent, SetOutcome, Status};
 
 /// What the camera thread tells the window.
 #[derive(Debug)]
@@ -29,6 +29,8 @@ pub enum FromCamera {
     /// A reply the media browser reads: catalogue chunks, delete and favourite
     /// answers, and the playback entry's acknowledgement.
     Frame(DumlFrame),
+    /// What became of a live-control SET.
+    Set(SetOutcome),
 }
 
 /// What the window tells the camera thread.
@@ -234,6 +236,7 @@ fn run(
                         continue;
                     }
                 }
+                SessionEvent::Set(outcome) => FromCamera::Set(outcome),
             };
             if events.send(message).is_err() {
                 return;

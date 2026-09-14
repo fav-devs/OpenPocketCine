@@ -30,7 +30,10 @@ pub enum Command {
     SetShootingMode(u8),
 
     // Zoom.
+    /// A slider tick: coalesced, never retransmitted, pipelined at 20 Hz.
     ZoomFactor(f64),
+    /// A chip stop or a key: urgent, retransmitted, announced.
+    ZoomJump(f64),
     ZoomLens(u16),
     /// Continuous slew; pair with `ZoomStop`.
     ZoomSlew(u16),
@@ -160,7 +163,9 @@ impl Command {
                 vec![],
             ),
 
-            Self::ZoomFactor(factor) => (sys::OPC_CAM_ZOOM_FACTOR, vec![], vec![factor]),
+            Self::ZoomFactor(factor) | Self::ZoomJump(factor) => {
+                (sys::OPC_CAM_ZOOM_FACTOR, vec![], vec![factor])
+            }
             Self::ZoomLens(position) => {
                 (sys::OPC_CAM_ZOOM_LENS, ints(&[i32::from(position)]), vec![])
             }
@@ -306,6 +311,44 @@ impl Command {
     }
 
     /// Builds this command as an encoded DUML frame, CRC included.
+    /// The opcode key (`set << 8 | cmd`) of the frame this becomes, from the core.
+    /// `None` without the core, or for a command it cannot build.
+    #[cfg(opc_core_linked)]
+    pub fn opcode_key(self) -> Option<u16> {
+        let (kind, ints, reals) = self.parts();
+        // Safety: both argument slices outlive the call.
+        let key = unsafe {
+            sys::opc_camera_command_key(
+                kind,
+                ints.as_ptr(),
+                ints.len(),
+                reals.as_ptr(),
+                reals.len(),
+            )
+        };
+        u16::try_from(key).ok()
+    }
+
+    #[cfg(not(opc_core_linked))]
+    pub fn opcode_key(self) -> Option<u16> {
+        None
+    }
+
+    /// Whether this write is one the SET mailbox governs, as the core lists them.
+    pub fn is_live_control(self) -> bool {
+        self.opcode_key().is_some_and(is_live_control)
+    }
+
+    /// A slider tick that must not be retransmitted and may coalesce.
+    pub fn is_slider(self) -> bool {
+        matches!(self, Self::ZoomFactor(_) | Self::ZoomLens(_))
+    }
+
+    /// Writes the phones fire without a retransmit: one photo is one photo.
+    pub fn retransmits(self) -> bool {
+        !matches!(self, Self::ShootPhoto) && !self.is_slider()
+    }
+
     pub fn encode(self, seq: u16) -> Result<Vec<u8>, CameraError> {
         let (kind, ints, reals) = self.parts();
         let call = |out: *mut u8, capacity: usize| {
@@ -336,4 +379,29 @@ impl Command {
         out.truncate(written as usize);
         Ok(out)
     }
+}
+
+/// Whether an opcode key is one the SET mailbox governs.
+#[cfg(opc_core_linked)]
+pub fn is_live_control(key: u16) -> bool {
+    // Safety: a plain value in.
+    unsafe { sys::opc_duml_is_live_control(i32::from(key)) != 0 }
+}
+
+#[cfg(not(opc_core_linked))]
+pub fn is_live_control(_key: u16) -> bool {
+    false
+}
+
+/// The key a reply frame carries, packed the way the core packs it.
+#[cfg(opc_core_linked)]
+pub fn opcode_key(cmd_set: u8, cmd_id: u8) -> Option<u16> {
+    // Safety: plain values in.
+    let key = unsafe { sys::opc_duml_opcode_key(i32::from(cmd_set), i32::from(cmd_id)) };
+    u16::try_from(key).ok()
+}
+
+#[cfg(not(opc_core_linked))]
+pub fn opcode_key(_cmd_set: u8, _cmd_id: u8) -> Option<u16> {
+    None
 }

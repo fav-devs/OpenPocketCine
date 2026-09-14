@@ -7,6 +7,7 @@
 
 use std::collections::VecDeque;
 
+use crate::mailbox::{Direct, SetDriver, SetOutcome, SetPolicy};
 use crate::Command;
 
 /// Forty hertz. Slower and the camera's send window closes; the contract is in
@@ -53,6 +54,8 @@ pub struct Sequencer {
     last_ack: Option<f64>,
     enabled: bool,
     queue: VecDeque<Command>,
+    /// Live-control SETs, through the mailbox.
+    sets: SetDriver,
 }
 
 impl Sequencer {
@@ -64,6 +67,15 @@ impl Sequencer {
             last_ack: None,
             enabled: false,
             queue: VecDeque::new(),
+            sets: SetDriver::new(Box::new(Direct)),
+        }
+    }
+
+    /// With the core's mailbox deciding what goes on the wire.
+    pub fn with_policy(now: f64, policy: Box<dyn SetPolicy>) -> Self {
+        Self {
+            sets: SetDriver::new(policy),
+            ..Self::new(now)
         }
     }
 
@@ -86,6 +98,7 @@ impl Sequencer {
         self.last_handshake = None;
         self.last_ack = None;
         self.enabled = false;
+        self.sets.reset();
     }
 
     /// The camera answered the session open.
@@ -113,6 +126,32 @@ impl Sequencer {
 
     pub fn pending_commands(&self) -> usize {
         self.queue.len()
+    }
+
+    /// Offers a live-control SET to the mailbox. What may go now goes on the next
+    /// tick; a superseded or held one waits its turn or is dropped.
+    pub fn fire_set(&mut self, key: u16, command: Command, urgent: bool, now: f64) {
+        if let Some(due) = self
+            .sets
+            .fire(key, command, urgent, command.retransmits(), now)
+        {
+            self.queue.push_back(due);
+        }
+    }
+
+    /// A SET left under this sequence number.
+    pub fn note_transmitted(&mut self, key: u16, seq: u16) {
+        self.sets.note_transmitted(key, seq);
+    }
+
+    /// A reply arrived. True when it answered a SET of ours.
+    pub fn reply(&mut self, key: u16, seq: u16, now: f64) -> bool {
+        self.sets.reply(key, seq, now)
+    }
+
+    /// What the mailbox settled since the last call.
+    pub fn take_set_outcomes(&mut self) -> Vec<SetOutcome> {
+        self.sets.take_outcomes()
     }
 
     /// What is due now.
@@ -150,6 +189,10 @@ impl Sequencer {
             out.push(Outgoing::EnableLiveView);
         }
 
+        // Retransmits and pending launches ride the same queue as everything else.
+        for due in self.sets.tick(now) {
+            self.queue.push_back(due);
+        }
         while let Some(command) = self.queue.pop_front() {
             out.push(Outgoing::Command(command));
         }

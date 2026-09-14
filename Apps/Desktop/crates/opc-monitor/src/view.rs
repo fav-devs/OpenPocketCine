@@ -196,6 +196,7 @@ impl View {
                     let now = self.now();
                     self.media.frame(frame, now);
                 }
+                FromCamera::Set(outcome) => self.shell.note_set(outcome),
                 FromCamera::Status(status) => {
                     self.media.status(status.in_playback);
                     self.shell.set_status(*status);

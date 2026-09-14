@@ -47,13 +47,17 @@ pub enum Action {
     ToggleMoves,
     /// Show or hide the assist toolbar.
     ToggleAssists,
+    /// Step to the body's next chip stop, its previous one, or back to wide. Which
+    /// stops those are is the body's business, so the shell resolves them.
+    ZoomIn,
+    ZoomOut,
+    ZoomWide,
     /// Grab the current frame.
     Still,
     Quit,
 }
 
-/// How far one key press moves a continuous control.
-const ZOOM_STEP: f64 = 0.5;
+/// The lens's whole range; the body's own stops narrow it.
 const ZOOM_MIN: f64 = 1.0;
 const ZOOM_MAX: f64 = 12.0;
 /// Gimbal stick centre and throw, in the camera's own units.
@@ -105,18 +109,9 @@ impl Controls {
             Key::Char(character) => match character.to_ascii_lowercase() {
                 'r' => Action::Send(Command::RecordStop),
                 't' => Action::ToggleTimer,
-                '=' | '+' => {
-                    self.zoom = (self.zoom + ZOOM_STEP).min(ZOOM_MAX);
-                    Action::Send(Command::ZoomFactor(self.zoom))
-                }
-                '-' | '_' => {
-                    self.zoom = (self.zoom - ZOOM_STEP).max(ZOOM_MIN);
-                    Action::Send(Command::ZoomFactor(self.zoom))
-                }
-                '0' => {
-                    self.zoom = ZOOM_MIN;
-                    Action::Send(Command::ZoomFactor(self.zoom))
-                }
+                '=' | '+' => Action::ZoomIn,
+                '-' | '_' => Action::ZoomOut,
+                '0' => Action::ZoomWide,
                 'c' => Action::Send(Command::GimbalRecenter),
                 'f' => Action::Send(Command::GimbalFlip),
                 'x' => Action::ClearTracking,
@@ -276,44 +271,13 @@ mod tests {
     }
 
     #[test]
-    fn zoom_steps_and_stops_at_the_ends() {
+    fn the_zoom_keys_ask_for_a_stop_rather_than_naming_a_factor() {
         let mut controls = Controls::new();
-        assert_eq!(controls.zoom(), 1.0);
-        controls.press(Key::Char('='));
-        assert_eq!(controls.zoom(), 1.5);
-        // Below one is not a zoom the lens has.
-        for _ in 0..10 {
-            controls.press(Key::Char('-'));
-        }
-        assert_eq!(controls.zoom(), 1.0);
-        for _ in 0..50 {
-            controls.press(Key::Char('='));
-        }
-        assert_eq!(controls.zoom(), 12.0);
-    }
-
-    #[test]
-    fn zero_snaps_back_to_wide() {
-        let mut controls = Controls::new();
-        controls.press(Key::Char('='));
-        controls.press(Key::Char('='));
-        assert_eq!(
-            controls.press(Key::Char('0')),
-            Some(Action::Send(Command::ZoomFactor(1.0)))
-        );
-        assert_eq!(controls.zoom(), 1.0);
-    }
-
-    #[test]
-    fn the_camera_can_correct_the_zoom_we_think_we_are_at() {
-        let mut controls = Controls::new();
-        // Somebody turned the ring on the body.
-        controls.set_zoom(4.0);
-        assert_eq!(
-            controls.press(Key::Char('=')),
-            Some(Action::Send(Command::ZoomFactor(4.5))),
-            "the next step should continue from the camera, not from where we were"
-        );
+        assert_eq!(controls.press(Key::Char('=')), Some(Action::ZoomIn));
+        assert_eq!(controls.press(Key::Char('+')), Some(Action::ZoomIn));
+        assert_eq!(controls.press(Key::Char('-')), Some(Action::ZoomOut));
+        assert_eq!(controls.press(Key::Char('0')), Some(Action::ZoomWide));
+        assert_eq!(controls.zoom(), 1.0, "the keys alone move nothing");
     }
 
     #[test]

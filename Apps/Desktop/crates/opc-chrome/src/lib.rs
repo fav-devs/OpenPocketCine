@@ -416,6 +416,12 @@ pub struct ChromeState<'a> {
     pub zoom: f32,
     /// Formatted zoom label, e.g. "1.0×".
     pub zoom_label: String,
+    /// The body's top stop; 1.0 greys the dial.
+    pub zoom_max: f32,
+    /// The body's chip stops, marked on the ruler.
+    pub zoom_stops: Vec<f32>,
+    /// A line for the operator in the top bar, or empty.
+    pub notice: String,
     /// Index into [`MODES`].
     pub mode: usize,
     /// The record button fires a still instead.
@@ -794,6 +800,9 @@ impl Chrome {
         c.set_storage_text(state.storage_text.clone().into());
         c.set_zoom_value(state.zoom);
         c.set_zoom_label(state.zoom_label.clone().into());
+        c.set_zoom_max(state.zoom_max.max(1.0));
+        c.set_zoom_stops(ModelRc::new(VecModel::from(state.zoom_stops.clone())));
+        c.set_notice(state.notice.clone().into());
         c.set_mode_selected(state.mode.min(MODES.len() - 1) as i32);
         c.set_photo_mode(state.photo_mode);
         c.set_controls_enabled(state.controls_enabled);

@@ -16,6 +16,7 @@ test = false
 
 [dependencies]
 opc-camera = { path = "../opc-camera" }
+opc-core-sys = { path = "../opc-core-sys" }
 opc-chrome = { path = "../opc-chrome" }
 opc-decode = { path = "../opc-decode" }
 opc-media = { path = "../opc-media" }

@@ -46,6 +46,19 @@ func opc_camera_command(
     return DesktopFacade.emit(Data(Duml.encode(frame)), into: out, capacity: capacity)
 }
 
+/// The opcode key (`set << 8 | cmd`) of the frame `opc_camera_command` would build,
+/// so the shell can match a reply to its SET without reading DUML. -1 when the core
+/// cannot build that kind.
+@_cdecl("opc_camera_command_key")
+func opc_camera_command_key(
+    _ kind: Int32, _ ints: UnsafePointer<Int32>?, _ intCount: Int,
+    _ reals: UnsafePointer<Double>?, _ realCount: Int
+) -> Int32 {
+    let arguments = Arguments(ints, intCount, reals, realCount)
+    guard let frame = cameraFrame(kind: kind, seq: 0, arguments: arguments) else { return -1 }
+    return Int32(Duml.opcodeKey(set: frame.cmdSet, cmd: frame.cmdId))
+}
+
 // swift-format-ignore: NeverForceUnwrap
 private func cameraFrame(kind: Int32, seq: UInt16, arguments: Arguments) -> Duml.Frame? {
     switch kind {

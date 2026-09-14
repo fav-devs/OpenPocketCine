@@ -10,8 +10,10 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
+use crate::command;
 use crate::depacketizer::Depacketizer;
 use crate::health::FeedHealth;
+use crate::mailbox::SetOutcome;
 use crate::packed::DumlFrame;
 use crate::sequence::{Outgoing, Phase, Sequencer};
 use crate::status::{Status, StatusDecoder};
@@ -35,6 +37,8 @@ pub enum SessionEvent {
     Picture(Vec<u8>),
     /// A command reply or a piece of telemetry.
     Frame(DumlFrame),
+    /// What became of a live-control SET.
+    Set(SetOutcome),
     /// The camera said something the HUD shows.
     StatusChanged,
     /// The camera never answered the handshake.
@@ -134,7 +138,7 @@ impl CameraSession {
             duml_seq: 0,
             udp_seq: base_seq,
             command_counter: 0,
-            sequencer: Sequencer::new(0.0),
+            sequencer: new_sequencer(0.0),
             pump: AckPump::new(base_seq),
             depacketizer: Depacketizer::new(),
             health: FeedHealth::new(),
@@ -166,7 +170,7 @@ impl CameraSession {
         self.duml_seq = 0;
         self.udp_seq = self.base_seq;
         self.command_counter = 0;
-        self.sequencer = Sequencer::new(now);
+        self.sequencer = new_sequencer(now);
         self.pump = AckPump::new(self.base_seq);
         self.depacketizer.reset();
         self.enable_not_before = None;
@@ -228,9 +232,21 @@ impl CameraSession {
         self.health.note_decoded_frame(now);
     }
 
-    /// Queues an operator command for the next tick.
+    /// Queues an operator command for the next tick. Live-control SETs go through the
+    /// mailbox: latest wins per opcode, one on the wire at a time, retransmitted once
+    /// and settled the way the phones do it.
     pub fn send(&mut self, command: Command) {
-        self.sequencer.enqueue(command);
+        match command
+            .opcode_key()
+            .filter(|key| command::is_live_control(*key))
+        {
+            Some(key) => {
+                let now = self.now();
+                self.sequencer
+                    .fire_set(key, command, !command.is_slider(), now);
+            }
+            None => self.sequencer.enqueue(command),
+        }
     }
 
     /// Monotonic seconds since the datalink opened.
@@ -247,6 +263,9 @@ impl CameraSession {
         self.drain(&mut events)?;
 
         let now = self.now();
+        for outcome in self.sequencer.take_set_outcomes() {
+            events.push(SessionEvent::Set(outcome));
+        }
         for due in self.sequencer.tick(now) {
             if due == Outgoing::EnableLiveView && self.enable_not_before.is_some_and(|at| now < at)
             {
@@ -386,7 +405,13 @@ impl CameraSession {
                     } else {
                         self.status.apply(&frame)
                     };
+                    if let Some(key) = command::opcode_key(frame.cmd_set, frame.cmd_id) {
+                        self.sequencer.reply(key, frame.seq, now);
+                    }
                     events.push(SessionEvent::Frame(frame));
+                }
+                for outcome in self.sequencer.take_set_outcomes() {
+                    events.push(SessionEvent::Set(outcome));
                 }
                 if changed {
                     events.push(SessionEvent::StatusChanged);
@@ -459,7 +484,15 @@ impl CameraSession {
                     Command::GimbalStick { .. } => self.health.note_gimbal_throw(now),
                     _ => self.health.note_camera_set(now),
                 }
-                self.command_datagram(command)?
+                let seq = self.duml_seq;
+                let datagram = self.command_datagram(command)?;
+                if let Some(key) = command
+                    .opcode_key()
+                    .filter(|key| command::is_live_control(*key))
+                {
+                    self.sequencer.note_transmitted(key, seq);
+                }
+                datagram
             }
         };
         self.socket.send(&datagram)?;
@@ -507,4 +540,19 @@ fn subscribe_keys() -> Vec<String> {
         .filter(|key| !key.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+/// The sequencer with the core's mailbox behind it when the core is linked, and the
+/// plain queue when it is not.
+#[cfg(opc_core_linked)]
+fn new_sequencer(now: f64) -> Sequencer {
+    match crate::mailbox::CoreMailbox::new() {
+        Some(mailbox) => Sequencer::with_policy(now, Box::new(mailbox)),
+        None => Sequencer::new(now),
+    }
+}
+
+#[cfg(not(opc_core_linked))]
+fn new_sequencer(now: f64) -> Sequencer {
+    Sequencer::new(now)
 }

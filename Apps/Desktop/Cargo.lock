@@ -3820,6 +3820,7 @@ dependencies = [
  "futures",
  "opc-camera",
  "opc-chrome",
+ "opc-core-sys",
  "opc-decode",
  "opc-media",
  "opc-render",

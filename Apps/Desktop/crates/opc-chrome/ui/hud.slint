@@ -151,6 +151,7 @@ component TopBar {
     in property <string> rec-elapsed;
     in property <string> timecode;
     in property <string> move-text;
+    in property <string> notice;
     in property <bool>   enabled;
 
     callback menu-tapped();
@@ -258,6 +259,26 @@ component TopBar {
                 }
             }
 
+            if root.move-text == "" && root.notice != "": Rectangle {
+                height: 28px;
+                width: nt.preferred-width + 24px;
+                y: (parent.height - self.height) / 2;
+                background: #ffffff14;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: #ffffff2e;
+                nt := Text {
+                    text: root.notice;
+                    color: Pal.ink-dim;
+                    font-family: Pal.font;
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: 0.8px;
+                    x: (parent.width - self.preferred-width) / 2;
+                    y: (parent.height - self.preferred-height) / 2;
+                }
+            }
+
             if root.timecode != "": Text {
                 text: root.timecode;
                 color: Pal.ink-dim;
@@ -316,6 +337,8 @@ component ZoomDial {
     in property <float> maximum: 6.0;
     in property <string> label;
     in property <bool> enabled: true;
+    /// The body's chip stops, marked under the ruler.
+    in property <[float]> stops: [];
     callback changed(float);
 
     width: 360px;
@@ -341,6 +364,18 @@ component ZoomDial {
         background: Pal.ink;
         opacity: 1.0 - min(1.0, abs((self.px - root.centre) / (root.width / 2 - 8px)));
         visible: abs((self.px - root.centre) / 1px) > 26 && self.px > 0 && self.px < root.width;
+    }
+
+    for stop in root.stops: Text {
+        property <length> px: root.centre + root.ruler-w * ((stop - root.minimum) / max(0.001, root.maximum - root.minimum) - root.pct);
+        text: stop == floor(stop) ? floor(stop) + "×" : stop + "×";
+        color: Pal.ink-dim;
+        font-family: Pal.font;
+        font-size: 9px;
+        font-weight: 600;
+        x: self.px - self.preferred-width / 2;
+        y: 32px;
+        visible: self.px > 8px && self.px < root.width - 8px && abs((self.px - root.centre) / 1px) > 26;
     }
 
     Rectangle {
@@ -1718,6 +1753,10 @@ export component HudOverlay inherits Window {
     // Zoom.
     in-out property <float> zoom-value: 1.0;
     in property <string>    zoom-label: "1.0×";
+    in property <float>     zoom-max: 6.0;
+    in property <[float]>   zoom-stops: [];
+    /// A line for the operator in the top bar (a refused zoom, a SET nobody answered).
+    in property <string>    notice: "";
 
     // Modes. Pano and Livestream are shown but unavailable.
     in property <[string]> modes: ["TIMELAPSE", "SLOWMOTION", "LOW-LIGHT", "VIDEO", "PHOTO", "PANO", "LIVESTREAM"];
@@ -1881,6 +1920,7 @@ export component HudOverlay inherits Window {
         x: 0; y: 0; width: parent.width;
         timecode: root.timecode;
         move-text: root.move-text;
+        notice: root.notice;
         follow-label: root.follow-label;
         format-label: root.format-label;
         expo-label: root.expo-label;
@@ -1909,7 +1949,9 @@ export component HudOverlay inherits Window {
         y: root.mid-top + root.bar-h + 10px;
         value <=> root.zoom-value;
         label: root.zoom-label;
-        enabled: root.controls-enabled;
+        maximum: root.zoom-max;
+        stops: root.zoom-stops;
+        enabled: root.controls-enabled && root.zoom-max > 1.0;
         changed(v) => { root.zoom-changed(v); }
     }
 

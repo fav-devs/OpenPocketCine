@@ -295,11 +295,116 @@ fn zoom_follows_the_body_rather_than_fighting_it() {
         zoom_hundredths: Some(400),
         ..Status::default()
     });
+    // Without the core the stand-in stops are 1 / 3 / 6 / 12: from 4× the next is 6×.
     assert_eq!(
         sent(&shell.press(Key::Char('='), 0.0)),
-        [Command::ZoomFactor(4.5)],
-        "the next step should continue from where the lens actually is"
+        [Command::ZoomJump(6.0)],
+        "the next stop should be the one above where the lens actually is"
     );
+    assert_eq!(
+        sent(&shell.press(Key::Char('-'), 0.0)),
+        [Command::ZoomJump(3.0)]
+    );
+    assert_eq!(
+        sent(&shell.press(Key::Char('0'), 0.0)),
+        [Command::ZoomJump(1.0)]
+    );
+    assert_eq!(shell.zoom_stops(), [1.0, 3.0, 6.0, 12.0]);
+}
+
+#[test]
+fn a_zoom_out_of_dlog2_hops_the_colour_first_and_puts_it_back_at_wide() {
+    let mut shell = framed();
+    shell.set_model(Some(0x20));
+    shell.set_status(Status {
+        color_mode: Some(0x41),
+        ..Status::default()
+    });
+    // The hop goes out; the zoom waits for the body to report D-Log.
+    assert_eq!(
+        sent(&shell.press(Key::Char('='), 0.0)),
+        [Command::SetColorMode {
+            mode: 0x17,
+            model_id: 0x20
+        }]
+    );
+    assert!(!shell.notice(0.5).is_empty(), "the operator is told why");
+    assert!(shell.tick(0.5).is_empty(), "nothing until the hop lands");
+    shell.set_status(Status {
+        color_mode: Some(0x17),
+        ..Status::default()
+    });
+    assert_eq!(sent(&shell.tick(0.6)), [Command::ZoomJump(3.0)]);
+    // Parking at 1× restores D-Log2.
+    assert_eq!(
+        sent(&shell.press(Key::Char('0'), 1.0)),
+        [
+            Command::ZoomJump(1.0),
+            Command::SetColorMode {
+                mode: 0x41,
+                model_id: 0x20
+            }
+        ]
+    );
+}
+
+#[test]
+fn rolling_in_dlog2_refuses_the_zoom_and_says_so() {
+    let mut shell = framed();
+    shell.set_status(Status {
+        color_mode: Some(0x41),
+        is_recording: true,
+        ..Status::default()
+    });
+    assert!(shell.press(Key::Char('='), 0.0).is_empty());
+    assert_eq!(shell.notice(0.1), "ZOOM LOCKED · D-LOG2 WHILE ROLLING");
+    assert_eq!(shell.notice(5.0), "", "a notice does not stay forever");
+}
+
+#[test]
+fn a_format_just_sent_is_pinned_until_the_body_confirms_it_or_gives_up() {
+    use opc_monitor::SetOutcome;
+    let mut shell = framed();
+    // 4K at 30, with 60 on offer: codes from the body's own table.
+    shell.set_status(Status {
+        available_formats: vec![(0x10, 0x03), (0x10, 0x06)],
+        video_resolution: Some(0x10),
+        video_frame_rate: Some(0x03),
+        ..Status::default()
+    });
+    assert_eq!(shell.format_label(0.0), "4K·30");
+    shell.press(Key::Char(']'), 0.0);
+    assert_eq!(
+        shell.format_label(0.5),
+        "4K·60",
+        "the chip reads the format asked for"
+    );
+    // A stale status inside the window does not unpin it.
+    shell.set_status(Status {
+        available_formats: vec![(0x10, 0x03), (0x10, 0x06)],
+        video_resolution: Some(0x10),
+        video_frame_rate: Some(0x03),
+        ..Status::default()
+    });
+    assert_eq!(shell.format_label(0.5), "4K·60");
+    // The body confirms: the pin is done with, and the chip reads the body.
+    shell.set_status(Status {
+        available_formats: vec![(0x10, 0x03), (0x10, 0x06)],
+        video_resolution: Some(0x10),
+        video_frame_rate: Some(0x06),
+        ..Status::default()
+    });
+    assert_eq!(shell.format_label(0.6), "4K·60");
+    // A SET nobody answered drops the pin and tells the operator.
+    shell.press(Key::Char('['), 1.0);
+    shell.note_set(SetOutcome::Unanswered {
+        command: Command::SetVideoFormat {
+            resolution: 0x10,
+            frame_rate: 0x03,
+        },
+    });
+    assert_eq!(shell.notice(1.1), "NO ANSWER FROM THE CAMERA");
+    assert_eq!(shell.format_label(1.1), "4K·60");
 }
 
 #[test]

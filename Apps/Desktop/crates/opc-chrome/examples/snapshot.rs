@@ -94,6 +94,13 @@ fn main() {
             storage_text: "5:36:07".into(),
             zoom: 1.0,
             zoom_label: "1.0×".into(),
+            zoom_max: 12.0,
+            zoom_stops: vec![1.0, 3.0, 6.0, 12.0],
+            notice: if name == "failed" {
+                "NO ANSWER FROM THE CAMERA".into()
+            } else {
+                String::new()
+            },
             mode: 3,
             photo_mode: false,
             controls_enabled: matches!(phase, Phase::Live),

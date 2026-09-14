@@ -20,7 +20,10 @@ All notable changes to this project are documented here. The format is based on
   Limits lattices, now built in `OpenPocketViewCore` for every shell, with a
   reference key), peaking sensitivity and colour, zebra levels and colours on
   the feed's axis, thirds / phi / diagonal grid, guide frames with a mask, and
-  the crosshair. Unqualified on a physical body.
+  the crosshair. Live-control SETs run through the core's `CameraSetMailbox`
+  (latest wins, 300 ms retransmit, 2 s settle, FORMAT pin, "no answer" notice)
+  and the zoom ruler carries the body's own stops with the D-Log2 hop.
+  Unqualified on a physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

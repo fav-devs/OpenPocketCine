@@ -19,6 +19,8 @@ use crate::library::{Library, MediaAction, Player};
 use crate::luts::{LutChoice, LutMenu};
 use crate::moves::{MoveEngine, Program, Waypoint};
 use crate::sheets::{self, Pick, Prefs, SheetKind, Slot};
+use crate::zoom::{self, ZoomHop, ZoomNote, ZoomPolicy, ZoomRules, ZoomWrite};
+use opc_camera::SetOutcome;
 use opc_render::{letterbox, AssistScalars, FalseColorScale, GradeOptions, Peaking, Rgba, Zebra};
 use opc_ui::{
     next_frame_rate, next_resolution, Action, Controls, Countdown, Drag, Fit, Hud, Key, Phase,
@@ -36,8 +38,9 @@ const STICK_REPEAT: f64 = 0.2;
 const BOX_CONFIRM: f64 = 1.5;
 /// Frames older than this stop counting towards the rate shown.
 const FPS_WINDOW: f64 = 1.0;
-const ZOOM_MIN: f64 = 1.0;
-const ZOOM_MAX: f64 = 6.0;
+/// How long a FORMAT pin and a notice stay up, as the phones keep them.
+const PIN_SECONDS: f64 = 2.0;
+const NOTICE_SECONDS: f64 = 2.5;
 
 /// What the window is asked to do.
 #[derive(Debug, Clone, PartialEq)]
@@ -208,6 +211,14 @@ pub struct Shell {
     assist_bar: bool,
     /// Which false-colour lattices the window was last asked to load.
     false_color_key: Option<FalseColorKey>,
+    /// The body's chip stops, and the D-Log2 hop a zoom may be waiting on.
+    zoom_rules: ZoomRules,
+    zoom_hop: ZoomHop,
+    zoom_policy: Box<dyn ZoomPolicy>,
+    /// A FORMAT just sent: the chip reads it until the body confirms or 2 s pass.
+    format_pin: Option<(u8, u8, String, f64)>,
+    /// A line for the operator in the top bar, and when it goes away.
+    notice: Option<(String, f64)>,
     stick_sent_at: f64,
     presented: VecDeque<f64>,
     /// The rasterised chrome, kept until something it draws changes.
@@ -297,6 +308,11 @@ impl Shell {
             assists: AssistOptions::default(),
             assist_bar: false,
             false_color_key: None,
+            zoom_rules: ZoomRules::default(),
+            zoom_hop: ZoomHop::default(),
+            zoom_policy: zoom::policy(),
+            format_pin: None,
+            notice: None,
             stick_sent_at: f64::NEG_INFINITY,
             presented: VecDeque::new(),
             chrome: None,
@@ -589,6 +605,125 @@ impl Shell {
         self.chrome_stale = true;
         // A colour-mode or ISO change moves the false-colour zones.
         self.sync_false_color();
+        self.sync_zoom();
+        self.settle_format_pin();
+    }
+
+    /// The body's stops follow its model, format and shooting mode; a zoom held for
+    /// the D-Log2 hop goes once the body reports the hop.
+    fn sync_zoom(&mut self) {
+        let status = &self.hud.status;
+        self.zoom_rules.refresh(
+            self.zoom_policy.as_ref(),
+            self.model_id,
+            status.video_resolution,
+            status.shooting_mode,
+        );
+        let color_mode = status.color_mode;
+        let (released, note) = self.zoom_hop.status(color_mode, self.last_now);
+        if let Some(command) = released {
+            self.chrome_pending_intents.push(Intent::Send(command));
+        }
+        if let Some(note) = note {
+            self.set_notice(note.text());
+        }
+    }
+
+    /// The FORMAT chip stops reading the pin once the body reports it, or gives up
+    /// after the settle window.
+    fn settle_format_pin(&mut self) {
+        let Some((resolution, frame_rate, _, deadline)) = self.format_pin else {
+            return;
+        };
+        let status = &self.hud.status;
+        let confirmed = status.video_resolution == Some(resolution)
+            && status.video_frame_rate == Some(frame_rate);
+        if confirmed || self.last_now >= deadline {
+            self.format_pin = None;
+        }
+    }
+
+    /// The FORMAT chip: the pinned label while a SET is out, else what the body says.
+    pub fn format_label(&self, now: f64) -> String {
+        match &self.format_pin {
+            Some((_, _, label, deadline)) if now < *deadline => label.clone(),
+            _ => self.hud.status.format_label(),
+        }
+    }
+
+    /// The body's chip stops right now.
+    pub fn zoom_stops(&self) -> &[f64] {
+        self.zoom_rules.stops()
+    }
+
+    /// A zoom, as the body allows it: clamped to its stops, hopped out of D-Log2
+    /// first, refused while rolling in D-Log2.
+    fn zoom_write(&mut self, write: ZoomWrite, now: f64) -> Vec<Intent> {
+        self.chrome_stale = true;
+        let write = match write {
+            ZoomWrite::Slider(factor) => ZoomWrite::Slider(self.zoom_rules.clamp(factor)),
+            ZoomWrite::Jump(factor) => ZoomWrite::Jump(self.zoom_rules.clamp(factor)),
+        };
+        let status = &self.hud.status;
+        let (commands, note) = self.zoom_hop.request(
+            write,
+            self.zoom_policy.as_ref(),
+            status.color_mode,
+            status.is_recording,
+            self.model_id,
+            now,
+        );
+        if let Some(note) = note {
+            self.set_notice(note.text());
+        }
+        if note != Some(ZoomNote::LockedWhileRecording) {
+            self.controls.set_zoom(write.factor());
+        }
+        commands.into_iter().map(Intent::Send).collect()
+    }
+
+    /// Something sent that the chrome should reflect before the body confirms it.
+    fn note_sent(&mut self, command: Command, now: f64) {
+        if let Command::SetVideoFormat {
+            resolution,
+            frame_rate,
+        } = command
+        {
+            let label = Status {
+                video_resolution: Some(resolution),
+                video_frame_rate: Some(frame_rate),
+                ..Status::default()
+            }
+            .format_label();
+            self.format_pin = Some((resolution, frame_rate, label, now + PIN_SECONDS));
+            self.chrome_stale = true;
+        }
+    }
+
+    /// What became of a SET, from the mailbox.
+    pub fn note_set(&mut self, outcome: SetOutcome) {
+        match outcome {
+            SetOutcome::Unanswered { command } => {
+                if matches!(command, Command::SetVideoFormat { .. }) {
+                    self.format_pin = None;
+                }
+                self.set_notice("NO ANSWER FROM THE CAMERA");
+            }
+            SetOutcome::Acked { .. } | SetOutcome::Superseded { .. } => {}
+        }
+    }
+
+    fn set_notice(&mut self, text: &str) {
+        self.notice = Some((text.to_string(), self.last_now + NOTICE_SECONDS));
+        self.chrome_stale = true;
+    }
+
+    /// The notice for the top bar, while it lasts.
+    pub fn notice(&self, now: f64) -> String {
+        match &self.notice {
+            Some((text, until)) if now < *until => text.clone(),
+            _ => String::new(),
+        }
     }
 
     /// The body's live pose, when it has reported one.
@@ -759,7 +894,12 @@ impl Shell {
     fn apply_pick(&mut self, pick: Pick) -> Vec<Intent> {
         self.chrome_stale = true;
         match pick {
-            Pick::Send(commands) => commands.into_iter().map(Intent::Send).collect(),
+            Pick::Send(commands) => {
+                for command in &commands {
+                    self.note_sent(*command, self.last_now);
+                }
+                commands.into_iter().map(Intent::Send).collect()
+            }
             Pick::Zebra => self.act(Action::ToggleZebra, 0.0),
             Pick::Peaking => self.act(Action::TogglePeaking, 0.0),
             Pick::Grade => self.act(Action::ToggleGrade, 0.0),
@@ -1041,7 +1181,19 @@ impl Shell {
     fn act(&mut self, action: Action, now: f64) -> Vec<Intent> {
         self.chrome_stale = true;
         match action {
-            Action::Send(command) => vec![Intent::Send(command)],
+            Action::Send(command) => {
+                self.note_sent(command, now);
+                vec![Intent::Send(command)]
+            }
+            Action::ZoomIn => {
+                let target = self.zoom_rules.next(self.controls.zoom());
+                self.zoom_write(ZoomWrite::Jump(target), now)
+            }
+            Action::ZoomOut => {
+                let target = self.zoom_rules.previous(self.controls.zoom());
+                self.zoom_write(ZoomWrite::Jump(target), now)
+            }
+            Action::ZoomWide => self.zoom_write(ZoomWrite::Jump(1.0), now),
             Action::Still => vec![Intent::Still],
             Action::Quit => vec![Intent::Quit],
             Action::ToggleTimer => {
@@ -1116,10 +1268,12 @@ impl Shell {
                 // back unchanged is a command that only costs a round trip.
                 stepped
                     .map(|(resolution, frame_rate)| {
-                        Intent::Send(Command::SetVideoFormat {
+                        let command = Command::SetVideoFormat {
                             resolution,
                             frame_rate,
-                        })
+                        };
+                        self.note_sent(command, now);
+                        Intent::Send(command)
                     })
                     .into_iter()
                     .collect()
@@ -1257,10 +1411,8 @@ impl Shell {
                     fired.push(Intent::Send(Command::GimbalRecenter));
                 }
                 ChromeIntent::ZoomSet(v) => {
-                    let z = (v as f64).clamp(ZOOM_MIN, ZOOM_MAX);
-                    self.controls.set_zoom(z);
-                    self.chrome_stale = true;
-                    fired.push(Intent::Send(Command::ZoomFactor(z)));
+                    let now = self.last_now;
+                    fired.extend(self.zoom_write(ZoomWrite::Slider(f64::from(v)), now));
                 }
                 ChromeIntent::GimbalMoved { x, y } => {
                     // The pad reports right and up positive, the same axes as the keys.
@@ -1832,6 +1984,10 @@ impl Shell {
             };
             let overlays = self.overlays();
             let assist_bar = self.assist_bar.then(|| self.assist_chips());
+            let format_label = self.format_label(now);
+            let notice = self.notice(now);
+            let zoom_max = self.zoom_rules.max() as f32;
+            let zoom_stops: Vec<f32> = self.zoom_rules.stops().iter().map(|s| *s as f32).collect();
             let move_text = self.move_text(now);
             let screen = self.screen;
             let grid_width = self.window.0 as f32;
@@ -1872,7 +2028,7 @@ impl Shell {
                     is_recording: status.is_recording,
                     rec_elapsed: status.elapsed_label(),
                     follow_on: self.gimbal_mode == GimbalMode::Follow,
-                    format_label: status.format_label(),
+                    format_label,
                     expo_label: match status.expo_mode {
                         Some(0x04) => "M".to_string(),
                         _ => "AUTO".to_string(),
@@ -1882,6 +2038,9 @@ impl Shell {
                     storage_text: status.remaining_label(),
                     zoom: zoom as f32,
                     zoom_label: format!("{:.1}×", zoom),
+                    zoom_max,
+                    zoom_stops,
+                    notice,
                     mode,
                     photo_mode: mode == 4,
                     controls_enabled,

@@ -254,6 +254,25 @@ pub const OPC_CAM_MEDIA_FAVORITE: i32 = 71;
 pub const OPC_CAM_PLAYBACK_SPECIAL: i32 = 72;
 pub const OPC_CAM_GIMBAL_TIMED_TARGET: i32 = 73;
 
+/// `CameraSetMailbox` decisions, as `opc_mailbox_*` return them.
+pub const OPC_MAILBOX_LAUNCH: i32 = 0;
+pub const OPC_MAILBOX_COALESCE: i32 = 1;
+pub const OPC_MAILBOX_ACK_ACCEPT: i32 = 0;
+pub const OPC_MAILBOX_ACK_ACCEPT_LATE: i32 = 1;
+pub const OPC_MAILBOX_ACK_DROP_SUPERSEDED: i32 = 2;
+pub const OPC_MAILBOX_ACK_DROP_UNKNOWN: i32 = 3;
+pub const OPC_MAILBOX_TIMEOUT_SUBSCRIBE_MATCHES: i32 = 0;
+pub const OPC_MAILBOX_TIMEOUT_WAIT_LATE: i32 = 1;
+pub const OPC_MAILBOX_TIMEOUT_LAUNCH_PENDING: i32 = 2;
+pub const OPC_MAILBOX_TIMEOUT_IDLE: i32 = 3;
+pub const OPC_MAILBOX_PENDING_IMMEDIATE: i32 = 0;
+pub const OPC_MAILBOX_PENDING_AFTER_HOLD: i32 = 1;
+pub const OPC_MAILBOX_PENDING_NONE: i32 = 2;
+/// What a zoom write needs first, as `opc_zoom_hop` returns it.
+pub const OPC_ZOOM_HOP_NONE: i32 = 0;
+pub const OPC_ZOOM_HOP_COLOR: i32 = 1;
+pub const OPC_ZOOM_HOP_BLOCKED: i32 = 2;
+
 pub const OPC_PKT_HANDSHAKE: u8 = 0x00;
 pub const OPC_PKT_TELEMETRY: u8 = 0x01;
 pub const OPC_PKT_VIDEO: u8 = 0x02;
@@ -521,6 +540,42 @@ extern "C" {
         midtone_ire: f32,
         out: *mut f32,
     ) -> i32;
+    /// The opcode key of the frame `opc_camera_command` would build, or -1.
+    pub fn opc_camera_command_key(
+        kind: i32,
+        ints: *const i32,
+        int_count: usize,
+        reals: *const f64,
+        real_count: usize,
+    ) -> i32;
+    pub fn opc_duml_opcode_key(set: i32, cmd: i32) -> i32;
+    pub fn opc_duml_is_live_control(key: i32) -> i32;
+
+    /// The core's `CameraSetMailbox`, one per datalink.
+    pub fn opc_mailbox_new() -> *mut c_void;
+    pub fn opc_mailbox_destroy(handle: *mut c_void);
+    pub fn opc_mailbox_reset(handle: *mut c_void);
+    pub fn opc_mailbox_offer(handle: *mut c_void, key: i32, urgent: i32, now: f64) -> i32;
+    pub fn opc_mailbox_begin_launch(handle: *mut c_void, key: i32, now: f64);
+    pub fn opc_mailbox_note_transmit(handle: *mut c_void, key: i32, seq: i32);
+    pub fn opc_mailbox_decide_ack(handle: *mut c_void, key: i32, seq: i32) -> i32;
+    pub fn opc_mailbox_timeout(handle: *mut c_void, key: i32, subscribe_matches: i32) -> i32;
+    pub fn opc_mailbox_pending_launch(handle: *mut c_void, key: i32, now: f64) -> i32;
+    pub fn opc_mailbox_hold_remaining(handle: *mut c_void, key: i32, now: f64) -> f64;
+    pub fn opc_mailbox_pipelines(key: i32) -> i32;
+
+    /// Zoom rules per body: the chip stops, and what a write needs first.
+    pub fn opc_zoom_stops(
+        model_id: i32,
+        resolution: i32,
+        shooting_mode: i32,
+        out: *mut f64,
+        capacity: usize,
+    ) -> i32;
+    pub fn opc_zoom_hop(factor: f64, color_mode: i32, is_recording: i32, out_mode: *mut i32)
+        -> i32;
+    pub fn opc_zoom_restore_dlog2(factor: f64) -> i32;
+
     /// The scale's legend, one `label<TAB>r<TAB>g<TAB>b` line per zone.
     pub fn opc_false_color_legend(
         scale: i32,

@@ -26,7 +26,13 @@ over the picture:
   exposure mode chip (`AUTO`/`M`), the link state in the middle with a red `REC` badge
   and running time while the body is rolling, and exit at the far right.
 - **Zoom ruler** — a dotted ruler under the top bar that slides beneath a fixed ring;
-  drag it to zoom, the label under it is the truth.
+  drag it to zoom, the label under it is the truth. The body's own chip stops are marked
+  on it (Pocket 4 Pro 1× / 3× / 6× / 12×; Pocket 4 and Pocket 3 1× / 2× / 4×, 2× at most
+  for a Pocket 3 in 4K; 1× only in slow motion, timelapse and low light; Nano 1×), and
+  `+` / `-` step between them. A body with only 1× greys the ruler. D-Log2 rejects every
+  zoom, so a zoom off 1× first hops the colour to D-Log, waits for the body to report
+  it, then zooms; parking back at 1× puts D-Log2 back. Rolling in D-Log2 locks the zoom,
+  and the top bar says so.
 - **Exposure plate** (left) — shutter, `ISO`, `EV` and `WB` readouts. A field the camera
   has not reported is absent rather than guessed.
 - **Status plate** (right) — Wi-Fi, battery (red at 20 %), card time left, and the rate
@@ -163,7 +169,7 @@ writes PNGs of the finding, live, recording, failed and wide-window states.
 | `Space` | start recording | `T` | 3-second countdown, or cancel it |
 | `R` | stop recording | `S` | write a still |
 | Arrows | pan and tilt | `C` | recentre the gimbal |
-| `+` / `-` | zoom in and out | `F` | flip to selfie and back |
+| `+` / `-` | the next / previous zoom stop | `F` | flip to selfie and back |
 | `0` | back to wide | `Esc` | close |
 | Drag | track what you drew around | `X` | stop tracking |
 | `[` / `]` | step resolution / frame rate | `H` | hide the chrome |
@@ -248,7 +254,17 @@ other. Two channels, and nothing shared but the messages.
   where the subject moved to, so a box left on screen would stop being where the subject
   is, and the operator would believe it.
 - **The zoom follows the body.** Somebody may have turned the ring; the next `+` steps
-  from where the lens actually is.
+  to the stop above where the lens actually is. Which stops the body has is the core's
+  answer (`CameraModel.activeZoomStops`), asked again whenever the model, format or
+  shooting mode moves.
+- **Every live-control SET goes through the phones' mailbox.** The core's
+  `CameraSetMailbox` decides, per opcode, what may go on the wire: one generation at a
+  time, latest wins (a wheel or a slider replaces its pending step rather than queuing),
+  the zoom slider pipelined at 20 Hz. The datalink keeps its clock the way the phones
+  do — retransmit once after 300 ms of silence, settle at 2 s, accept a late ACK for
+  the open generation, drop a superseded one. A FORMAT just sent is pinned on its chip
+  until the body confirms it or the settle window passes; a SET nobody answered puts
+  "no answer from the camera" in the top bar.
 - **Presented frames drive the watchdog**, not arrived ones. A decoder quietly producing
   nothing looks exactly like a healthy feed otherwise — the black-picture-with-live-HUD
   failure this whole port has been written around.

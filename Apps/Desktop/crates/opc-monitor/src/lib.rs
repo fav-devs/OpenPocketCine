@@ -11,8 +11,10 @@ pub mod luts;
 pub mod moves;
 pub mod sheets;
 pub mod shell;
+pub mod zoom;
 
 pub use assists::{AssistOptions, AssistTool};
 pub use library::{Library, MediaAction, Player};
 pub use luts::{LutChoice, LutMenu};
+pub use opc_camera::SetOutcome;
 pub use shell::{FalseColorKey, GimbalMode, Intent, LutRequest, Shell, Toggles, TouchPhase};
