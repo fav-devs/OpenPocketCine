@@ -6,8 +6,10 @@
 //! that can build it.
 
 pub mod library;
+pub mod luts;
 pub mod sheets;
 pub mod shell;
 
 pub use library::{Library, MediaAction, Player};
-pub use shell::{GimbalMode, Intent, Shell, Toggles, TouchPhase};
+pub use luts::{LutChoice, LutMenu};
+pub use shell::{GimbalMode, Intent, LutRequest, Shell, Toggles, TouchPhase};

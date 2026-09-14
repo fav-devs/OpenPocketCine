@@ -318,10 +318,16 @@ fn the_cube_is_loaded_once_per_change_not_once_per_frame() {
     let mut shell = framed();
     assert_eq!(shell.take_lut_change(), None);
     shell.press(Key::Char('l'), 0.0);
-    assert_eq!(shell.take_lut_change(), Some(true));
+    assert_eq!(
+        shell.take_lut_change(),
+        Some(opc_monitor::LutRequest::Toggle(true))
+    );
     assert_eq!(shell.take_lut_change(), None, "already applied");
     shell.press(Key::Char('l'), 0.0);
-    assert_eq!(shell.take_lut_change(), Some(false));
+    assert_eq!(
+        shell.take_lut_change(),
+        Some(opc_monitor::LutRequest::Toggle(false))
+    );
 }
 
 #[test]
@@ -566,13 +572,14 @@ fn gimbal_pad_throws_on_down_and_rests_on_release_and_cancel() {
     let mut shell = framed();
     shell.set_phase(opc_ui::Phase::Live);
     // The pad is 96 px square at the bottom left, centred on (252, 624) in this
-    // 1280 × 720 layout. Below and right of centre throws both axes positive.
-    let thrown = sent(&shell.control_down(280.0, 650.0, 0.0).expect("gimbal pad"));
+    // 1280 × 720 layout. Above and right of centre throws both axes positive: up is
+    // positive on the pad exactly as the Up arrow is.
+    let thrown = sent(&shell.control_down(280.0, 600.0, 0.0).expect("gimbal pad"));
     assert!(
         matches!(thrown.as_slice(), [Command::GimbalStick { axis0, axis1 }] if *axis0 > 1024 && *axis1 > 1024)
     );
     assert_eq!(
-        sent(&shell.control_up(280.0, 650.0, 0.0)),
+        sent(&shell.control_up(280.0, 600.0, 0.0)),
         [Command::GimbalStick {
             axis0: 1024,
             axis1: 1024
@@ -580,7 +587,7 @@ fn gimbal_pad_throws_on_down_and_rests_on_release_and_cancel() {
         "a release is an immediate rest, not a later timer tick"
     );
 
-    shell.control_down(280.0, 650.0, 1.0).expect("gimbal pad");
+    shell.control_down(280.0, 600.0, 1.0).expect("gimbal pad");
     assert_eq!(
         sent(&shell.control_cancel()),
         [Command::GimbalStick {
@@ -701,8 +708,9 @@ fn an_open_sheet_owns_the_whole_window() {
     shell.chrome(0.0);
     // The middle of the picture would start a tracking box; under a sheet it cannot.
     assert!(shell.is_control(640.0, 500.0));
-    shell.control_down(640.0, 500.0, 0.0).expect("scrim");
-    shell.control_up(640.0, 500.0, 0.0);
+    // Below the panel is scrim, whatever the tab's row count.
+    shell.control_down(640.0, 690.0, 0.0).expect("scrim");
+    shell.control_up(640.0, 690.0, 0.0);
     assert_eq!(shell.sheet(), None, "a tap on the scrim closes the sheet");
 }
 
@@ -778,7 +786,10 @@ fn a_listed_clip_can_be_selected_played_and_starred() {
     assert!(shell.tick(0.2).is_empty(), "a thumbnail is asked for once");
 
     shell.library_mut().select_index(0);
-    assert_eq!(shell.library().selected_file().map(|f| f.path.clone()), Some(clip.path.clone()));
+    assert_eq!(
+        shell.library().selected_file().map(|f| f.path.clone()),
+        Some(clip.path.clone())
+    );
 
     // The player opens once the window has the clip on disk.
     shell.open_player(clip.clone(), 26_000, true, false);
@@ -793,4 +804,66 @@ fn a_listed_clip_can_be_selected_played_and_starred() {
         [Intent::Media(MediaAction::ClosePlayer)]
     );
     assert_eq!(shell.screen(), Screen::Library);
+}
+
+// ── Gimbal ramp ──────────────────────────────────────────────────────────────
+
+#[test]
+fn with_the_ramp_on_a_throw_eases_in_and_eases_back_to_rest() {
+    use opc_monitor::sheets::SheetKind;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    // Pick "Soft" on the Camera tab's ramp row through the sheet, as the operator would.
+    shell.press(Key::Tab, 0.0);
+    shell.chrome(0.0);
+    assert_eq!(shell.sheet(), Some(SheetKind::Settings));
+    shell.set_ramp_for_test(1);
+    shell.press(Key::Escape, 0.0);
+
+    let first = sent(&shell.press(Key::Right, 1.0));
+    let axis0 = |commands: &[Command]| match commands.last() {
+        Some(Command::GimbalStick { axis0, .. }) => *axis0,
+        other => panic!("expected a stick, got {other:?}"),
+    };
+    let start = axis0(&first);
+    assert!(
+        start > 1024 && start < 1424,
+        "the first step is a fraction: {start}"
+    );
+    let mut last = start;
+    let mut t = 1.05;
+    while t < 3.0 {
+        let step = sent(&shell.tick(t));
+        if !step.is_empty() {
+            let now = axis0(&step);
+            assert!(now >= last, "the throw only grows toward the target");
+            last = now;
+        }
+        t += 0.05;
+    }
+    assert!(
+        last >= 1420,
+        "held long enough, the throw reaches full: {last}"
+    );
+
+    shell.release(Key::Right, 3.0);
+    let mut rested = false;
+    let mut t = 3.05;
+    while t < 6.0 {
+        let step = sent(&shell.tick(t));
+        if let Some(Command::GimbalStick { axis0, axis1 }) = step.last() {
+            if *axis0 == 1024 && *axis1 == 1024 {
+                rested = true;
+            }
+        }
+        t += 0.05;
+    }
+    assert!(
+        rested,
+        "the stick ends centred, not parked at a small throw"
+    );
+    assert!(
+        sent(&shell.tick(7.0)).is_empty(),
+        "nothing more goes out once rested"
+    );
 }

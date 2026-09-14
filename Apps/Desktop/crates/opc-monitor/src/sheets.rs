@@ -8,6 +8,7 @@
 use opc_camera::{frame_rate_fps, resolution_name, Command, Status};
 use opc_chrome::{SheetRowState, SheetState};
 
+use crate::luts::{self, LutChoice, LutMenu};
 use crate::shell::{GimbalMode, Toggles};
 
 /// Which sheet is open.
@@ -34,6 +35,21 @@ pub struct Prefs {
     pub gimbal_speed: u8,
     pub grid: bool,
     pub timecode: bool,
+    /// The stick's first-order follow: 0 off, 1 soft, 2 medium.
+    pub ramp: u8,
+    /// The `T` take countdown, in seconds.
+    pub countdown_seconds: u32,
+}
+
+impl Prefs {
+    /// The ramp's time constant, as the mobile shells define it.
+    pub fn ramp_tau(&self) -> f64 {
+        match self.ramp {
+            1 => 0.35,
+            2 => 0.18,
+            _ => 0.0,
+        }
+    }
 }
 
 impl Default for Prefs {
@@ -45,6 +61,8 @@ impl Default for Prefs {
             gimbal_speed: 0x01,
             grid: false,
             timecode: false,
+            ramp: 0,
+            countdown_seconds: 3,
         }
     }
 }
@@ -66,6 +84,9 @@ pub enum Pick {
     VocalBoost(u8),
     Fov(u8),
     GimbalSpeed(u8),
+    Ramp(u8),
+    Countdown(u32),
+    Lut(LutChoice),
     /// A chip that is shown but does nothing here yet.
     Nothing,
 }
@@ -79,6 +100,8 @@ pub struct Context<'a> {
     pub gimbal_mode: GimbalMode,
     /// The body's model id for commands that encode per model, or -1.
     pub model_id: i32,
+    pub luts: &'a LutMenu,
+    pub lut_choice: &'a LutChoice,
 }
 
 /// A built sheet: what to draw, and what each chip means.
@@ -347,7 +370,7 @@ fn settings(tab: usize, context: Context) -> Built {
     let rows = match tab {
         0 => camera_rows(context),
         1 => audio_rows(context.prefs),
-        _ => assist_rows(context.prefs, context.toggles),
+        _ => assist_rows(context),
     };
     assemble("SETTINGS", &SETTINGS_TABS, tab, rows)
 }
@@ -436,7 +459,13 @@ fn camera_rows(context: Context) -> Vec<RowBuilder> {
         )
         .option("Fast", prefs.gimbal_speed == 0x00, Pick::GimbalSpeed(0x00));
 
-    vec![focus, white_balance, color, fov, follow, speed]
+    // The stick's ease-in and -out, applied here before the throw goes out.
+    let ramp = RowBuilder::new("Gimbal ramp")
+        .option("Off", prefs.ramp == 0, Pick::Ramp(0))
+        .option("Soft", prefs.ramp == 1, Pick::Ramp(1))
+        .option("Medium", prefs.ramp == 2, Pick::Ramp(2));
+
+    vec![focus, white_balance, color, fov, follow, speed, ramp]
 }
 
 fn audio_rows(prefs: Prefs) -> Vec<RowBuilder> {
@@ -473,7 +502,9 @@ fn audio_rows(prefs: Prefs) -> Vec<RowBuilder> {
     vec![channel, vocal, wind, directional]
 }
 
-fn assist_rows(prefs: Prefs, toggles: Toggles) -> Vec<RowBuilder> {
+fn assist_rows(context: Context) -> Vec<RowBuilder> {
+    let prefs = context.prefs;
+    let toggles = context.toggles;
     let on_off = |title: &str, on: bool, off_pick: Pick, on_pick: Pick| {
         RowBuilder::new(title)
             .option("Off", !on, off_pick)
@@ -485,13 +516,45 @@ fn assist_rows(prefs: Prefs, toggles: Toggles) -> Vec<RowBuilder> {
             .option("Off", !on, if on { pick.clone() } else { Pick::Nothing })
             .option("On", on, if on { Pick::Nothing } else { pick })
     };
+
+    // The LUT row: off, the core's official cubes, then the operator's own.
+    let mut lut = RowBuilder::new("LUT").option(
+        "Off",
+        !toggles.grade || *context.lut_choice == LutChoice::Off,
+        Pick::Lut(LutChoice::Off),
+    );
+    for name in &context.luts.builtin {
+        lut = lut.option(
+            name.clone(),
+            toggles.grade && *context.lut_choice == LutChoice::BuiltIn(name.clone()),
+            Pick::Lut(LutChoice::BuiltIn(name.clone())),
+        );
+    }
+    for file in &context.luts.custom {
+        lut = lut.option(
+            luts::display_name(file).to_string(),
+            toggles.grade && *context.lut_choice == LutChoice::File(file.clone()),
+            Pick::Lut(LutChoice::File(file.clone())),
+        );
+    }
+    let folder = RowBuilder::placeholder(
+        "LUT folder",
+        &format!("Drop .cube files in {}", context.luts.folder),
+    );
+
+    let countdown = RowBuilder::new("Countdown")
+        .option("3 s", prefs.countdown_seconds == 3, Pick::Countdown(3))
+        .option("5 s", prefs.countdown_seconds == 5, Pick::Countdown(5))
+        .option("10 s", prefs.countdown_seconds == 10, Pick::Countdown(10));
+
     vec![
         RowBuilder::new("Grid")
             .option("Off", !prefs.grid, Pick::Grid(false))
             .option("Thirds", prefs.grid, Pick::Grid(true)),
         toggle("Overexposure alert", toggles.zebra, Pick::Zebra),
         toggle("Focus peaking", toggles.peaking, Pick::Peaking),
-        toggle("LUT", toggles.grade, Pick::Grade),
+        lut,
+        folder,
         toggle("Mirror", toggles.mirror, Pick::Mirror),
         on_off(
             "Timecode",
@@ -499,6 +562,7 @@ fn assist_rows(prefs: Prefs, toggles: Toggles) -> Vec<RowBuilder> {
             Pick::Timecode(false),
             Pick::Timecode(true),
         ),
+        countdown,
     ]
 }
 
@@ -507,12 +571,20 @@ mod tests {
     use super::*;
 
     fn context(status: &Status) -> Context<'_> {
+        static MENU: std::sync::OnceLock<LutMenu> = std::sync::OnceLock::new();
+        static CHOICE: LutChoice = LutChoice::Off;
         Context {
             status,
             prefs: Prefs::default(),
             toggles: Toggles::default(),
             gimbal_mode: GimbalMode::Follow,
             model_id: -1,
+            luts: MENU.get_or_init(|| LutMenu {
+                builtin: vec!["Pocket4P DLog".to_string()],
+                custom: vec!["mine.cube".to_string()],
+                folder: "/tmp/luts".to_string(),
+            }),
+            lut_choice: &CHOICE,
         }
     }
 
@@ -587,5 +659,50 @@ mod tests {
         assert_eq!(built.sheet.rows[zebra].selected, Some(0));
         assert_eq!(built.pick(zebra, 0), Some(&Pick::Nothing));
         assert_eq!(built.pick(zebra, 1), Some(&Pick::Zebra));
+    }
+
+    #[test]
+    fn the_lut_row_lists_off_the_official_cubes_then_the_operators_own() {
+        let status = Status::default();
+        let built = build(SheetKind::Settings, 2, context(&status));
+        let lut = built
+            .sheet
+            .rows
+            .iter()
+            .position(|row| row.title == "LUT")
+            .unwrap();
+        assert_eq!(
+            built.sheet.rows[lut].options,
+            ["Off", "Pocket4P DLog", "mine"]
+        );
+        assert_eq!(built.sheet.rows[lut].selected, Some(0));
+        assert_eq!(
+            built.pick(lut, 2),
+            Some(&Pick::Lut(LutChoice::File("mine.cube".to_string())))
+        );
+        let folder = &built.sheet.rows[lut + 1];
+        assert!(!folder.enabled && folder.options[0].contains("/tmp/luts"));
+    }
+
+    #[test]
+    fn the_camera_tab_carries_the_ramp_and_assist_the_countdown() {
+        let status = Status::default();
+        let camera = build(SheetKind::Settings, 0, context(&status));
+        let ramp = camera
+            .sheet
+            .rows
+            .iter()
+            .position(|r| r.title == "Gimbal ramp")
+            .unwrap();
+        assert_eq!(camera.pick(ramp, 1), Some(&Pick::Ramp(1)));
+        let assist = build(SheetKind::Settings, 2, context(&status));
+        let countdown = assist
+            .sheet
+            .rows
+            .iter()
+            .position(|r| r.title == "Countdown")
+            .unwrap();
+        assert_eq!(assist.sheet.rows[countdown].selected, Some(0));
+        assert_eq!(assist.pick(countdown, 2), Some(&Pick::Countdown(10)));
     }
 }

@@ -11,7 +11,9 @@ All notable changes to this project are documented here. The format is based on
   exposure and settings sheets, and a media library — the card listed through
   the core's decoder with the Pocket 3's `0x01/0x01` playback entry, thumbnails
   and files over `/v2`, star and delete, and the 720p proxy played through the
-  feed pipeline so the assists work on it. Unqualified on a physical body.
+  feed pipeline so the assists work on it. The Camera tab gains the gimbal
+  ramp, the Assist tab a LUT row fed by the official cubes and a `.cube`
+  drop folder, and the countdown length. Unqualified on a physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

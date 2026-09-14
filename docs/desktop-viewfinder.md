@@ -47,10 +47,14 @@ Three sheets open over the picture and close on `Esc`, the `×`, or a tap outsid
   manual, ISO max and EV for auto. The rows the mode does not use are drawn greyed, the
   way Mimo shows them.
 - **Settings** (`⋮`, or `Tab`) — three tabs. **Camera:** focus mode, white balance
-  presets, colour profile (from the body's own list), field of view, gimbal mode and
-  speed. **Audio:** channel and vocal boost; wind and directional audio are shown greyed
-  because they live in a DSP blob the desktop cannot read yet. **Assist:** thirds grid,
-  overexposure alert (zebra), focus peaking, LUT, mirror, and the timecode in the top bar.
+  presets, colour profile (from the body's own list), field of view, gimbal mode,
+  speed and **ramp** (Off / Soft / Medium, the phones' first-order ease on the stick,
+  applied to the arrow keys and the on-screen pad alike). **Audio:** channel and vocal
+  boost; wind and directional audio are shown greyed because they live in a DSP blob
+  the desktop cannot read yet. **Assist:** thirds grid, overexposure alert (zebra),
+  focus peaking, the **LUT** row (Off, the core's official Rec.709 cubes, then every
+  `.cube` the operator dropped into the LUT folder the row names), mirror, the timecode
+  in the top bar, and the `T` countdown length (3, 5 or 10 s).
 
 A chip lights up when the camera confirms the value, not when it is tapped; a setting
 the body never reports (audio channel, field of view, gimbal speed) is kept as last

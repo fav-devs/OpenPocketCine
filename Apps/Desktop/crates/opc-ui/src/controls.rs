@@ -166,6 +166,14 @@ impl Stick {
         *self == Self::default()
     }
 
+    /// Everything held, added up, as a throw in -1…1 on each axis: right and up
+    /// positive.
+    pub fn target(&self) -> (f64, f64) {
+        let axis =
+            |negative: bool, positive: bool| f64::from(i32::from(positive) - i32::from(negative));
+        (axis(self.left, self.right), axis(self.down, self.up))
+    }
+
     /// Everything held, added up, as the camera's own stick units.
     pub fn command(&self) -> Command {
         let axis = |negative: bool, positive: bool| {
@@ -343,5 +351,97 @@ mod tests {
         let mut controls = Controls::new();
         assert_eq!(controls.press(Key::Char('Z')), Some(Action::ToggleZebra));
         assert_eq!(controls.press(Key::Char('z')), Some(Action::ToggleZebra));
+    }
+}
+
+/// A throw in -1…1 on each axis as the camera's own stick units, the same scale the
+/// keys use at full deflection.
+pub fn stick_command(x: f64, y: f64) -> Command {
+    let axis = |v: f64| {
+        (f64::from(STICK_CENTRE) + v.clamp(-1.0, 1.0) * f64::from(STICK_THROW)).round() as u16
+    };
+    Command::GimbalStick {
+        axis0: axis(x),
+        axis1: axis(y),
+    }
+}
+
+/// First-order follow on the stick throw: the mobile shells' gimbal ramp. A time
+/// constant of zero is a passthrough. Transcribed from `GimbalRampFilter` in the core.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RampFilter {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl RampFilter {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Moves toward the target by one step of `dt` seconds with time constant `tau`.
+    pub fn tick(&mut self, target_x: f64, target_y: f64, tau: f64, dt: f64) -> (f64, f64) {
+        if tau <= 0.0 || dt <= 0.0 {
+            self.x = target_x;
+            self.y = target_y;
+            return (self.x, self.y);
+        }
+        let alpha = 1.0 - (-dt / tau).exp();
+        self.x += (target_x - self.x) * alpha;
+        self.y += (target_y - self.y) * alpha;
+        (self.x, self.y)
+    }
+
+    /// Close enough to the rest position to call it rested.
+    pub fn is_settled_at_rest(&self) -> bool {
+        self.x.abs() < 0.02 && self.y.abs() < 0.02
+    }
+}
+
+#[cfg(test)]
+mod ramp_tests {
+    use super::*;
+
+    #[test]
+    fn off_is_a_passthrough_and_soft_follows_first_order() {
+        let mut off = RampFilter::default();
+        assert_eq!(off.tick(1.0, -1.0, 0.0, 0.04), (1.0, -1.0));
+        let mut soft = RampFilter::default();
+        let (x, _) = soft.tick(1.0, 0.0, 0.35, 0.04);
+        assert!(
+            x > 0.0 && x < 0.2,
+            "one step is a fraction of the throw: {x}"
+        );
+        for _ in 0..100 {
+            soft.tick(1.0, 0.0, 0.35, 0.04);
+        }
+        assert!(soft.x > 0.99);
+        for _ in 0..100 {
+            soft.tick(0.0, 0.0, 0.35, 0.04);
+        }
+        assert!(soft.is_settled_at_rest());
+    }
+
+    #[test]
+    fn a_throw_maps_to_the_same_units_as_the_keys() {
+        assert_eq!(
+            stick_command(1.0, 1.0),
+            Command::GimbalStick {
+                axis0: STICK_CENTRE + STICK_THROW,
+                axis1: STICK_CENTRE + STICK_THROW
+            }
+        );
+        assert_eq!(
+            stick_command(0.0, -0.5),
+            Command::GimbalStick {
+                axis0: STICK_CENTRE,
+                axis1: STICK_CENTRE - STICK_THROW / 2
+            }
+        );
+        let mut stick = Stick::default();
+        stick.set(Key::Right, true);
+        stick.set(Key::Up, true);
+        assert_eq!(stick.target(), (1.0, 1.0));
+        assert_eq!(stick_command(1.0, 1.0), stick.command());
     }
 }

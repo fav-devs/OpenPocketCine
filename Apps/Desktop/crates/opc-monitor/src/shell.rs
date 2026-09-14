@@ -13,6 +13,7 @@ use opc_chrome::{Chrome, ChromeIntent, ChromeState, Screen};
 use opc_media::MediaFile;
 
 use crate::library::{Library, MediaAction, Player};
+use crate::luts::{LutChoice, LutMenu};
 use crate::sheets::{self, Pick, Prefs, SheetKind};
 use opc_render::{letterbox, GradeOptions, Peaking, PeakingSense, Rgba, Zebra};
 use opc_ui::{
@@ -21,7 +22,6 @@ use opc_ui::{
 };
 
 /// How long before a timed take starts rolling.
-const COUNTDOWN: f64 = 3.0;
 /// The stick is re-sent while held. The gimbal moves until it is told to stop, so this
 /// is a keepalive, not the thing that makes it move.
 const STICK_REPEAT: f64 = 0.2;
@@ -178,7 +178,7 @@ pub struct Shell {
     next_track_id: u16,
     chrome_visible: bool,
     /// The window has to be told to load or drop the cube, which is not a per-frame job.
-    lut_pending: Option<bool>,
+    lut_pending: Option<LutRequest>,
     stick_sent_at: f64,
     presented: VecDeque<f64>,
     /// The rasterised chrome, kept until something it draws changes.
@@ -201,6 +201,22 @@ pub struct Shell {
     player: Option<Player>,
     /// Delete and favourite carry a running index the camera does not police.
     media_counter: u32,
+    /// The stick's ease, when the ramp is on: the filtered throw and its clock.
+    ramp: opc_ui::RampFilter,
+    ramp_ticked_at: f64,
+    /// The on-screen pad's throw while it is held, right and up positive.
+    pad_target: (f64, f64),
+    lut_menu: LutMenu,
+    lut_choice: LutChoice,
+}
+
+/// What the window must do about the cube, once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LutRequest {
+    /// Keep the loaded cube and switch it on or off.
+    Toggle(bool),
+    /// Load this cube and switch it on (or off, for `Off`).
+    Load(LutChoice),
 }
 
 impl Default for Shell {
@@ -244,6 +260,11 @@ impl Shell {
             library: Library::default(),
             player: None,
             media_counter: 0,
+            ramp: opc_ui::RampFilter::default(),
+            ramp_ticked_at: 0.0,
+            pad_target: (0.0, 0.0),
+            lut_menu: LutMenu::default(),
+            lut_choice: LutChoice::Off,
             drawn_second: None,
         }
     }
@@ -269,8 +290,24 @@ impl Shell {
 
     /// Whether the cube should be loaded or dropped, once. The window does that between
     /// frames because it waits for the device to go idle.
-    pub fn take_lut_change(&mut self) -> Option<bool> {
+    pub fn take_lut_change(&mut self) -> Option<LutRequest> {
         self.lut_pending.take()
+    }
+
+    /// The names the LUT row offers, found by the window.
+    pub fn set_lut_menu(&mut self, menu: LutMenu) {
+        self.lut_menu = menu;
+        self.chrome_stale = true;
+    }
+
+    pub fn lut_choice(&self) -> &LutChoice {
+        &self.lut_choice
+    }
+
+    /// The ramp setting, as the sheet would set it. For tests that do not want to
+    /// find the chip by coordinate.
+    pub fn set_ramp_for_test(&mut self, ramp: u8) {
+        self.apply_pick(Pick::Ramp(ramp));
     }
 
     pub fn phase(&self) -> &Phase {
@@ -349,6 +386,8 @@ impl Shell {
             toggles: self.toggles,
             gimbal_mode: self.gimbal_mode,
             model_id: self.model_id,
+            luts: &self.lut_menu,
+            lut_choice: &self.lut_choice,
         }
     }
 
@@ -388,6 +427,22 @@ impl Shell {
             Pick::GimbalSpeed(speed) => {
                 self.prefs.gimbal_speed = speed;
                 vec![Intent::Send(Command::GimbalSpeed(speed))]
+            }
+            Pick::Ramp(ramp) => {
+                self.prefs.ramp = ramp;
+                self.ramp.reset();
+                Vec::new()
+            }
+            Pick::Countdown(seconds) => {
+                self.prefs.countdown_seconds = seconds;
+                Vec::new()
+            }
+            Pick::Lut(choice) => {
+                self.toggles.grade = choice != LutChoice::Off;
+                self.lut_choice = choice.clone();
+                self.lut_pending = Some(LutRequest::Load(choice));
+                self.refresh_assists();
+                Vec::new()
             }
             Pick::Nothing => Vec::new(),
         }
@@ -450,8 +505,7 @@ impl Shell {
             return self.open_library();
         }
         if self.stick.set(key, true) {
-            self.stick_sent_at = now;
-            return vec![Intent::Send(self.stick.command())];
+            return self.stick_changed(now);
         }
         let Some(action) = self.controls.press(key) else {
             return Vec::new();
@@ -462,10 +516,65 @@ impl Shell {
     /// A key came up. Only the stick cares.
     pub fn release(&mut self, key: Key, now: f64) -> Vec<Intent> {
         if self.stick.set(key, false) {
+            return self.stick_changed(now);
+        }
+        Vec::new()
+    }
+
+    /// The keys' throw changed. Without a ramp the new throw goes out at once; with
+    /// one, the filter starts moving toward it and `tick` sends each step.
+    fn stick_changed(&mut self, now: f64) -> Vec<Intent> {
+        if self.prefs.ramp_tau() <= 0.0 {
             self.stick_sent_at = now;
             return vec![Intent::Send(self.stick.command())];
         }
+        // One nominal frame of ease, so the first send is already a fraction of the
+        // throw rather than the whole of it.
+        self.ramp_ticked_at = self.ramp_ticked_at.max(now - 0.04);
+        self.ramp_step(now)
+    }
+
+    /// The throw the operator is asking for right now, keys or pad.
+    fn stick_target(&self) -> (f64, f64) {
+        if self.pad_held {
+            self.pad_target
+        } else {
+            self.stick.target()
+        }
+    }
+
+    /// One step of the ramp toward the target; sends when the throw moved.
+    fn ramp_step(&mut self, now: f64) -> Vec<Intent> {
+        let tau = self.prefs.ramp_tau();
+        let dt = (now - self.ramp_ticked_at).clamp(0.0, 0.2);
+        self.ramp_ticked_at = now;
+        let (tx, ty) = self.stick_target();
+        let before = self.ramp;
+        let (mut x, mut y) = self.ramp.tick(tx, ty, tau, dt);
+        if tx == 0.0 && ty == 0.0 && self.ramp.is_settled_at_rest() {
+            self.ramp.reset();
+            x = 0.0;
+            y = 0.0;
+        } else if (x - tx).abs() < 0.01 && (y - ty).abs() < 0.01 {
+            // Close enough: land on the throw itself, so a held key reaches full.
+            self.ramp.x = tx;
+            self.ramp.y = ty;
+            x = tx;
+            y = ty;
+        }
+        let moved = (x - before.x).abs() > 0.005 || (y - before.y).abs() > 0.005;
+        let rested_now = x == 0.0 && y == 0.0 && (before.x != 0.0 || before.y != 0.0);
+        if moved || rested_now {
+            self.stick_sent_at = now;
+            return vec![Intent::Send(opc_ui::stick_command(x, y))];
+        }
         Vec::new()
+    }
+
+    /// Whether the ramp still has somewhere to go.
+    fn ramp_busy(&self) -> bool {
+        let (tx, ty) = self.stick_target();
+        (self.ramp.x - tx).abs() > 0.005 || (self.ramp.y - ty).abs() > 0.005
     }
 
     fn act(&mut self, action: Action, now: f64) -> Vec<Intent> {
@@ -479,7 +588,10 @@ impl Shell {
                 // operator reaches for when the shot is not ready.
                 self.hud.countdown = match self.hud.countdown {
                     Some(_) => None,
-                    None => Some(Countdown::start(now, COUNTDOWN)),
+                    None => Some(Countdown::start(
+                        now,
+                        f64::from(self.prefs.countdown_seconds),
+                    )),
                 };
                 Vec::new()
             }
@@ -500,7 +612,7 @@ impl Shell {
             }
             Action::ToggleGrade => {
                 self.toggles.grade = !self.toggles.grade;
-                self.lut_pending = Some(self.toggles.grade);
+                self.lut_pending = Some(LutRequest::Toggle(self.toggles.grade));
                 self.refresh_assists();
                 Vec::new()
             }
@@ -681,19 +793,33 @@ impl Shell {
                     fired.push(Intent::Send(Command::ZoomFactor(z)));
                 }
                 ChromeIntent::GimbalMoved { x, y } => {
+                    // The pad reports right and up positive, the same axes as the keys.
                     self.pad_held = true;
-                    let axis = |v: f32| (1024.0 + v * 400.0).round() as u16;
-                    fired.push(Intent::Send(Command::GimbalStick {
-                        axis0: axis(x),
-                        axis1: axis(-y),
-                    }));
+                    self.pad_target = (f64::from(x), f64::from(y));
+                    if self.prefs.ramp_tau() > 0.0 {
+                        // A pointer event carries no clock: step one nominal frame.
+                        let now = self.ramp_ticked_at + 0.04;
+                        fired.extend(self.ramp_step(now));
+                    } else {
+                        fired.push(Intent::Send(opc_ui::stick_command(
+                            f64::from(x),
+                            f64::from(y),
+                        )));
+                    }
                 }
                 ChromeIntent::GimbalReleased => {
                     self.pad_held = false;
-                    fired.push(Intent::Send(Command::GimbalStick {
-                        axis0: 1024,
-                        axis1: 1024,
-                    }));
+                    self.pad_target = (0.0, 0.0);
+                    if self.prefs.ramp_tau() > 0.0 && self.stick.is_resting() {
+                        // The ramp eases the stick back; the ticks send the steps.
+                        let now = self.ramp_ticked_at + 0.04;
+                        fired.extend(self.ramp_step(now));
+                    } else {
+                        fired.push(Intent::Send(Command::GimbalStick {
+                            axis0: 1024,
+                            axis1: 1024,
+                        }));
+                    }
                 }
                 ChromeIntent::FollowToggle => {
                     // ON is Follow; OFF is the tilt-locked follow the body offers.
@@ -1044,6 +1170,16 @@ impl Shell {
         self.take_chrome_intents()
     }
 
+    /// The window's clock, for the ramp when a pointer event carries none.
+    pub fn note_time(&mut self, now: f64) {
+        if self.ramp_ticked_at < now
+            && !self.ramp_busy()
+            && self.ramp == opc_ui::RampFilter::default()
+        {
+            self.ramp_ticked_at = now;
+        }
+    }
+
     /// Pointer released over a control zone.
     pub fn control_up(&mut self, x: f64, y: f64, _now: f64) -> Vec<Intent> {
         if let Some(cr) = &self.chrome_renderer {
@@ -1083,7 +1219,23 @@ impl Shell {
             self.chrome_stale = true;
             intents.push(Intent::Send(Command::RecordStart));
         }
-        if !self.stick.is_resting() && now - self.stick_sent_at >= STICK_REPEAT {
+        if self.prefs.ramp_tau() > 0.0 {
+            // The ramp steps at 25 Hz while it moves, and keeps a held throw alive.
+            let held = self.stick_target() != (0.0, 0.0);
+            if (self.ramp_busy()
+                || !self.ramp.is_settled_at_rest()
+                || self.ramp != opc_ui::RampFilter::default())
+                && now - self.ramp_ticked_at >= 0.04
+            {
+                intents.extend(self.ramp_step(now));
+            } else if held && now - self.stick_sent_at >= STICK_REPEAT {
+                self.stick_sent_at = now;
+                intents.push(Intent::Send(opc_ui::stick_command(
+                    self.ramp.x,
+                    self.ramp.y,
+                )));
+            }
+        } else if !self.stick.is_resting() && now - self.stick_sent_at >= STICK_REPEAT {
             self.stick_sent_at = now;
             intents.push(Intent::Send(self.stick.command()));
         }

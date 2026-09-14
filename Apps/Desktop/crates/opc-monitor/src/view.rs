@@ -13,6 +13,8 @@ use opc_decode::{Codec, Decoder, OwnedPicture};
 use opc_render::{write_png, FeedRenderer, Lut, Presented};
 
 use crate::media::MediaDriver;
+use opc_monitor::luts;
+use opc_monitor::{LutChoice, LutRequest};
 use opc_ui::{Key as UiKey, Phase};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
@@ -91,12 +93,48 @@ impl View {
                 }
             }
         }
-        if let Some(wanted) = self.shell.take_lut_change() {
-            let cube = wanted.then_some(self.lut.as_ref()).flatten();
-            if let Some(renderer) = self.renderer.as_mut() {
-                if let Err(error) = renderer.set_lut(cube) {
-                    eprintln!("could not set the cube: {error}");
+        if let Some(request) = self.shell.take_lut_change() {
+            self.apply_lut_request(request);
+        }
+    }
+
+    /// A cube change from the `L` key or the LUT row: load what was picked, then tell
+    /// the renderer. Loading happens here because the built-in looks come from the core.
+    fn apply_lut_request(&mut self, request: LutRequest) {
+        let on = match request {
+            LutRequest::Toggle(on) => on,
+            LutRequest::Load(choice) => {
+                let loaded: Result<Option<Lut>, String> = match &choice {
+                    LutChoice::Off => Ok(None),
+                    // 33 is the lattice the shells build the built-in looks at.
+                    LutChoice::BuiltIn(name) => Lut::built_in(name, 33)
+                        .map(Some)
+                        .map_err(|error| error.to_string()),
+                    LutChoice::File(file) => {
+                        std::fs::read_to_string(luts::custom_folder().join(file))
+                            .map_err(|error| error.to_string())
+                            .and_then(|text| Lut::parse(&text).map_err(|error| error.to_string()))
+                            .map(Some)
+                    }
+                };
+                match loaded {
+                    Ok(cube) => {
+                        if cube.is_some() {
+                            self.lut = cube;
+                        }
+                        choice != LutChoice::Off
+                    }
+                    Err(error) => {
+                        eprintln!("could not load the cube: {error}");
+                        false
+                    }
                 }
+            }
+        };
+        let cube = on.then_some(self.lut.as_ref()).flatten();
+        if let Some(renderer) = self.renderer.as_mut() {
+            if let Err(error) = renderer.set_lut(cube) {
+                eprintln!("could not set the cube: {error}");
             }
         }
     }
@@ -429,6 +467,7 @@ impl ApplicationHandler for View {
                 self.carry_out(intents, event_loop);
             }
             WindowEvent::CursorMoved { position, .. } => {
+                self.shell.note_time(now);
                 self.pointer = (position.x, position.y);
                 let intents = if self.pointer_control {
                     self.shell.control_moved(position.x, position.y)
@@ -444,6 +483,7 @@ impl ApplicationHandler for View {
                 state,
                 ..
             } => {
+                self.shell.note_time(now);
                 let (x, y) = self.pointer;
                 match state {
                     ElementState::Pressed => match self.shell.control_down(x, y, now) {
@@ -533,6 +573,15 @@ pub fn run(options: Options) -> Result<(), String> {
         pointer_control: false,
         started: Instant::now(),
     };
+    {
+        let folder = luts::custom_folder();
+        let _ = std::fs::create_dir_all(&folder);
+        view.shell.set_lut_menu(opc_monitor::LutMenu {
+            builtin: opc_render::built_in_names(),
+            custom: luts::list_custom(&folder),
+            folder: folder.display().to_string(),
+        });
+    }
     view.shell.set_phase(Phase::Waiting);
 
     let event_loop = EventLoop::new().map_err(|error| format!("no window system: {error}"))?;
