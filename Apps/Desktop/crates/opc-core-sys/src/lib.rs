@@ -247,6 +247,11 @@ pub const OPC_CAM_EXIT_PLAYBACK: i32 = 64;
 pub const OPC_CAM_SET_EXPO_MODE: i32 = 65;
 pub const OPC_CAM_SET_AUDIO_CHANNEL: i32 = 66;
 pub const OPC_CAM_SET_VOCAL_BOOST: i32 = 67;
+pub const OPC_CAM_MEDIA_LIST: i32 = 68;
+pub const OPC_CAM_MEDIA_LIST_TRIGGER: i32 = 69;
+pub const OPC_CAM_MEDIA_DELETE: i32 = 70;
+pub const OPC_CAM_MEDIA_FAVORITE: i32 = 71;
+pub const OPC_CAM_PLAYBACK_SPECIAL: i32 = 72;
 
 pub const OPC_PKT_HANDSHAKE: u8 = 0x00;
 pub const OPC_PKT_TELEMETRY: u8 = 0x01;
@@ -661,6 +666,19 @@ extern "C" {
     pub fn opc_status_timecode(handle: *mut c_void, out: *mut u8, capacity: usize) -> i64;
     pub fn opc_status_firmware(handle: *mut c_void, out: *mut u8, capacity: usize) -> i64;
     pub fn opc_status_subscribe_keys(out: *mut u8, capacity: usize) -> i64;
+
+    /// Decodes a catalogue page (counter 1 blob, counter 2 blob, every chunk merged) to a
+    /// JSON array of media records. Reports the size needed like every other emitter.
+    pub fn opc_media_decode(
+        sd: *const u8,
+        sd_count: usize,
+        internal: *const u8,
+        internal_count: usize,
+        merged: *const u8,
+        merged_count: usize,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
 }
 
 /// Reads a NUL-terminated string out of one of the fixed character fields.

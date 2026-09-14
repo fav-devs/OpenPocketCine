@@ -172,6 +172,23 @@ private func cameraFrame(kind: Int32, seq: UInt16, arguments: Arguments) -> Duml
         guard let boost = VocalBoost(rawValue: arguments.byte(0)) else { return nil }
         return Commands.setVocalBoost(boost, seq: seq)
 
+    case OPC_CAM_MEDIA_LIST:
+        return Commands.mediaList(
+            counter: arguments.byte(0), cursor: UInt32(truncatingIfNeeded: arguments.int(1)),
+            seq: seq)
+    case OPC_CAM_MEDIA_LIST_TRIGGER:
+        return Commands.mediaListTrigger(seq: seq)
+    case OPC_CAM_MEDIA_DELETE:
+        return Commands.deleteMedia(
+            handle: UInt32(truncatingIfNeeded: arguments.int(0)),
+            counter: UInt32(truncatingIfNeeded: arguments.int(1)), seq: seq)
+    case OPC_CAM_MEDIA_FAVORITE:
+        return Commands.setMediaFavorite(
+            handle: UInt32(truncatingIfNeeded: arguments.int(0)), on: arguments.int(2) != 0,
+            counter: UInt32(truncatingIfNeeded: arguments.int(1)), seq: seq)
+    case OPC_CAM_PLAYBACK_SPECIAL:
+        return Commands.pocket3PlaybackEntry(step: arguments.int(0), seq: seq)
+
     default:
         return nil
     }

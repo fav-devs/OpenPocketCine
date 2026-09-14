@@ -204,6 +204,14 @@ typedef struct {
 #define OPC_CAM_SET_AUDIO_CHANNEL 66
 #define OPC_CAM_SET_VOCAL_BOOST 67
 
+// Media: the catalogue list, its trigger, delete, favourite, and the Pocket 3
+// playback entry (`0x01/0x01`, two steps).
+#define OPC_CAM_MEDIA_LIST 68
+#define OPC_CAM_MEDIA_LIST_TRIGGER 69
+#define OPC_CAM_MEDIA_DELETE 70
+#define OPC_CAM_MEDIA_FAVORITE 71
+#define OPC_CAM_PLAYBACK_SPECIAL 72
+
 // `DumlTransport.PktType`.
 #define OPC_PKT_HANDSHAKE 0x00
 #define OPC_PKT_TELEMETRY 0x01

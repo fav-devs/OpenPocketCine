@@ -5,6 +5,7 @@ members = [
     "crates/opc-chrome",
     "crates/opc-core-sys",
     "crates/opc-decode",
+    "crates/opc-media",
     "crates/opc-monitor",
     "crates/opc-relay",
     "crates/opc-render",

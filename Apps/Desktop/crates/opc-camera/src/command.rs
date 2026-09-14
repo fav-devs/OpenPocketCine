@@ -96,6 +96,29 @@ pub enum Command {
     /// `0x00` off, `0x01` on.
     SetVocalBoost(u8),
 
+    // Media.
+    /// `0x00/0x26`. Counter 1 lists the card, 2 the internal store; the cursor is the
+    /// newest marker (`0x00000001` / `0x40000001`) or a video handle to page older.
+    MediaList {
+        counter: u8,
+        cursor: u32,
+    },
+    /// The `4a040e10` trigger sent between the two list queries of a page.
+    MediaListTrigger,
+    /// `0x00/0x28`. Irreversible; the shell sends a handle only when the fit vouched for it.
+    MediaDelete {
+        handle: u32,
+        counter: u32,
+    },
+    /// `0x02/0xBF`.
+    MediaFavorite {
+        handle: u32,
+        counter: u32,
+        on: bool,
+    },
+    /// `0x01/0x01` Pocket 3 playback entry, step 1 or 2.
+    PlaybackSpecial(u8),
+
     // Reads.
     ParamGet(u16),
     GetWifiSsid,
@@ -235,6 +258,31 @@ impl Command {
             Self::SetVocalBoost(boost) => (
                 sys::OPC_CAM_SET_VOCAL_BOOST,
                 ints(&[i32::from(boost)]),
+                vec![],
+            ),
+            Self::MediaList { counter, cursor } => (
+                sys::OPC_CAM_MEDIA_LIST,
+                ints(&[i32::from(counter), cursor as i32]),
+                vec![],
+            ),
+            Self::MediaListTrigger => (sys::OPC_CAM_MEDIA_LIST_TRIGGER, vec![], vec![]),
+            Self::MediaDelete { handle, counter } => (
+                sys::OPC_CAM_MEDIA_DELETE,
+                ints(&[handle as i32, counter as i32]),
+                vec![],
+            ),
+            Self::MediaFavorite {
+                handle,
+                counter,
+                on,
+            } => (
+                sys::OPC_CAM_MEDIA_FAVORITE,
+                ints(&[handle as i32, counter as i32, i32::from(on)]),
+                vec![],
+            ),
+            Self::PlaybackSpecial(step) => (
+                sys::OPC_CAM_PLAYBACK_SPECIAL,
+                ints(&[i32::from(step)]),
                 vec![],
             ),
         }

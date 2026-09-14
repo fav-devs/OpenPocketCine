@@ -126,6 +126,17 @@ import Testing
         #expect(Commands.enterPlayback(seq: 0).payload == [0x01, 0x01, 0x00, 0x01])
     }
 
+    @Test func pocket3PlaybackEntryMatchesOsmosis() {
+        let first = Commands.pocket3PlaybackEntry(step: 1)
+        #expect(first.cmdSet == 0x01)
+        #expect(first.cmdId == 0x01)
+        #expect(first.flags == Duml.flagNotify)
+        #expect(first.payload == [0x03, 0, 0, 0, 0, 0x04, 0, 0, 0, 0x07, 0x01])
+        #expect(
+            Commands.pocket3PlaybackEntry(step: 2).payload
+                == [0x00, 0, 0, 0, 0, 0x04, 0, 0, 0, 0x04, 0x01])
+    }
+
     @Test func deleteAndFavoritePayloadsMatchCapture() {
         // Osmosis: handle 0x40104480, first delete of a session (counter 1).
         let del = Commands.deleteMedia(handle: 0x4010_4480, counter: 1)

@@ -141,6 +141,21 @@ public enum Commands {
             cmdSet: 0x02, cmdId: 0x0C, payload: [0x01, 0x01, 0x00, 0x00])
     }
 
+    /// `0x01/0x01` SPECIAL control, notify, no reply. A Pocket 3 (and an Action 4) answers
+    /// `e0` to `0x02/0x0c` and stays in capture; these two payloads, sent in order at
+    /// ~20 Hz, fold the gimbal and set the `0x02/0x80` playback bit. Step 1 for ~6 frames,
+    /// then step 2 until the bit sets. There is no exit: the body returns to capture on
+    /// its own a few seconds after the link drops (Osmosis MEDIA_PROTOCOL §13b).
+    public static func pocket3PlaybackEntry(step: Int, seq: UInt16 = 0) -> Duml.Frame {
+        let payload: [UInt8] =
+            step <= 1
+            ? [0x03, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x07, 0x01]
+            : [0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x01]
+        return Duml.Frame(
+            sender: Duml.senderApp, receiver: Duml.rxCamera, seq: seq, flags: Duml.flagNotify,
+            cmdSet: 0x01, cmdId: 0x01, payload: payload)
+    }
+
     /// `0x00/0x26` media list. Cursor at bytes 10–13; counter at byte 4.
     public static func mediaList(counter: UInt8, cursor: UInt32, seq: UInt16 = 0) -> Duml.Frame {
         Duml.Frame(
