@@ -494,7 +494,8 @@ fn a_finger_that_lands_off_the_picture_does_not_lock_out_the_next_one() {
     shell.set_window(1280, 1280);
     shell.set_source(1920, 1080);
     // The window is square and the picture is 16:9, so the top is a letterbox bar.
-    shell.touch(1, TouchPhase::Started, 640.0, 10.0, 0.0);
+    // Land below the top bar and above the picture: bar, not button.
+    shell.touch(1, TouchPhase::Started, 640.0, 200.0, 0.0);
 
     // A finger that does land on the shot must still be able to draw.
     let fit = shell.fit();
@@ -564,13 +565,14 @@ fn stray_phases_for_a_finger_nobody_is_tracking_do_nothing() {
 fn gimbal_pad_throws_on_down_and_rests_on_release_and_cancel() {
     let mut shell = framed();
     shell.set_phase(opc_ui::Phase::Live);
-    // The trailing pad is 131 px square in this 1280 px-wide layout.
-    let thrown = sent(&shell.control_down(1_220.0, 550.0, 0.0).expect("gimbal pad"));
+    // The pad is 96 px square at the bottom left, centred on (252, 624) in this
+    // 1280 × 720 layout. Below and right of centre throws both axes positive.
+    let thrown = sent(&shell.control_down(280.0, 650.0, 0.0).expect("gimbal pad"));
     assert!(
         matches!(thrown.as_slice(), [Command::GimbalStick { axis0, axis1 }] if *axis0 > 1024 && *axis1 > 1024)
     );
     assert_eq!(
-        sent(&shell.control_up(1_220.0, 550.0, 0.0)),
+        sent(&shell.control_up(280.0, 650.0, 0.0)),
         [Command::GimbalStick {
             axis0: 1024,
             axis1: 1024
@@ -578,7 +580,7 @@ fn gimbal_pad_throws_on_down_and_rests_on_release_and_cancel() {
         "a release is an immediate rest, not a later timer tick"
     );
 
-    shell.control_down(1_220.0, 550.0, 1.0).expect("gimbal pad");
+    shell.control_down(280.0, 650.0, 1.0).expect("gimbal pad");
     assert_eq!(
         sent(&shell.control_cancel()),
         [Command::GimbalStick {
@@ -593,18 +595,23 @@ fn gimbal_pad_throws_on_down_and_rests_on_release_and_cancel() {
 fn control_hit_rectangles_beat_tracking_and_buttons_keep_typed_commands() {
     let mut shell = framed();
     shell.set_phase(opc_ui::Phase::Live);
-    // Still is the first trailing-bottom button at this layout. Its target is 56 px,
-    // safely above the 44 px minimum, and it must not make a tracking box.
-    assert!(shell.is_control(950.0, 670.0));
+    // STILL is the third button of the trailing-bottom cluster at this layout. Its
+    // target is 56 px, safely above the 44 px minimum, and it must not make a tracking
+    // box.
+    assert!(shell.is_control(1_184.0, 630.0));
     assert_eq!(
-        sent(&shell.control_down(950.0, 670.0, 0.0).expect("still button")),
+        sent(
+            &shell
+                .control_down(1_184.0, 630.0, 0.0)
+                .expect("still button")
+        ),
         [],
     );
     assert_eq!(
-        sent(&shell.control_up(950.0, 670.0, 0.0)),
+        sent(&shell.control_up(1_184.0, 630.0, 0.0)),
         [Command::ShootPhoto]
     );
-    assert!(shell.pointer_up(950.0, 670.0, 0.0).is_empty());
+    assert!(shell.pointer_up(1_184.0, 630.0, 0.0).is_empty());
 }
 
 #[test]

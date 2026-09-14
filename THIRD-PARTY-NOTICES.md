@@ -24,6 +24,23 @@ references that are **not** distributed.
 - **License:** SIL Open Font License 1.1 (full text in `ios/OpenPocketCine/Resources/Fonts/OFL-IBMPlexSans.txt`)
 - **Copyright:** 2017 IBM Corp. with Reserved Font Name "Plex"
 
+## Outfit
+
+- **Homepage:** <https://github.com/Outfitio/Outfit-Fonts>
+- **Used for:** desktop viewfinder type (`Apps/Desktop/crates/opc-chrome/assets/fonts/`, static
+  instances cut from the variable font)
+- **License:** SIL Open Font License 1.1 (full text in
+  `Apps/Desktop/crates/opc-chrome/assets/fonts/OFL-Outfit.txt`)
+- **Copyright:** 2021 The Outfit Project Authors
+
+## Tabler Icons
+
+- **Homepage:** <https://tabler.io/icons>
+- **Used for:** desktop viewfinder icons (`Apps/Desktop/crates/opc-chrome/assets/icons/`, the
+  outline set, recoloured white)
+- **License:** MIT (full text in `Apps/Desktop/crates/opc-chrome/assets/icons/LICENSE-tabler.txt`)
+- **Copyright:** 2020-2024 Paweł Kuna
+
 ## Protocol references (not distributed)
 
 I learned the BLE pairing and camera Wi-Fi connection path from the public

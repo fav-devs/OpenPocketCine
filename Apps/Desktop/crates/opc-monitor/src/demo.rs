@@ -15,7 +15,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
-use winit::window::{Window, WindowId};
+use winit::window::{Fullscreen, Window, WindowId};
 
 use opc_monitor::shell::{Intent, Shell, TouchPhase as Finger};
 
@@ -167,8 +167,15 @@ impl Demo {
 
     fn carry_out(&mut self, intents: Vec<Intent>, event_loop: &ActiveEventLoop) {
         for intent in intents {
-            if let Intent::Quit = intent {
-                event_loop.exit();
+            match intent {
+                Intent::Quit => event_loop.exit(),
+                Intent::ToggleFullscreen => {
+                    if let Some(window) = self.window.as_ref() {
+                        let wanted = window.fullscreen().is_none();
+                        window.set_fullscreen(wanted.then_some(Fullscreen::Borderless(None)));
+                    }
+                }
+                Intent::Send(_) | Intent::Still => {}
             }
         }
     }
@@ -234,11 +241,9 @@ impl ApplicationHandler for Demo {
             }
         };
         let size = window.inner_size();
-        let handles = window.display_handle().and_then(|d| {
-            window
-                .window_handle()
-                .map(|h| (d.as_raw(), h.as_raw()))
-        });
+        let handles = window
+            .display_handle()
+            .and_then(|d| window.window_handle().map(|h| (d.as_raw(), h.as_raw())));
         let Ok((display, raw_window)) = handles else {
             eprintln!("demo window gave no handles");
             event_loop.exit();
@@ -331,9 +336,9 @@ impl ApplicationHandler for Demo {
                     TouchPhase::Ended => Finger::Ended,
                     TouchPhase::Cancelled => Finger::Cancelled,
                 };
-                let intents = self
-                    .shell
-                    .touch(touch.id, finger, touch.location.x, touch.location.y, now);
+                let intents =
+                    self.shell
+                        .touch(touch.id, finger, touch.location.x, touch.location.y, now);
                 self.carry_out(intents, event_loop);
             }
             WindowEvent::Focused(false) => {

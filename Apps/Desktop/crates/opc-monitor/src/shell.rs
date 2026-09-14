@@ -31,7 +31,6 @@ const FPS_WINDOW: f64 = 1.0;
 const ZOOM_MIN: f64 = 1.0;
 const ZOOM_MAX: f64 = 6.0;
 
-
 /// What the window is asked to do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
@@ -41,6 +40,61 @@ pub enum Intent {
     Still,
     /// Close.
     Quit,
+    /// Toggle the window between fullscreen and windowed.
+    ToggleFullscreen,
+}
+
+/// The gimbal's live mode, as commanded. The body's GET cannot tell FPV from Tilt
+/// locked, so the shell keeps what it last asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GimbalMode {
+    Follow,
+    TiltLocked,
+    Fpv,
+}
+
+impl GimbalMode {
+    /// The SET frames for a mode, in the order the mobile shells send them.
+    pub fn commands(self) -> Vec<Command> {
+        match self {
+            Self::Follow => vec![Command::GimbalFollow, Command::GimbalTiltLock(0)],
+            Self::TiltLocked => vec![Command::GimbalFollow, Command::GimbalTiltLock(1)],
+            Self::Fpv => vec![Command::GimbalFpv],
+        }
+    }
+
+    /// Mimo's order when the FOLLOW button cycles.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Follow => Self::TiltLocked,
+            Self::TiltLocked => Self::Fpv,
+            Self::Fpv => Self::Follow,
+        }
+    }
+}
+
+/// Shooting-mode codes behind the mode strip, by [`opc_chrome::MODES`] index. `None` is a
+/// mode the strip shows but this shell cannot select (Pano, Livestream).
+const MODE_CODES: [Option<u8>; 7] = [
+    Some(0x02), // TIMELAPSE
+    Some(0x00), // SLOWMOTION
+    Some(0x28), // LOW-LIGHT (SuperNight)
+    Some(0x01), // VIDEO
+    Some(0x17), // PHOTO (Pocket 4; Nano's 0x05 reads the same)
+    None,       // PANO
+    None,       // LIVESTREAM
+];
+
+/// The strip index for a shooting-mode code the body reported. Unknown codes read as
+/// VIDEO rather than moving the highlight somewhere the operator did not tap.
+fn mode_index(code: Option<i32>) -> usize {
+    match code {
+        Some(0x02) => 0,
+        Some(0x00) => 1,
+        Some(0x28) => 2,
+        Some(0x17) | Some(0x05) => 4,
+        _ => 3,
+    }
 }
 
 /// What a finger did — winit's touch phases, without winit, so the rule about which
@@ -127,6 +181,9 @@ pub struct Shell {
     /// The second the countdown last showed, so a ticking number redraws and a still one
     /// does not.
     drawn_second: Option<u32>,
+    gimbal_mode: GimbalMode,
+    /// The on-screen joystick is being held, so a cancelled gesture must rest the stick.
+    pad_held: bool,
 }
 
 impl Default for Shell {
@@ -160,6 +217,8 @@ impl Shell {
             presented: VecDeque::new(),
             chrome: None,
             chrome_stale: true,
+            gimbal_mode: GimbalMode::Follow,
+            pad_held: false,
             drawn_second: None,
         }
     }
@@ -214,6 +273,11 @@ impl Shell {
             self.window = (width, height);
             self.chrome_stale = true;
             self.chrome = None;
+            // Slint hit-tests against its own window size, so a tap before the first
+            // frame has drawn must still land on the right control.
+            if let Some(cr) = self.chrome_renderer.as_mut() {
+                cr.resize(width, height);
+            }
         }
     }
 
@@ -457,6 +521,95 @@ impl Shell {
         }
     }
 
+    /// Maps what the Slint controls fired since the last call onto shell intents. Called
+    /// after every pointer event and every render, so a tap answers on the spot rather
+    /// than on the next frame.
+    fn take_chrome_intents(&mut self) -> Vec<Intent> {
+        let mut fired = Vec::new();
+        let Some(cr) = self.chrome_renderer.as_ref() else {
+            return fired;
+        };
+        for intent in cr.drain_intents() {
+            match intent {
+                ChromeIntent::RecordToggle => {
+                    fired.push(Intent::Send(if self.hud.status.is_recording {
+                        Command::RecordStop
+                    } else {
+                        Command::RecordStart
+                    }));
+                }
+                ChromeIntent::TakeStill => fired.push(Intent::Send(Command::ShootPhoto)),
+                ChromeIntent::GimbalFlip => fired.push(Intent::Send(Command::GimbalFlip)),
+                ChromeIntent::GimbalRecenter => {
+                    fired.push(Intent::Send(Command::GimbalRecenter));
+                }
+                ChromeIntent::ZoomSet(v) => {
+                    let z = (v as f64).clamp(ZOOM_MIN, ZOOM_MAX);
+                    self.controls.set_zoom(z);
+                    self.chrome_stale = true;
+                    fired.push(Intent::Send(Command::ZoomFactor(z)));
+                }
+                ChromeIntent::GimbalMoved { x, y } => {
+                    self.pad_held = true;
+                    let axis = |v: f32| (1024.0 + v * 400.0).round() as u16;
+                    fired.push(Intent::Send(Command::GimbalStick {
+                        axis0: axis(x),
+                        axis1: axis(-y),
+                    }));
+                }
+                ChromeIntent::GimbalReleased => {
+                    self.pad_held = false;
+                    fired.push(Intent::Send(Command::GimbalStick {
+                        axis0: 1024,
+                        axis1: 1024,
+                    }));
+                }
+                ChromeIntent::FollowToggle => {
+                    // ON is Follow; OFF is the tilt-locked follow the body offers.
+                    self.gimbal_mode = if self.gimbal_mode == GimbalMode::Follow {
+                        GimbalMode::TiltLocked
+                    } else {
+                        GimbalMode::Follow
+                    };
+                    self.chrome_stale = true;
+                    fired.extend(self.gimbal_mode.commands().into_iter().map(Intent::Send));
+                }
+                ChromeIntent::FollowCycle => {
+                    self.gimbal_mode = self.gimbal_mode.next();
+                    self.chrome_stale = true;
+                    fired.extend(self.gimbal_mode.commands().into_iter().map(Intent::Send));
+                }
+                ChromeIntent::ModeSelected(index) => {
+                    if let Some(code) = MODE_CODES.get(index).copied().flatten() {
+                        fired.push(Intent::Send(Command::SetShootingMode(code)));
+                    }
+                }
+                // The format chip steps the format until the picker sheet exists.
+                ChromeIntent::OpenFormat => {
+                    let status = &self.hud.status;
+                    let current = status.video_resolution.zip(status.video_frame_rate);
+                    if let Some((resolution, frame_rate)) =
+                        next_resolution(&status.available_formats, current)
+                    {
+                        fired.push(Intent::Send(Command::SetVideoFormat {
+                            resolution,
+                            frame_rate,
+                        }));
+                    }
+                }
+                ChromeIntent::Exit => fired.push(Intent::Quit),
+                ChromeIntent::FullscreenToggle => fired.push(Intent::ToggleFullscreen),
+                // Surfaces that do not exist on the desktop yet: the settings panel,
+                // the exposure sheet, the gallery, and the orientation switch.
+                ChromeIntent::OpenMenu
+                | ChromeIntent::OpenExposure
+                | ChromeIntent::OpenGallery
+                | ChromeIntent::OrientationToggle => {}
+            }
+        }
+        fired
+    }
+
     fn controls_enabled(&self) -> bool {
         matches!(self.hud.phase, Phase::Live)
     }
@@ -494,7 +647,7 @@ impl Shell {
             cr.pointer_pressed(x as f32, y as f32);
         }
         self.chrome_stale = true;
-        Some(Vec::new())
+        Some(self.take_chrome_intents())
     }
 
     /// Pointer moved while a Slint control is held.
@@ -502,7 +655,7 @@ impl Shell {
         if let Some(cr) = &self.chrome_renderer {
             cr.pointer_moved(x as f32, y as f32);
         }
-        Vec::new()
+        self.take_chrome_intents()
     }
 
     /// Pointer released over a control zone.
@@ -510,12 +663,27 @@ impl Shell {
         if let Some(cr) = &self.chrome_renderer {
             cr.pointer_released(x as f32, y as f32);
         }
-        Vec::new()
+        self.chrome_stale = true;
+        self.take_chrome_intents()
     }
 
-    /// Focus lost or gesture cancelled — no in-flight Slint gesture to clean up.
+    /// Focus lost or gesture cancelled. Slint drops its pressed state, and a joystick
+    /// that was being held rests the camera at once: a stick left thrown by a palm or a
+    /// window that lost focus is a gimbal that keeps moving.
     pub fn control_cancel(&mut self) -> Vec<Intent> {
-        Vec::new()
+        if let Some(cr) = &self.chrome_renderer {
+            cr.pointer_cancel();
+        }
+        let mut intents = self.take_chrome_intents();
+        if self.pad_held {
+            self.pad_held = false;
+            self.chrome_stale = true;
+            intents.push(Intent::Send(Command::GimbalStick {
+                axis0: 1024,
+                axis1: 1024,
+            }));
+        }
+        intents
     }
 
     /// The clock moved on: fires the countdown, keeps the stick alive, and
@@ -523,7 +691,7 @@ impl Shell {
     pub fn tick(&mut self, now: f64) -> Vec<Intent> {
         let mut intents = Vec::new();
         // Drain intents queued by Slint button callbacks.
-        intents.extend(self.chrome_pending_intents.drain(..));
+        intents.append(&mut self.chrome_pending_intents);
         if self.hud.countdown_fired(now) {
             self.hud.countdown = None;
             self.chrome_stale = true;
@@ -564,62 +732,56 @@ impl Shell {
                 self.hud.drag = Some(rectangle);
             }
 
+            let controls_enabled = self.controls_enabled();
             let mut canvas = if let Some(cr) = self.chrome_renderer.as_mut() {
-                let chips = self.hud.top_chips();
-                let chip = |i: usize| chips.get(i).cloned().unwrap_or_default();
+                let status = &self.hud.status;
                 let link_state = self.hud.connection_chip();
-                let rec_elapsed = self.hud.status.elapsed_label();
                 let zoom = self.controls.zoom();
-                let battery_pct = self.hud.status.battery_percent.unwrap_or(0);
-                let storage_gb = self.hud.status.storage_free_mb / 1024;
+                let battery_pct = status.battery_percent.unwrap_or(0);
+                let fit = self.hud.fit.unwrap_or(opc_ui::Fit {
+                    x: 0.0,
+                    y: 0.0,
+                    width: f64::from(self.window.0),
+                    height: f64::from(self.window.1),
+                });
+                let mode = mode_index(status.shooting_mode);
                 let state = ChromeState {
                     phase: &self.hud.phase,
-                    chip1: chip(0),
-                    chip2: chip(1),
-                    chip3: chip(2),
-                    chip4: chip(3),
+                    shutter: status.shutter_label().unwrap_or_default(),
+                    iso: status.iso.map(|iso| iso.to_string()).unwrap_or_default(),
+                    ev: status.ev_label().unwrap_or_default(),
+                    wb: status
+                        .white_balance_kelvin
+                        .filter(|value| *value > 0)
+                        .map(|kelvin| format!("{kelvin}K"))
+                        .unwrap_or_default(),
                     link_state,
-                    is_recording: self.hud.status.is_recording,
-                    rec_elapsed,
+                    is_recording: status.is_recording,
+                    rec_elapsed: status.elapsed_label(),
+                    follow_on: self.gimbal_mode == GimbalMode::Follow,
+                    format_label: status.format_label(),
+                    expo_label: match status.expo_mode {
+                        Some(0x04) => "M".to_string(),
+                        _ => "AUTO".to_string(),
+                    },
                     battery_text: format!("{battery_pct}%"),
-                    storage_text: format!("{storage_gb} GB"),
+                    battery_percent: battery_pct,
+                    storage_text: status.remaining_label(),
                     zoom: zoom as f32,
                     zoom_label: format!("{:.1}×", zoom),
+                    mode,
+                    photo_mode: mode == 4,
+                    controls_enabled,
+                    fit: (
+                        fit.x.max(0.0) as u32,
+                        fit.y.max(0.0) as u32,
+                        fit.width.max(0.0) as u32,
+                        fit.height.max(0.0) as u32,
+                    ),
+                    countdown: second,
+                    fps_shown: self.hud.fps,
                 };
-                let canvas = cr.render(&state, self.window.0, self.window.1);
-                // Process any intents fired by Slint callbacks during this render.
-                for intent in cr.drain_intents() {
-                    let shell_intent = match intent {
-                        ChromeIntent::RecordToggle => {
-                            if self.hud.status.is_recording {
-                                Intent::Send(Command::RecordStop)
-                            } else {
-                                Intent::Send(Command::RecordStart)
-                            }
-                        }
-                        ChromeIntent::TakeStill => Intent::Send(Command::ShootPhoto),
-                        ChromeIntent::GimbalFlip => Intent::Send(Command::GimbalFlip),
-                        ChromeIntent::GimbalRecenter => Intent::Send(Command::GimbalRecenter),
-                        ChromeIntent::ZoomSet(v) => {
-                            let z = (v as f64).clamp(ZOOM_MIN, ZOOM_MAX);
-                            self.controls.set_zoom(z);
-                            self.chrome_stale = true;
-                            Intent::Send(Command::ZoomFactor(z))
-                        }
-                        ChromeIntent::GimbalMoved { x, y } => {
-                            let axis = |v: f32| (1024.0 + v * 400.0).round() as u16;
-                            Intent::Send(Command::GimbalStick {
-                                axis0: axis(x),
-                                axis1: axis(-y),
-                            })
-                        }
-                        ChromeIntent::GimbalReleased => {
-                            Intent::Send(Command::GimbalStick { axis0: 1024, axis1: 1024 })
-                        }
-                    };
-                    self.chrome_pending_intents.push(shell_intent);
-                }
-                canvas
+                cr.render(&state, self.window.0, self.window.1)
             } else {
                 // Fallback: old CPU canvas (Slint unavailable).
                 self.hud.draw(self.window.0, self.window.1, now)
@@ -649,6 +811,9 @@ impl Shell {
                 pixels: canvas.pixels,
             });
             self.chrome_stale = false;
+            // Anything a Slint control fired while its state was pushed.
+            let fired = self.take_chrome_intents();
+            self.chrome_pending_intents.extend(fired);
         }
         self.chrome.as_ref()
     }
@@ -657,5 +822,4 @@ impl Shell {
     pub fn chrome_visible(&self) -> bool {
         self.chrome_visible
     }
-
 }

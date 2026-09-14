@@ -18,19 +18,41 @@ BLE transport lands; the state machine behind it is already in `opc-camera`.
 The picture fills the window, keeping its proportions — a 16:9 feed in a window the
 operator dragged square gets bars, not narrow faces. Framing is what a viewfinder is for.
 
-The chrome is one strip along the top, one along the bottom, and nothing in the middle
-unless something is wrong:
+The chrome is a DJI Mimo replica laid out for a landscape laptop, rendered by Slint
+(`opc-chrome`, Outfit type, Tabler icons) into a transparent overlay the shell composites
+over the picture:
 
-- **Top left** — separate camera-truth chips for ISO, shutter, EV, white balance and
-  zoom. A field the camera has not reported is absent rather than guessed.
-- **Top right** — connection state, plus a red lamp and running time while the body is
-  rolling. Recovery never leaves a stale live claim beside a retained frame.
-- **Bottom left** — the frame rate the body is shooting, the rate actually reaching the
-  screen, battery, storage, and which assists are on.
+- **Top bar** — menu, gimbal follow `ON`/`OFF`, the format chip (`1080P·60`), the
+  exposure mode chip (`AUTO`/`M`), the link state in the middle with a red `REC` badge
+  and running time while the body is rolling, and exit at the far right.
+- **Zoom ruler** — a dotted ruler under the top bar that slides beneath a fixed ring;
+  drag it to zoom, the label under it is the truth.
+- **Exposure plate** (left) — shutter, `ISO`, `EV` and `WB` readouts. A field the camera
+  has not reported is absent rather than guessed.
+- **Status plate** (right) — Wi-Fi, battery (red at 20 %), card time left, and the rate
+  actually reaching the screen.
+- **Bottom bar** — gallery, flip and orientation next to the joystick on the left; the
+  record button in the middle (a red disc, a red square while rolling, white in photo
+  mode); `CTR`, `FOLLOW`, `STILL` and fullscreen on the right; and the mode strip
+  (`TIMELAPSE · SLOWMOTION · LOW-LIGHT · VIDEO · PHOTO · PANO · LIVESTREAM`) with the
+  active mode in Mimo yellow and Pano / Livestream greyed out.
 - **Middle** — only a phase message (`WAITING FOR LIVE VIEW`, `APPROVE ON THE CAMERA`,
-  `RECOVERING FEED`), or a countdown, or a failure.
+  `RECOVERING FEED`), the take countdown, or a failure.
 
-`H` hides all of it.
+Every button carries its key hint in small type, so a keyboard operator learns the
+bindings from the screen. When the window is wider than the picture, the two plates park
+in the black gutters and leave the shot clean.
+
+Each cluster is a self-contained Slint component with its own anchor, so a later edit
+mode can move them without touching their internals.
+
+`H` hides all of it. To look at the chrome without a camera or a window:
+
+```
+cargo run -p opc-chrome --example snapshot -- <dir>
+```
+
+writes PNGs of the finding, live, recording, failed and wide-window states.
 
 ## Keys
 
@@ -43,6 +65,7 @@ unless something is wrong:
 | `0` | back to wide | `Esc` | close |
 | Drag | track what you drew around | `X` | stop tracking |
 | `[` / `]` | step resolution / frame rate | `H` | hide the chrome |
+| `F11` | fullscreen (button) | | |
 | `Z` | zebra | `P` | peaking |
 | `L` | colour cube | `M` | mirror |
 
@@ -53,12 +76,14 @@ the thing that makes it move, and it rests the moment the key comes up.
 
 ## Pointer controls
 
-The bottom and trailing plates are a desktop operator surface, not scaled-up phone
-chrome: `−`, `1X`, and `+` move zoom in safe 0.5x steps; REC/STOP, STILL, FLIP and
-CTR carry the existing typed commands. The trailing gimbal pad is a **hold** control:
-pressing or moving it sends the matching stick axes and release, cancellation, focus
-loss, and window close send a centred stick immediately. Controls are at least 44 px,
-and they are disabled while the link is recovering or failed.
+The bars are a desktop operator surface, not scaled-up phone chrome. The record button,
+`STILL`, flip, `CTR` and the mode strip carry the existing typed commands. The gimbal
+follow chip and `FOLLOW` button send the same SET frames as the mobile gimbal sheet
+(`Follow` → `Tilt locked` → `FPV`). The format chip steps the body's own format list
+until the picker sheet exists. The joystick is a **hold** control: pressing or moving it
+sends the matching stick axes and release, cancellation, focus loss, and window close
+send a centred stick immediately. Controls are at least 44 px, and they are greyed and
+disabled while the link is recovering or failed.
 
 A finger drags a tracking box on the unobstructed fitted image, exactly as the mouse
 does. A press that starts in a control stays a control — it can never become tracking.

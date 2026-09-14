@@ -137,7 +137,38 @@ pub enum ChromeIntent {
     },
     /// Stick released — camera should return to centre.
     GimbalReleased,
+    /// The `⋮` in the top bar: open the settings panel.
+    OpenMenu,
+    /// Gimbal follow toggle in the top bar.
+    FollowToggle,
+    /// Cycle the gimbal follow mode (Follow / Tilt locked / FPV).
+    FollowCycle,
+    /// Resolution / frame-rate chip.
+    OpenFormat,
+    /// Exposure chip (AUTO / M).
+    OpenExposure,
+    /// Leave the viewfinder.
+    Exit,
+    /// Media gallery.
+    OpenGallery,
+    /// Landscape / portrait switch.
+    OrientationToggle,
+    /// Fullscreen window toggle.
+    FullscreenToggle,
+    /// A mode tapped in the strip, by index into [`MODES`].
+    ModeSelected(usize),
 }
+
+/// The mode strip, in Mimo's order. Indices are what [`ChromeIntent::ModeSelected`] carries.
+pub const MODES: [&str; 7] = [
+    "TIMELAPSE",
+    "SLOWMOTION",
+    "LOW-LIGHT",
+    "VIDEO",
+    "PHOTO",
+    "PANO",
+    "LIVESTREAM",
+];
 
 // ── State passed by the shell each frame ─────────────────────────────────────
 
@@ -145,22 +176,48 @@ pub enum ChromeIntent {
 #[derive(Debug)]
 pub struct ChromeState<'a> {
     pub phase: &'a Phase,
-    /// Exposure chips shown in the left column (shutter, ISO, EV, WB).
-    pub chip1: String,
-    pub chip2: String,
-    pub chip3: String,
-    pub chip4: String,
+    /// Exposure readouts in the left column. Empty means the camera has not said.
+    pub shutter: String,
+    pub iso: String,
+    pub ev: String,
+    pub wb: String,
     pub link_state: &'a str,
     pub is_recording: bool,
     pub rec_elapsed: String,
-    /// Right-column status labels.
+    /// Top-bar chips.
+    pub follow_on: bool,
+    /// e.g. "1080P·60".
+    pub format_label: String,
+    /// "AUTO" or "M".
+    pub expo_label: String,
+    /// Right-column status.
     pub battery_text: String,
+    pub battery_percent: i32,
     pub storage_text: String,
-    /// Current zoom (1.0 – 6.0) — drives slider thumb position.
+    /// Current zoom (1.0 – 6.0) — drives the dial.
     pub zoom: f32,
     /// Formatted zoom label, e.g. "1.0×".
     pub zoom_label: String,
+    /// Index into [`MODES`].
+    pub mode: usize,
+    /// The record button fires a still instead.
+    pub photo_mode: bool,
+    /// Controls are greyed while the link is recovering or failed.
+    pub controls_enabled: bool,
+    /// Where the fitted picture sits in the window, in physical pixels: x, y, w, h.
+    pub fit: (u32, u32, u32, u32),
+    /// Seconds left on the take countdown, while one runs.
+    pub countdown: Option<u32>,
+    /// Frames reaching the screen per second; zero hides the readout.
+    pub fps_shown: u32,
 }
+
+// Layout metrics mirrored from `hud.slint`; `is_over_control` uses them for hit zones.
+const TOP_BAR_H: f64 = 56.0;
+const BOTTOM_BAR_H: f64 = 152.0;
+const ZOOM_DIAL_W: f64 = 320.0;
+const ZOOM_DIAL_H: f64 = 76.0;
+const SIDE_COLUMN_W: f64 = 110.0;
 
 // ── Chrome ───────────────────────────────────────────────────────────────────
 
@@ -229,6 +286,31 @@ impl Chrome {
                 q.borrow_mut().push(ChromeIntent::GimbalReleased);
             });
         }
+        macro_rules! simple {
+            ($setter:ident, $intent:expr) => {{
+                let q = intents.clone();
+                component.$setter(move || {
+                    q.borrow_mut().push($intent);
+                });
+            }};
+        }
+        simple!(on_menu_tapped, ChromeIntent::OpenMenu);
+        simple!(on_follow_tapped, ChromeIntent::FollowToggle);
+        simple!(on_follow_cycle_tapped, ChromeIntent::FollowCycle);
+        simple!(on_format_tapped, ChromeIntent::OpenFormat);
+        simple!(on_expo_tapped, ChromeIntent::OpenExposure);
+        simple!(on_exit_tapped, ChromeIntent::Exit);
+        simple!(on_gallery_tapped, ChromeIntent::OpenGallery);
+        simple!(on_orientation_tapped, ChromeIntent::OrientationToggle);
+        simple!(on_fullscreen_tapped, ChromeIntent::FullscreenToggle);
+        {
+            let q = intents.clone();
+            component.on_mode_selected_changed(move |i| {
+                if i >= 0 {
+                    q.borrow_mut().push(ChromeIntent::ModeSelected(i as usize));
+                }
+            });
+        }
 
         Ok(Chrome {
             window,
@@ -269,6 +351,11 @@ impl Chrome {
         });
     }
 
+    /// The gesture was taken away: the pointer leaves, so pressed controls let go.
+    pub fn pointer_cancel(&self) {
+        self.window.dispatch_event(WindowEvent::PointerExited);
+    }
+
     /// Drain all ChromeIntents fired since the last call.
     pub fn drain_intents(&self) -> Vec<ChromeIntent> {
         self.intents.borrow_mut().drain(..).collect()
@@ -277,18 +364,22 @@ impl Chrome {
     /// Whether (x, y) in physical pixels falls inside one of the Slint control
     /// zones.  Used by the shell to decide if a pointer down goes to Slint
     /// rather than starting a tracking-box drag.
-    pub fn is_over_control(&self, x: f64, y: f64, _w: u32, h: u32) -> bool {
-        let h = h as f64;
-        // Bottom bar (80 px): all interactive controls live here
-        if y >= h - 80.0 {
+    pub fn is_over_control(&self, x: f64, y: f64, w: u32, h: u32) -> bool {
+        let (w, h) = (w as f64, h as f64);
+        // Top bar and bottom bar (with the mode strip) hold every button.
+        if y <= TOP_BAR_H || y >= h - BOTTOM_BAR_H {
             return true;
         }
-        // Zoom strip (44 px, starting at y=48)
-        if (48.0..=92.0).contains(&y) {
+        // Zoom dial sits under the top bar, centred.
+        let c = &self.component;
+        let fit_x = f64::from(c.get_fit_x());
+        let fit_w = f64::from(c.get_fit_width());
+        let dial_x = fit_x + (fit_w - ZOOM_DIAL_W) / 2.0;
+        if y <= TOP_BAR_H + ZOOM_DIAL_H && (dial_x..=dial_x + ZOOM_DIAL_W).contains(&x) {
             return true;
         }
-        // Left exposure column (60 px wide) — read-only, but don't start tracking boxes there
-        if x <= 60.0 {
+        // Side columns are read-only, but a press there must not start a tracking box.
+        if x <= SIDE_COLUMN_W + 16.0 || x >= w - SIDE_COLUMN_W - 16.0 {
             return true;
         }
         false
@@ -322,17 +413,44 @@ impl Chrome {
 
     fn push_state(&self, state: &ChromeState) {
         let c = &self.component;
-        c.set_chip1(state.chip1.clone().into());
-        c.set_chip2(state.chip2.clone().into());
-        c.set_chip3(state.chip3.clone().into());
-        c.set_chip4(state.chip4.clone().into());
+        c.set_shutter(state.shutter.clone().into());
+        c.set_iso(state.iso.clone().into());
+        c.set_ev(state.ev.clone().into());
+        c.set_wb(state.wb.clone().into());
         c.set_link_state(state.link_state.into());
         c.set_is_recording(state.is_recording);
         c.set_rec_elapsed(state.rec_elapsed.clone().into());
+        c.set_follow_label(if state.follow_on { "ON" } else { "OFF" }.into());
+        c.set_format_label(state.format_label.clone().into());
+        c.set_expo_label(state.expo_label.clone().into());
         c.set_battery_text(state.battery_text.clone().into());
+        c.set_battery_percent(state.battery_percent);
         c.set_storage_text(state.storage_text.clone().into());
         c.set_zoom_value(state.zoom);
         c.set_zoom_label(state.zoom_label.clone().into());
+        c.set_mode_selected(state.mode.min(MODES.len() - 1) as i32);
+        c.set_photo_mode(state.photo_mode);
+        c.set_controls_enabled(state.controls_enabled);
+        let (fx, fy, fw, fh) = state.fit;
+        c.set_fit_x(fx as f32);
+        c.set_fit_y(fy as f32);
+        c.set_fit_width(fw as f32);
+        c.set_fit_height(fh as f32);
+        c.set_countdown(
+            state
+                .countdown
+                .map(|seconds| seconds.to_string())
+                .unwrap_or_default()
+                .into(),
+        );
+        c.set_fps_text(
+            if state.fps_shown > 0 {
+                format!("{} FPS", state.fps_shown)
+            } else {
+                String::new()
+            }
+            .into(),
+        );
 
         let (msg, failed) = match state.phase {
             Phase::Live => (String::new(), false),

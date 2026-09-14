@@ -16,7 +16,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
-use winit::window::{Window, WindowId};
+use winit::window::{Fullscreen, Window, WindowId};
 
 use crate::link::{FromCamera, Link};
 use opc_monitor::shell::{Intent, Shell, TouchPhase as Finger};
@@ -70,6 +70,12 @@ impl View {
                 Intent::Send(command) => self.link.send(command),
                 Intent::Still => self.take_still = true,
                 Intent::Quit => event_loop.exit(),
+                Intent::ToggleFullscreen => {
+                    if let Some(window) = self.window.as_ref() {
+                        let wanted = window.fullscreen().is_none();
+                        window.set_fullscreen(wanted.then_some(Fullscreen::Borderless(None)));
+                    }
+                }
             }
         }
         if let Some(wanted) = self.shell.take_lut_change() {

@@ -1,394 +1,757 @@
-// OpenPocketCine viewfinder chrome — DJI Mimo layout.
+// OpenPocketCine desktop viewfinder chrome — a DJI Mimo replica laid out for a
+// landscape laptop window.
 //
-// Layout (landscape desktop):
+//  ┌ TopBar ──────────────────────────────────────────────────────────────────┐
+//  │ ⋮   ⟳ON   ▭1080P·60   ◎AUTO        ● REC 00:12:34                    ⇥ │
+//  ├──────────────────────────────────────────────────────────────────────────┤
+//  │                       · · · ·(●)· · · ·   1.0×                           │
+//  │  1/60                                                        ᯤ  ▮15%     │
+//  │  ISO 400                    V I D E O                        ▤ 5:36:07   │
+//  │  EV -0.3                                                     ⛶            │
+//  ├ BottomBar ───────────────────────────────────────────────────────────────┤
+//  │ ▣ ⇅ ⟲  (joystick)              (● REC)              ⊙CTR ⟳  ⛶ 📷        │
+//  │        TIMELAPSE  SLOWMOTION  LOW-LIGHT  VIDEO  PHOTO  PANO  LIVESTREAM   │
+//  └──────────────────────────────────────────────────────────────────────────┘
 //
-//  ┌── TopBar (48px) ─────────────────────────────── ●LINK   REC ●──┐
-//  ├── ZoomStrip (44px) ──── 1× ━━━●──────── 6× ──────────────────┤
-//  │                                                                  │
-//  │  chip1 │                                         │  signal      │
-//  │  chip2 │        V I D E O   F R A M E            │  battery     │
-//  │  chip3 │                                         │  storage     │
-//  │  chip4 │                                         │  timer       │
-//  │                                                                  │
-//  ├── BottomBar (80px) ──[Gimbal]──────[REC]──────[STILL FLIP CTR]─┤
-//  └──────────────────────────────────────────────────────────────────┘
+// Every cluster is its own component with an explicit x/y so a later edit mode
+// can move it without touching the internals.
 
-// ── Colour palette ────────────────────────────────────────────────────────────
+import "../assets/fonts/Outfit-Regular.ttf";
+import "../assets/fonts/Outfit-Medium.ttf";
+import "../assets/fonts/Outfit-SemiBold.ttf";
+import "../assets/fonts/Outfit-Bold.ttf";
 
-global Pal {
+// ── Palette ───────────────────────────────────────────────────────────────────
+
+export global Pal {
+    out property <color> bar:          #000000e6;
+    out property <color> plate:        #00000099;
+    out property <color> ink:          #ffffff;
+    out property <color> ink-dim:      #ffffffb3;
+    out property <color> ink-faint:    #ffffff4d;
+    out property <color> accent:       #ffc400;   // Mimo yellow: active mode, focus box
     out property <color> online:       #34c759;
     out property <color> offline:      #8e8e93;
-    out property <color> rec:          #ff3b30;
-    out property <color> rec-bg:       #ff3b3030;
+    out property <color> rec:          #f5222d;
+    out property <color> rec-bg:       #f5222d33;
     out property <color> warn:         #ffd60a;
-    out property <color> chip-text:    #ffffffe6;
-    out property <color> chip-dim:     #ffffffb0;
-    out property <color> panel-bg:     #000000d9;
-    out property <color> panel-border: #ffffff1a;
-    out property <color> panel-shine:  #ffffff12;
-    out property <color> bar-bg:       #000000cc;
-    out property <color> ctrl-border:  #ffffff50;
+    out property <color> ring:         #ffffff;
+    out property <color> ring-faint:   #ffffff66;
+    out property <string> font:        "Outfit";
 }
 
-// ── ZoomSlider primitive ──────────────────────────────────────────────────────
+// ── Building blocks ───────────────────────────────────────────────────────────
 
-component ZoomSlider {
-    in-out property <float> value: 1.0;
-    in property <float> minimum: 1.0;
-    in property <float> maximum: 6.0;
-    callback changed(float);
+// A square icon button with an optional caption (label) and a key hint.
+component IconButton {
+    in property <image> icon;
+    in property <string> label;
+    in property <string> key;
+    in property <length> icon-size: 24px;
+    in property <color> tint: Pal.ink;
+    in property <bool> enabled: true;
+    callback tapped();
 
-    height: 32px;
-    min-width: 120px;
+    width: 56px;
+    height: 56px;
+    opacity: root.enabled ? 1.0 : 0.35;
 
-    property <float> pct: (root.value - root.minimum) / (root.maximum - root.minimum);
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.tapped(); }
+    }
 
     Rectangle {
-        y: (parent.height - self.height) / 2;
-        height: 3px;
-        background: #ffffff30;
-        border-radius: 2px;
-        Rectangle {
-            width: root.pct * parent.width;
-            height: 3px;
-            background: white;
-            border-radius: 2px;
+        border-radius: 8px;
+        background: ta.pressed ? #ffffff2e : (ta.has-hover ? #ffffff14 : transparent);
+    }
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        Image {
+            source: root.icon;
+            colorize: root.tint;
+            width: root.icon-size;
+            height: root.icon-size;
+            horizontal-alignment: center;
+        }
+        if root.label != "": Text {
+            text: root.label;
+            color: root.tint;
+            font-family: Pal.font;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            horizontal-alignment: center;
+        }
+        if root.key != "": Text {
+            text: root.key;
+            color: Pal.ink-faint;
+            font-family: Pal.font;
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.6px;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+// A readout with a small glyph box on the left ("ISO", "EV") and a value.
+component Readout {
+    in property <string> badge;
+    in property <image> badge-icon;
+    in property <string> value;
+    height: 22px;
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+        if root.badge != "": Rectangle {
+            width: 26px;
+            height: 16px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3px;
+            background: Pal.ink;
+            Text {
+                text: root.badge;
+                color: #000000;
+                font-family: Pal.font;
+                font-size: 9px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        if root.badge == "" && root.badge-icon.width > 0: Image {
+            source: root.badge-icon;
+            colorize: Pal.ink;
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+        }
+        Text {
+            text: root.value;
+            color: Pal.ink;
+            font-family: Pal.font;
+            font-size: 14px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// ── Top bar ───────────────────────────────────────────────────────────────────
+
+component TopBar {
+    in property <string> follow-label;   // "ON" / "OFF"
+    in property <string> format-label;   // "1080P·60"
+    in property <string> expo-label;     // "AUTO" / "M"
+    in property <string> link-state;
+    in property <bool>   is-recording;
+    in property <string> rec-elapsed;
+    in property <bool>   enabled;
+
+    callback menu-tapped();
+    callback follow-tapped();
+    callback format-tapped();
+    callback expo-tapped();
+    callback exit-tapped();
+
+    height: 56px;
+
+    Rectangle { background: Pal.bar; }
+
+    HorizontalLayout {
+        x: 8px;
+        y: 0;
+        height: parent.height;
+        spacing: 4px;
+        alignment: start;
+
+        IconButton {
+            icon: @image-url("../assets/icons/dots-vertical.svg");
+            key: "TAB";
+            tapped => { root.menu-tapped(); }
+        }
+        IconButton {
+            icon: @image-url("../assets/icons/rotate-clockwise-2.svg");
+            label: root.follow-label;
+            tint: root.follow-label == "ON" ? Pal.ink : Pal.ink-dim;
+            enabled: root.enabled;
+            tapped => { root.follow-tapped(); }
+        }
+        IconButton {
+            icon: @image-url("../assets/icons/video.svg");
+            label: root.format-label;
+            key: "[ ]";
+            width: 84px;
+            enabled: root.enabled;
+            tapped => { root.format-tapped(); }
+        }
+        IconButton {
+            icon: @image-url("../assets/icons/aperture.svg");
+            label: root.expo-label;
+            key: "E";
+            enabled: root.enabled;
+            tapped => { root.expo-tapped(); }
         }
     }
 
+    // Centre: link state, and the REC badge while rolling.
+    centre := Rectangle {
+        width: centre-row.preferred-width;
+        height: parent.height;
+        x: (parent.width - self.width) / 2;
+        y: 0;
+        centre-row := HorizontalLayout {
+            spacing: 12px;
+            alignment: center;
+
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: center;
+                Rectangle {
+                    width: 7px; height: 7px;
+                    border-radius: 4px;
+                    y: (parent.height - self.height) / 2;
+                    background: root.link-state == "LINK" ? Pal.online : Pal.offline;
+                }
+                Text {
+                    text: root.link-state;
+                    color: root.link-state == "LINK" ? Pal.online : Pal.ink-dim;
+                    font-family: Pal.font;
+                    font-size: 11px;
+                    font-weight: 700;
+                    letter-spacing: 1px;
+                    vertical-alignment: center;
+                }
+            }
+
+            if root.is-recording: Rectangle {
+                height: 28px;
+                width: ri.preferred-width + 34px;
+                y: (parent.height - self.height) / 2;
+                background: Pal.rec-bg;
+                border-radius: 6px;
+                border-color: Pal.rec;
+                border-width: 1px;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 7px;
+                    Rectangle {
+                        width: 8px; height: 8px; border-radius: 4px;
+                        background: Pal.rec;
+                        y: (parent.height - self.height) / 2;
+                    }
+                    ri := Text {
+                        text: "REC  " + root.rec-elapsed;
+                        color: Pal.rec;
+                        font-family: Pal.font;
+                        font-size: 13px;
+                        font-weight: 700;
+                        letter-spacing: 0.8px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    IconButton {
+        x: parent.width - self.width - 8px;
+        y: 0;
+        icon: @image-url("../assets/icons/logout.svg");
+        key: "ESC";
+        tapped => { root.exit-tapped(); }
+    }
+}
+
+// ── Zoom dial ─────────────────────────────────────────────────────────────────
+// Mimo's dotted ruler with a ring in the middle. Horizontal drag sets the zoom.
+
+component ZoomDial {
+    in-out property <float> value: 1.0;
+    in property <float> minimum: 1.0;
+    in property <float> maximum: 6.0;
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback changed(float);
+
+    width: 360px;
+    height: 76px;
+    opacity: root.enabled ? 1.0 : 0.4;
+
+    // The ruler is `ruler-w` wide for the full range and slides so that the current
+    // value sits under the fixed ring in the middle.
+    property <float> pct: (root.value - root.minimum) / (root.maximum - root.minimum);
+    property <length> ruler-w: 480px;
+    property <length> centre: root.width / 2;
+    property <length> knob: 44px;
+    property <float> press-value;
+
+    for i in 41: Rectangle {
+        property <length> px: root.centre + root.ruler-w * (i / 40 - root.pct);
+        property <bool> major: mod(i, 8) == 0;
+        width: self.major ? 7px : 3px;
+        height: self.width;
+        border-radius: self.width / 2;
+        x: self.px - self.width / 2;
+        y: 22px - self.height / 2;
+        background: Pal.ink;
+        opacity: 1.0 - min(1.0, abs((self.px - root.centre) / (root.width / 2 - 8px)));
+        visible: abs((self.px - root.centre) / 1px) > 26 && self.px > 0 && self.px < root.width;
+    }
+
     Rectangle {
-        width: 16px; height: 16px;
-        border-radius: 8px;
-        x: root.pct * (root.width - self.width);
-        y: (parent.height - self.height) / 2;
-        background: white;
+        width: root.knob; height: root.knob;
+        border-radius: root.knob / 2;
+        x: root.centre - self.width / 2;
+        y: 22px - self.height / 2;
+        border-width: 2px;
+        border-color: Pal.ring;
+        background: #00000033;
+        Rectangle {
+            width: 14px; height: 14px; border-radius: 7px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Pal.ink;
+        }
+    }
+
+    Text {
+        text: root.label;
+        color: Pal.ink;
+        font-family: Pal.font;
+        font-size: 15px;
+        font-weight: 600;
+        x: (parent.width - self.preferred-width) / 2;
+        y: 50px;
     }
 
     ta := TouchArea {
+        enabled: root.enabled;
+        height: 48px;
         moved => {
             if self.pressed {
-                let p = (self.mouse-x / root.width).clamp(0, 1);
-                root.value = root.minimum + p * (root.maximum - root.minimum);
+                // Dragging right pulls the ruler left, so the value goes up.
+                let delta = (self.mouse-x - self.pressed-x) / root.ruler-w;
+                root.value = (root.press-value + delta * (root.maximum - root.minimum))
+                    .clamp(root.minimum, root.maximum);
                 root.changed(root.value);
             }
         }
         pointer-event(e) => {
             if e.kind == PointerEventKind.down {
-                let p = (self.mouse-x / root.width).clamp(0, 1);
-                root.value = root.minimum + p * (root.maximum - root.minimum);
-                root.changed(root.value);
+                root.press-value = root.value;
             }
         }
     }
 }
 
-// ── Top bar — connection left, REC badge right ────────────────────────────────
-
-component TopBar {
-    in property <string> link-state;
-    in property <bool>   is-recording;
-    in property <string> rec-elapsed;
-
-    height: 48px;
-
-    Rectangle {
-        background: Pal.bar-bg;
-
-        // Left: connection
-        HorizontalLayout {
-            x: 16px;
-            y: (parent.height - self.height) / 2;
-            height: 22px;
-            spacing: 7px;
-            alignment: center;
-
-            Rectangle {
-                width: 7px; height: 7px;
-                border-radius: 4px;
-                y: (parent.height - self.height) / 2;
-                background: root.link-state == "LINK" ? Pal.online : Pal.offline;
-            }
-            Text {
-                text: root.link-state;
-                color: root.link-state == "LINK" ? Pal.online : Pal.chip-dim;
-                font-size: 10px;
-                font-family: "Segoe UI";
-                font-weight: 700;
-                letter-spacing: 0.8px;
-                vertical-alignment: center;
-            }
-        }
-
-        // Right: REC badge
-        rec-badge := Rectangle {
-            visible: root.is-recording;
-            height: 26px;
-            width: ri.preferred-width + 32px;
-            x: parent.width - self.width - 16px;
-            y: (parent.height - self.height) / 2;
-            background: Pal.rec-bg;
-            border-radius: 5px;
-            border-color: Pal.rec;
-            border-width: 1px;
-
-            HorizontalLayout {
-                width: parent.width; height: parent.height;
-                alignment: center; spacing: 6px;
-                Rectangle {
-                    width: 7px; height: 7px; border-radius: 4px;
-                    background: Pal.rec;
-                    y: (parent.height - self.height) / 2;
-                }
-                ri := Text {
-                    text: "REC  " + root.rec-elapsed;
-                    color: Pal.rec;
-                    font-size: 11px; font-family: "Segoe UI"; font-weight: 700;
-                    letter-spacing: 0.6px; vertical-alignment: center;
-                }
-            }
-        }
-    }
-}
-
-// ── Zoom strip — sits directly below TopBar ───────────────────────────────────
-
-component ZoomStrip {
-    in-out property <float> zoom-value: 1.0;
-    in property <string>    zoom-label: "1.0×";
-    callback changed(float);
-
-    height: 44px;
-
-    Rectangle { background: #00000080; }
-
-    HorizontalLayout {
-        padding-left: 20px;
-        padding-right: 20px;
-        spacing: 14px;
-        alignment: center;
-
-        Text {
-            text: "1×";
-            color: #ffffffa0; font-size: 11px; font-family: "Segoe UI";
-            vertical-alignment: center; width: 22px; horizontal-alignment: right;
-        }
-
-        ZoomSlider {
-            horizontal-stretch: 1;
-            value <=> root.zoom-value;
-            changed(v) => { root.changed(v); }
-        }
-
-        Text {
-            text: root.zoom-label;
-            color: white; font-size: 13px; font-family: "Segoe UI"; font-weight: 600;
-            vertical-alignment: center; width: 40px; horizontal-alignment: center;
-        }
-
-        Text {
-            text: "6×";
-            color: #ffffffa0; font-size: 11px; font-family: "Segoe UI";
-            vertical-alignment: center; width: 22px; horizontal-alignment: left;
-        }
-    }
-}
-
-// ── Left exposure column ───────────────────────────────────────────────────────
-// Shows shutter / ISO / EV / WB stacked vertically, DJI-style.
+// ── Exposure column ───────────────────────────────────────────────────────────
 
 component ExposureColumn {
-    in property <string> chip1;
-    in property <string> chip2;
-    in property <string> chip3;
-    in property <string> chip4;
+    in property <string> shutter;
+    in property <string> iso;
+    in property <string> ev;
+    in property <string> wb;
 
-    width: 60px;
+    width: 110px;
+    height: layout.preferred-height + 24px;
 
     Rectangle {
-        background: #00000080;
+        background: Pal.plate;
+        border-radius: 10px;
+    }
 
-        VerticalLayout {
-            alignment: center;
-            spacing: 10px;
-            padding-top: 16px;
-            padding-bottom: 16px;
-            padding-left: 4px;
-            padding-right: 4px;
-
-            if root.chip1 != "": Text {
-                text: root.chip1;
-                color: Pal.chip-text; font-size: 11px; font-family: "Segoe UI";
-                font-weight: 500; horizontal-alignment: center; wrap: no-wrap;
-            }
-            if root.chip2 != "": Text {
-                text: root.chip2;
-                color: Pal.chip-text; font-size: 11px; font-family: "Segoe UI";
-                font-weight: 500; horizontal-alignment: center; wrap: no-wrap;
-            }
-            if root.chip3 != "": Text {
-                text: root.chip3;
-                color: Pal.chip-text; font-size: 11px; font-family: "Segoe UI";
-                font-weight: 500; horizontal-alignment: center; wrap: no-wrap;
-            }
-            if root.chip4 != "": Text {
-                text: root.chip4;
-                color: Pal.chip-text; font-size: 11px; font-family: "Segoe UI";
-                font-weight: 500; horizontal-alignment: center; wrap: no-wrap;
-            }
-        }
+    layout := VerticalLayout {
+        x: 12px;
+        y: 12px;
+        spacing: 12px;
+        alignment: start;
+        if root.shutter != "": Readout { value: root.shutter; }
+        if root.iso != "": Readout { badge: "ISO"; value: root.iso; }
+        if root.ev != "": Readout { badge: "EV"; value: root.ev; }
+        if root.wb != "": Readout { badge: "WB"; value: root.wb; }
     }
 }
 
-// ── Right status column ────────────────────────────────────────────────────────
-// Signal / battery / storage / rec-timer stacked vertically.
+// ── Status column ─────────────────────────────────────────────────────────────
 
 component StatusColumn {
     in property <string> link-state;
     in property <string> battery-text;
     in property <string> storage-text;
-    in property <bool>   is-recording;
-    in property <string> rec-elapsed;
+    in property <int>    battery-percent;
+    in property <string> fps-text;
 
-    width: 56px;
+    width: 108px;
+    height: layout.preferred-height + 24px;
 
     Rectangle {
-        background: #00000080;
+        background: Pal.plate;
+        border-radius: 10px;
+    }
 
-        VerticalLayout {
-            alignment: center;
-            spacing: 10px;
-            padding-top: 16px;
-            padding-bottom: 16px;
-            padding-left: 4px;
-            padding-right: 4px;
+    layout := VerticalLayout {
+        x: 12px;
+        y: 12px;
+        spacing: 12px;
+        alignment: start;
 
-            // Signal dot + label
+        HorizontalLayout {
+            spacing: 6px;
+            Image {
+                source: @image-url("../assets/icons/wifi.svg");
+                colorize: root.link-state == "LINK" ? Pal.ink : Pal.offline;
+                width: 18px; height: 18px;
+            }
             Text {
-                text: "●";
-                color: root.link-state == "LINK" ? Pal.online : Pal.offline;
-                font-size: 10px; horizontal-alignment: center;
+                text: root.link-state == "LINK" ? "Wi-Fi" : "—";
+                color: root.link-state == "LINK" ? Pal.ink : Pal.offline;
+                font-family: Pal.font; font-size: 13px; font-weight: 600;
+                vertical-alignment: center;
+            }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            Image {
+                source: @image-url("../assets/icons/battery-2.svg");
+                colorize: root.battery-percent <= 20 ? Pal.rec : (root.battery-percent <= 40 ? Pal.warn : Pal.ink);
+                width: 18px; height: 18px;
             }
             Text {
                 text: root.battery-text;
-                color: Pal.chip-dim; font-size: 10px; font-family: "Segoe UI";
-                horizontal-alignment: center;
+                color: root.battery-percent <= 20 ? Pal.rec : Pal.ink;
+                font-family: Pal.font; font-size: 13px; font-weight: 600;
+                vertical-alignment: center;
+            }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            Image {
+                source: @image-url("../assets/icons/device-sd-card.svg");
+                colorize: Pal.ink;
+                width: 18px; height: 18px;
             }
             Text {
                 text: root.storage-text;
-                color: Pal.chip-dim; font-size: 10px; font-family: "Segoe UI";
-                horizontal-alignment: center;
+                color: Pal.ink;
+                font-family: Pal.font; font-size: 13px; font-weight: 600;
+                vertical-alignment: center;
             }
-            if root.is-recording: Text {
-                text: root.rec-elapsed;
-                color: Pal.rec; font-size: 11px; font-family: "Segoe UI"; font-weight: 600;
-                horizontal-alignment: center;
-            }
+        }
+        // The rate reaching the screen, which is the desktop's own truth, not the body's.
+        if root.fps-text != "": Text {
+            text: root.fps-text;
+            color: Pal.ink-dim;
+            font-family: Pal.font; font-size: 12px; font-weight: 600;
+            letter-spacing: 0.5px;
         }
     }
 }
 
-// ── Gimbal joystick pad ────────────────────────────────────────────────────────
+// ── Countdown ─────────────────────────────────────────────────────────────────
+// The T-key take countdown: one big number in the middle of the shot.
+
+component CountdownPanel {
+    in property <string> seconds;
+    width: 120px;
+    height: 120px;
+    Rectangle {
+        border-radius: 60px;
+        background: #000000b3;
+        border-width: 3px;
+        border-color: Pal.accent;
+    }
+    Text {
+        text: root.seconds;
+        color: Pal.accent;
+        font-family: Pal.font;
+        font-size: 64px;
+        font-weight: 700;
+        x: (parent.width - self.preferred-width) / 2;
+        y: (parent.height - self.preferred-height) / 2;
+    }
+}
+
+// ── Gimbal joystick ───────────────────────────────────────────────────────────
 
 component GimbalPad {
+    in property <bool> enabled: true;
     callback gimbal-moved(float, float);
     callback gimbal-released();
 
-    width: 88px;
-    height: 88px;
+    width: 96px;
+    height: 96px;
+    opacity: root.enabled ? 1.0 : 0.4;
 
-    // Outer ring
+    property <float> dx: 0;
+    property <float> dy: 0;
+
     Rectangle {
-        border-radius: 44px;
+        border-radius: 48px;
         border-width: 1.5px;
-        border-color: #ffffff60;
-        background: #00000080;
+        border-color: Pal.ring-faint;
+        background: #00000066;
     }
 
-    // D-pad arrows
-    Text { text: "▲"; color: #ffffffc0; font-size: 11px; font-family: "Segoe UI";
-        x: (parent.width - self.preferred-width) / 2; y: 7px; }
-    Text { text: "▼"; color: #ffffffc0; font-size: 11px; font-family: "Segoe UI";
-        x: (parent.width - self.preferred-width) / 2;
-        y: parent.height - self.preferred-height - 7px; }
-    Text { text: "◀"; color: #ffffffc0; font-size: 11px; font-family: "Segoe UI";
-        x: 7px; y: (parent.height - self.preferred-height) / 2; }
-    Text { text: "▶"; color: #ffffffc0; font-size: 11px; font-family: "Segoe UI";
-        x: parent.width - self.preferred-width - 7px;
-        y: (parent.height - self.preferred-height) / 2; }
+    Image { source: @image-url("../assets/icons/chevron-up.svg"); colorize: Pal.ink-dim;
+        width: 16px; height: 16px; x: (parent.width - self.width) / 2; y: 6px; }
+    Image { source: @image-url("../assets/icons/chevron-down.svg"); colorize: Pal.ink-dim;
+        width: 16px; height: 16px; x: (parent.width - self.width) / 2; y: parent.height - self.height - 6px; }
+    Image { source: @image-url("../assets/icons/chevron-left.svg"); colorize: Pal.ink-dim;
+        width: 16px; height: 16px; x: 6px; y: (parent.height - self.height) / 2; }
+    Image { source: @image-url("../assets/icons/chevron-right.svg"); colorize: Pal.ink-dim;
+        width: 16px; height: 16px; x: parent.width - self.width - 6px; y: (parent.height - self.height) / 2; }
 
-    // Centre dot
+    // Thumb follows the finger while held.
     Rectangle {
-        width: 14px; height: 14px; border-radius: 7px;
-        background: #ffffffd0;
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
+        width: 40px; height: 40px; border-radius: 20px;
+        background: ta.pressed ? #ffffffe6 : #ffffffb3;
+        x: (parent.width - self.width) / 2 + root.dx * 22px;
+        y: (parent.height - self.height) / 2 + root.dy * 22px;
     }
 
     ta := TouchArea {
+        enabled: root.enabled;
         moved => {
             if self.pressed {
-                let dx = ((self.mouse-x - root.width / 2) / (root.width / 2)).clamp(-1, 1);
-                let dy = ((self.mouse-y - root.height / 2) / (root.height / 2)).clamp(-1, 1);
-                root.gimbal-moved(dx, dy);
+                root.dx = ((self.mouse-x - root.width / 2) / (root.width / 2)).clamp(-1, 1);
+                root.dy = ((self.mouse-y - root.height / 2) / (root.height / 2)).clamp(-1, 1);
+                root.gimbal-moved(root.dx, -root.dy);
             }
         }
         pointer-event(e) => {
-            if e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel {
+            if e.kind == PointerEventKind.down {
+                root.dx = ((self.mouse-x - root.width / 2) / (root.width / 2)).clamp(-1, 1);
+                root.dy = ((self.mouse-y - root.height / 2) / (root.height / 2)).clamp(-1, 1);
+                root.gimbal-moved(root.dx, -root.dy);
+            } else if e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel {
+                root.dx = 0;
+                root.dy = 0;
                 root.gimbal-released();
             }
         }
+    }
+
+    Text {
+        text: "ARROWS";
+        color: Pal.ink-faint;
+        font-family: Pal.font; font-size: 9px; font-weight: 600; letter-spacing: 0.6px;
+        x: (parent.width - self.preferred-width) / 2;
+        y: parent.height + 2px;
     }
 }
 
 // ── Record button ─────────────────────────────────────────────────────────────
 
-component RecButton {
-    in property <bool> is-recording: false;
+component RecordButton {
+    in property <bool> is-recording;
+    in property <bool> photo-mode;
+    in property <bool> enabled: true;
     callback tapped();
 
     width: 72px;
     height: 72px;
-
-    ta := TouchArea { clicked => { root.tapped(); } }
+    opacity: root.enabled ? 1.0 : 0.4;
 
     Rectangle {
         border-radius: 36px;
         border-width: 3px;
-        border-color: white;
-        background: transparent;
+        border-color: Pal.ring;
+        background: ta.pressed ? #ffffff22 : transparent;
     }
     Rectangle {
-        width: 50px; height: 50px;
+        // A red disc; a rounded square while rolling; white for a still.
+        width: root.is-recording ? 30px : 56px;
+        height: self.width;
+        border-radius: root.is-recording ? 6px : self.width / 2;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        border-radius: root.is-recording ? 6px : 25px;
-        background: Pal.rec;
-        animate border-radius { duration: 120ms; easing: ease-in-out; }
+        background: root.photo-mode ? Pal.ink : Pal.rec;
+        animate width, border-radius { duration: 120ms; }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.tapped(); }
+    }
+    Text {
+        text: root.photo-mode ? "S" : "SPACE";
+        color: Pal.ink-faint;
+        font-family: Pal.font; font-size: 9px; font-weight: 600; letter-spacing: 0.6px;
+        x: (parent.width - self.preferred-width) / 2;
+        y: parent.height + 4px;
     }
 }
 
-// ── Small action button ────────────────────────────────────────────────────────
+// ── Mode strip ────────────────────────────────────────────────────────────────
 
-component SmallBtn {
-    in property <string> label;
-    callback tapped();
+component ModeStrip {
+    in property <[string]> modes;
+    in property <[bool]> available;
+    in property <int> selected;
+    in property <bool> enabled: true;
+    callback selected-changed(int);
 
-    width: 52px;
-    height: 52px;
-
-    ta := TouchArea { clicked => { root.tapped(); } }
+    height: 36px;
 
     Rectangle {
-        background: #000000b0;
-        border-radius: 8px;
-        border-width: 1px;
-        border-color: Pal.ctrl-border;
+        width: row.preferred-width;
+        height: parent.height;
+        x: (parent.width - self.width) / 2;
+        row := HorizontalLayout {
+        spacing: 28px;
+        alignment: center;
 
-        Text {
-            text: root.label;
-            color: white; font-size: 10px; font-family: "Segoe UI"; font-weight: 600;
-            letter-spacing: 0.4px; horizontal-alignment: center; vertical-alignment: center;
+        for m[i] in root.modes: Rectangle {
+            width: t.preferred-width;
+            t := Text {
+                text: m;
+                color: i == root.selected ? Pal.accent : (root.available[i] ? Pal.ink-dim : Pal.ink-faint);
+                font-family: Pal.font;
+                font-size: 15px;
+                font-weight: i == root.selected ? 700 : 600;
+                letter-spacing: 0.6px;
+                vertical-alignment: center;
+                height: parent.height;
+            }
+            TouchArea {
+                enabled: root.enabled && root.available[i];
+                clicked => { root.selected-changed(i); }
+            }
         }
+        }
+    }
+}
+
+// ── Bottom bar ────────────────────────────────────────────────────────────────
+
+component BottomBar {
+    in property <bool> is-recording;
+    in property <bool> photo-mode;
+    in property <bool> enabled;
+    in property <[string]> modes;
+    in property <[bool]> modes-available;
+    in property <int> mode-selected;
+
+    callback record-tapped();
+    callback still-tapped();
+    callback flip-tapped();
+    callback recenter-tapped();
+    callback gallery-tapped();
+    callback orientation-tapped();
+    callback follow-cycle-tapped();
+    callback fullscreen-tapped();
+    callback mode-selected-changed(int);
+    callback gimbal-moved(float, float);
+    callback gimbal-released();
+
+    height: 152px;
+
+    Rectangle { background: Pal.bar; }
+
+    // Left cluster: gallery / flip / orientation, then the stick.
+    HorizontalLayout {
+        x: 12px;
+        y: 8px;
+        height: 100px;
+        spacing: 6px;
+        alignment: start;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 0;
+            HorizontalLayout {
+                spacing: 2px;
+                IconButton {
+                    icon: @image-url("../assets/icons/photo.svg");
+                    key: "G";
+                    tapped => { root.gallery-tapped(); }
+                }
+                IconButton {
+                    icon: @image-url("../assets/icons/flip-vertical.svg");
+                    key: "F";
+                    enabled: root.enabled;
+                    tapped => { root.flip-tapped(); }
+                }
+                IconButton {
+                    icon: @image-url("../assets/icons/device-mobile-rotated.svg");
+                    key: "O";
+                    enabled: root.enabled;
+                    tapped => { root.orientation-tapped(); }
+                }
+            }
+        }
+        Rectangle { width: 8px; }
+        GimbalPad {
+            y: 0;
+            enabled: root.enabled;
+            gimbal-moved(x, y) => { root.gimbal-moved(x, y); }
+            gimbal-released => { root.gimbal-released(); }
+        }
+    }
+
+    // Centre: record.
+    RecordButton {
+        x: (parent.width - self.width) / 2;
+        y: 14px;
+        is-recording: root.is-recording;
+        photo-mode: root.photo-mode;
+        enabled: root.enabled;
+        tapped => { root.record-tapped(); }
+    }
+
+    // Right cluster.
+    Rectangle {
+        width: right-row.preferred-width;
+        x: parent.width - self.width - 12px;
+        y: 8px;
+        height: 100px;
+
+        VerticalLayout {
+            alignment: center;
+            right-row := HorizontalLayout {
+                spacing: 2px;
+                IconButton {
+                    icon: @image-url("../assets/icons/arrows-minimize.svg");
+                    label: "CTR";
+                    key: "C";
+                    enabled: root.enabled;
+                    tapped => { root.recenter-tapped(); }
+                }
+                IconButton {
+                    icon: @image-url("../assets/icons/rotate-360.svg");
+                    label: "FOLLOW";
+                    width: 64px;
+                    enabled: root.enabled;
+                    tapped => { root.follow-cycle-tapped(); }
+                }
+                IconButton {
+                    icon: @image-url("../assets/icons/camera.svg");
+                    label: "STILL";
+                    key: "S";
+                    enabled: root.enabled;
+                    tapped => { root.still-tapped(); }
+                }
+                IconButton {
+                    icon: @image-url("../assets/icons/maximize.svg");
+                    key: "F11";
+                    tapped => { root.fullscreen-tapped(); }
+                }
+            }
+        }
+    }
+
+    ModeStrip {
+        x: 0;
+        y: parent.height - self.height - 6px;
+        width: parent.width;
+        modes: root.modes;
+        available: root.modes-available;
+        selected: root.mode-selected;
+        enabled: root.enabled;
+        selected-changed(i) => { root.mode-selected-changed(i); }
     }
 }
 
@@ -398,58 +761,75 @@ component PhasePanel {
     in property <string> message;
     in property <bool>   failed;
 
-    min-width: 220px;
-    height: inner-text.preferred-height + 56px;
+    width: t.preferred-width + 56px;
+    height: 64px;
 
     Rectangle {
-        background: Pal.panel-bg;
-        border-color: Pal.panel-border;
+        background: #000000d9;
+        border-radius: 12px;
         border-width: 1px;
-        border-radius: 14px;
+        border-color: root.failed ? #f5222d66 : #ffffff1f;
+    }
 
-        Rectangle {
-            x: 1px; y: 1px; width: parent.width - 2px; height: 1px;
-            background: Pal.panel-shine;
-        }
-
-        inner-text := Text {
-            x: 36px; y: 28px;
-            width: parent.width - 72px;
-            text: root.message;
-            color: root.failed ? Pal.warn : white;
-            font-size: 16px; font-family: "Segoe UI"; font-weight: 300;
-            letter-spacing: 3.5px; horizontal-alignment: center; wrap: word-wrap;
-        }
+    t := Text {
+        text: root.message;
+        color: root.failed ? Pal.warn : Pal.ink;
+        font-family: Pal.font;
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 2.5px;
+        x: (parent.width - self.preferred-width) / 2;
+        y: (parent.height - self.preferred-height) / 2;
     }
 }
 
 // ── Root overlay ──────────────────────────────────────────────────────────────
 
 export component HudOverlay inherits Window {
-    // Exposure chips (shown in left column)
-    in property <string> chip1: "";
-    in property <string> chip2: "";
-    in property <string> chip3: "";
-    in property <string> chip4: "";
+    // Exposure readouts.
+    in property <string> shutter: "";
+    in property <string> iso: "";
+    in property <string> ev: "";
+    in property <string> wb: "";
 
-    // Connection + recording
+    // Top bar.
+    in property <string> follow-label: "ON";
+    in property <string> format-label: "";
+    in property <string> expo-label: "AUTO";
     in property <string> link-state: "LINKING";
     in property <bool>   is-recording: false;
     in property <string> rec-elapsed: "";
+    in property <bool>   controls-enabled: true;
 
-    // Right-column status
+    // Status column.
     in property <string> battery-text: "";
+    in property <int>    battery-percent: 100;
     in property <string> storage-text: "";
 
-    // Phase overlay
+    // Phase overlay.
     in property <string> phase-message: "";
     in property <bool>   phase-failed: false;
+    /// Seconds left on the take countdown; empty when none is running.
+    in property <string> countdown: "";
+    in property <string> fps-text: "";
 
-    // Zoom slider
+    // Zoom.
     in-out property <float> zoom-value: 1.0;
     in property <string>    zoom-label: "1.0×";
 
-    // Callbacks
+    // Modes. Pano and Livestream are shown but unavailable.
+    in property <[string]> modes: ["TIMELAPSE", "SLOWMOTION", "LOW-LIGHT", "VIDEO", "PHOTO", "PANO", "LIVESTREAM"];
+    in property <[bool]> modes-available: [true, true, true, true, true, false, false];
+    in property <int> mode-selected: 3;
+    in property <bool> photo-mode: false;
+
+    // Where the picture sits in the window, so side chrome can park in the gutters.
+    in property <length> fit-x: 0;
+    in property <length> fit-y: 0;
+    in property <length> fit-width: root.width;
+    in property <length> fit-height: root.height;
+
+    // Callbacks.
     callback record-tapped();
     callback still-tapped();
     callback flip-tapped();
@@ -457,101 +837,105 @@ export component HudOverlay inherits Window {
     callback zoom-changed(float);
     callback gimbal-moved(float, float);
     callback gimbal-released();
+    callback menu-tapped();
+    callback follow-tapped();
+    callback format-tapped();
+    callback expo-tapped();
+    callback exit-tapped();
+    callback gallery-tapped();
+    callback orientation-tapped();
+    callback follow-cycle-tapped();
+    callback fullscreen-tapped();
+    callback mode-selected-changed(int);
 
     background: transparent;
 
-    // ── Top bar ───────────────────────────────────────────────────────────
+    property <length> top-h: 56px;
+    property <length> bottom-h: 152px;
+    // Picture area not covered by the bars.
+    property <length> mid-top: max(root.top-h, root.fit-y);
+    property <length> mid-bottom: min(root.height - root.bottom-h, root.fit-y + root.fit-height);
+    property <length> left-gutter: root.fit-x;
+    property <length> right-gutter: root.width - root.fit-x - root.fit-width;
+
     TopBar {
         x: 0; y: 0; width: parent.width;
+        follow-label: root.follow-label;
+        format-label: root.format-label;
+        expo-label: root.expo-label;
         link-state: root.link-state;
         is-recording: root.is-recording;
         rec-elapsed: root.rec-elapsed;
+        enabled: root.controls-enabled;
+        menu-tapped => { root.menu-tapped(); }
+        follow-tapped => { root.follow-tapped(); }
+        format-tapped => { root.format-tapped(); }
+        expo-tapped => { root.expo-tapped(); }
+        exit-tapped => { root.exit-tapped(); }
     }
 
-    // ── Zoom strip ────────────────────────────────────────────────────────
-    ZoomStrip {
-        x: 0; y: 48px; width: parent.width;
-        zoom-value <=> root.zoom-value;
-        zoom-label: root.zoom-label;
+    ZoomDial {
+        x: root.fit-x + (root.fit-width - self.width) / 2;
+        y: root.mid-top + 10px;
+        value <=> root.zoom-value;
+        label: root.zoom-label;
+        enabled: root.controls-enabled;
         changed(v) => { root.zoom-changed(v); }
     }
 
-    // ── Left exposure column ──────────────────────────────────────────────
     ExposureColumn {
-        x: 0;
-        y: 92px;
-        height: parent.height - 92px - 80px;
-        chip1: root.chip1;
-        chip2: root.chip2;
-        chip3: root.chip3;
-        chip4: root.chip4;
+        // Park in the left gutter when there is one wide enough, else over the picture edge.
+        x: root.left-gutter >= self.width + 24px ? (root.left-gutter - self.width) / 2 : root.fit-x + 16px;
+        y: root.mid-top + (root.mid-bottom - root.mid-top - self.height) / 2;
+        shutter: root.shutter;
+        iso: root.iso;
+        ev: root.ev;
+        wb: root.wb;
     }
 
-    // ── Right status column ───────────────────────────────────────────────
     StatusColumn {
-        x: parent.width - self.width;
-        y: 92px;
-        height: parent.height - 92px - 80px;
+        x: root.right-gutter >= self.width + 24px
+            ? root.width - root.right-gutter + (root.right-gutter - self.width) / 2
+            : root.fit-x + root.fit-width - self.width - 16px;
+        y: root.mid-top + (root.mid-bottom - root.mid-top - self.height) / 2;
         link-state: root.link-state;
         battery-text: root.battery-text;
+        battery-percent: root.battery-percent;
         storage-text: root.storage-text;
+        fps-text: root.fps-text;
+    }
+
+    BottomBar {
+        x: 0; y: parent.height - self.height; width: parent.width;
         is-recording: root.is-recording;
-        rec-elapsed: root.rec-elapsed;
-    }
-
-    // ── Bottom bar background ─────────────────────────────────────────────
-    Rectangle {
-        x: 0;
-        y: parent.height - self.height;
-        width: parent.width;
-        height: 80px;
-        background: Pal.bar-bg;
-    }
-
-    // ── Gimbal pad (bottom-left) ──────────────────────────────────────────
-    GimbalPad {
-        x: 20px;
-        y: parent.height - 80px + (80px - self.height) / 2;
-        gimbal-moved(dx, dy) => { root.gimbal-moved(dx, dy); }
+        photo-mode: root.photo-mode;
+        enabled: root.controls-enabled;
+        modes: root.modes;
+        modes-available: root.modes-available;
+        mode-selected: root.mode-selected;
+        record-tapped => { root.record-tapped(); }
+        still-tapped => { root.still-tapped(); }
+        flip-tapped => { root.flip-tapped(); }
+        recenter-tapped => { root.recenter-tapped(); }
+        gallery-tapped => { root.gallery-tapped(); }
+        orientation-tapped => { root.orientation-tapped(); }
+        follow-cycle-tapped => { root.follow-cycle-tapped(); }
+        fullscreen-tapped => { root.fullscreen-tapped(); }
+        mode-selected-changed(i) => { root.mode-selected-changed(i); }
+        gimbal-moved(x, y) => { root.gimbal-moved(x, y); }
         gimbal-released => { root.gimbal-released(); }
     }
 
-    // ── Record button (bottom-centre) ─────────────────────────────────────
-    RecButton {
-        x: (parent.width - self.width) / 2;
-        y: parent.height - 80px + (80px - self.height) / 2;
-        is-recording: root.is-recording;
-        tapped => { root.record-tapped(); }
+    if root.countdown != "": CountdownPanel {
+        x: root.fit-x + (root.fit-width - self.width) / 2;
+        y: root.mid-top + (root.mid-bottom - root.mid-top - self.height) / 2;
+        seconds: root.countdown;
     }
 
-    // ── STILL / FLIP / CTR (bottom-right) ────────────────────────────────
-    HorizontalLayout {
-        x: parent.width - self.width - 16px;
-        y: parent.height - 80px + (80px - self.height) / 2;
-        width: 52px + 52px + 52px + 8px + 8px;
-        height: 52px;
-        spacing: 8px;
-
-        SmallBtn { label: "STILL"; tapped => { root.still-tapped(); } }
-        SmallBtn { label: "FLIP";  tapped => { root.flip-tapped(); } }
-        SmallBtn { label: "CTR";   tapped => { root.recenter-tapped(); } }
-    }
-
-    // ── Phase panel ───────────────────────────────────────────────────────
     if root.phase-message != "": PhasePanel {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        width: pm.preferred-width + 80px > 260px
-             ? pm.preferred-width + 80px
-             : 260px;
         message: root.phase-message;
         failed: root.phase-failed;
-    }
-
-    pm := Text {
-        visible: false;
-        text: root.phase-message;
-        font-size: 16px; font-family: "Segoe UI";
-        font-weight: 300; letter-spacing: 3.5px;
     }
 }

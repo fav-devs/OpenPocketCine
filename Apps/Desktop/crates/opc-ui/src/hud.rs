@@ -211,8 +211,7 @@ impl Hud {
         // Exposure chips inside the bar — text directly on BAR, no individual plates.
         let mut chip_x = margin;
         for chip in self.top_chips() {
-            chip_x +=
-                canvas.text(chip_x, margin, &chip, scale, WHITE) as i64 + margin;
+            chip_x += canvas.text(chip_x, margin, &chip, scale, WHITE) as i64 + margin;
         }
 
         // Link state and record truth at top-right, inside the bar.
@@ -228,7 +227,13 @@ impl Hud {
             let rec_x = connection_x - margin - text_width - (10 * scale) as i64;
             canvas.text(rec_x, margin, &text, scale, RECORD);
             // Red dot to the left of the elapsed time.
-            canvas.fill(rec_x - (10 * scale) as i64, margin + line / 3, dot, dot, RECORD);
+            canvas.fill(
+                rec_x - (10 * scale) as i64,
+                margin + line / 3,
+                dot,
+                dot,
+                RECORD,
+            );
         }
 
         // ── Bottom bar ──────────────────────────────────────────────────────
