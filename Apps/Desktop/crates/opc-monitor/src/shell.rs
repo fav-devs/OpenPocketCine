@@ -811,6 +811,42 @@ impl Shell {
             || self.move_countdown.is_some()
     }
 
+    pub fn move_paused(&self) -> bool {
+        self.move_engine.as_ref().is_some_and(MoveEngine::is_paused)
+    }
+
+    /// Pause pressed: the motors stop, the remaining time freezes.
+    fn move_pause(&mut self) -> Vec<Intent> {
+        let mut intents = Vec::new();
+        if let Some(engine) = self.move_engine.as_mut() {
+            if engine.pause().stop {
+                intents.push(Intent::Send(Command::GimbalTimedStop));
+            }
+        }
+        self.chrome_stale = true;
+        intents
+    }
+
+    /// Resume pressed: from the body's settled pose, without a countdown.
+    fn move_resume(&mut self, now: f64) -> Vec<Intent> {
+        let Some(live) = self.live_pose() else {
+            return Vec::new();
+        };
+        let mut intents = Vec::new();
+        if let Some(engine) = self.move_engine.as_mut() {
+            let output = engine.resume(live);
+            if let Some((target, duration)) = output.target {
+                intents.push(Intent::Send(target.timed_target(duration)));
+            }
+            if output.stop {
+                intents.push(Intent::Send(Command::GimbalTimedStop));
+            }
+            self.move_ticked_at = now;
+        }
+        self.chrome_stale = true;
+        intents
+    }
+
     /// What the top bar says about a take, or nothing.
     fn move_text(&self, now: f64) -> String {
         if let Some(countdown) = self.move_countdown {
@@ -1207,6 +1243,7 @@ impl Shell {
             program: &self.program,
             live_pose: self.live_pose(),
             move_running: self.move_running(),
+            move_paused: self.move_paused(),
             assists: self.assists,
             zebra_steps: self.zebra_steps(),
             scopes: self.scope_options,
@@ -1658,6 +1695,15 @@ impl Shell {
                 self.move_start(now)
             }
             Pick::MoveStop => self.move_stop(),
+            Pick::MovePause => self.move_pause(),
+            Pick::MoveResume => {
+                let now = self.last_now;
+                self.move_resume(now)
+            }
+            Pick::Smoothness(percent) => {
+                self.program.smoothness = f64::from(percent) / 100.0;
+                Vec::new()
+            }
             Pick::Nothing => Vec::new(),
         }
     }

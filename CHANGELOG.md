@@ -33,7 +33,9 @@ All notable changes to this project are documented here. The format is based on
   tabs: reconnect, joystick sensitivity through the core's stick curve, a game
   controller on the phones' map, DISP and per-part chrome toggles, the cache
   size and a clear, a diagnostics report; the operator's settings persist
-  beside the LUT folder. Unqualified on a physical body.
+  beside the LUT folder. Programmed moves gain the phones' smoothness (a
+  Bézier fillet at B, streamed as look-ahead targets) and pause / resume from
+  the stopped pose. Unqualified on a physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

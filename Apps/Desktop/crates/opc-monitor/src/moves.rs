@@ -126,6 +126,8 @@ pub struct Program {
     pub c: Option<Waypoint>,
     pub duration_ab: f64,
     pub duration_bc: f64,
+    /// 0 keeps the exact B target; above it a Bézier fillet rounds B (see [`Curve`]).
+    pub smoothness: f64,
 }
 
 impl Default for Program {
@@ -136,6 +138,142 @@ impl Default for Program {
             c: None,
             duration_ab: 5.0,
             duration_bc: 5.0,
+            smoothness: 0.0,
+        }
+    }
+}
+
+/// How often a smoothed take streams a target, and how far ahead each one is.
+pub const CURVE_INTERVAL: f64 = 0.05;
+pub const CURVE_LOOK_AHEAD: f64 = 0.1;
+
+/// A quadratic Bézier fillet joining the two legs with matching angular velocity at
+/// each join, transcribed from the core's `GimbalProgramCurve`. The fillet's
+/// half-duration is half the shorter leg scaled by the smoothness; A and C stay exact,
+/// B is the control point and is bypassed; the take's total duration is unchanged.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Curve {
+    pieces: Vec<Piece>,
+    end: Waypoint,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Piece {
+    from: Waypoint,
+    control: Option<Waypoint>,
+    to: Waypoint,
+    duration: f64,
+}
+
+impl Curve {
+    /// `None` without a positive smoothness or positive leg durations.
+    pub fn new(
+        a: Waypoint,
+        b: Waypoint,
+        c: Waypoint,
+        duration_ab: f64,
+        duration_bc: f64,
+        smoothness: f64,
+    ) -> Option<Self> {
+        let sane = smoothness.is_finite()
+            && smoothness > 0.0
+            && duration_ab.is_finite()
+            && duration_ab > 0.0
+            && duration_bc.is_finite()
+            && duration_bc > 0.0;
+        if !sane {
+            return None;
+        }
+        let half = duration_ab.min(duration_bc) * 0.5 * smoothness.min(1.0);
+        let p = a.lerp(&b, 1.0 - half / duration_ab);
+        let q = b.lerp(&c, half / duration_bc);
+        Some(Self {
+            pieces: vec![
+                Piece {
+                    from: a,
+                    control: None,
+                    to: p,
+                    duration: duration_ab - half,
+                },
+                Piece {
+                    from: p,
+                    control: Some(b),
+                    to: q,
+                    duration: 2.0 * half,
+                },
+                Piece {
+                    from: q,
+                    control: None,
+                    to: c,
+                    duration: duration_bc - half,
+                },
+            ],
+            end: c,
+        })
+    }
+
+    pub fn duration(&self) -> f64 {
+        self.pieces.iter().map(|piece| piece.duration).sum()
+    }
+
+    pub fn position(&self, time: f64) -> Waypoint {
+        let Some(first) = self.pieces.first() else {
+            return self.end;
+        };
+        if time <= 0.0 {
+            return first.from;
+        }
+        let mut remaining = time;
+        for piece in &self.pieces {
+            if remaining <= piece.duration {
+                let u = remaining / piece.duration;
+                return match piece.control {
+                    Some(control) => piece
+                        .from
+                        .lerp(&control, u)
+                        .lerp(&control.lerp(&piece.to, u), u),
+                    None => piece.from.lerp(&piece.to, u),
+                };
+            }
+            remaining -= piece.duration;
+        }
+        self.end
+    }
+
+    /// The rest of the curve after `time`, starting from the pose the body actually
+    /// stopped at: the cut piece's start moves, every later control point stays.
+    pub fn remaining(&self, time: f64, pose: Waypoint) -> Self {
+        let mut consumed = time.max(0.0);
+        let mut rest: Vec<Piece> = Vec::new();
+        for (index, piece) in self.pieces.iter().enumerate() {
+            if consumed >= piece.duration {
+                consumed -= piece.duration;
+                continue;
+            }
+            let u = consumed / piece.duration;
+            let mut cut = *piece;
+            cut.from = pose;
+            cut.control = piece.control.map(|control| control.lerp(&piece.to, u));
+            cut.duration -= consumed;
+            rest.push(cut);
+            rest.extend(self.pieces[index + 1..].iter().copied());
+            break;
+        }
+        if rest.is_empty() {
+            rest.push(Piece {
+                from: pose,
+                control: None,
+                to: self.end,
+                duration: 0.1,
+            });
+        }
+        let total: f64 = rest.iter().map(|piece| piece.duration).sum();
+        if total < 0.1 {
+            rest[0].duration += 0.1 - total;
+        }
+        Self {
+            pieces: rest,
+            end: self.end,
         }
     }
 }
@@ -159,6 +297,8 @@ enum Phase {
     Approach,
     Hold,
     Run,
+    /// Stopped mid-leg by the operator, with the remaining time frozen.
+    Paused,
     Verify,
     Done,
     Failed(String),
@@ -186,6 +326,15 @@ pub struct MoveEngine {
     pending_command: bool,
     /// Where the current routed leg's next part starts, in leg time.
     next_part_at: f64,
+    /// The smoothed path, when the program asks for one; the legs then only name
+    /// the take and its final target.
+    curve: Option<Curve>,
+    /// When the next look-ahead target is due, in curve time, and whether the final
+    /// C target has gone out.
+    next_curve_at: f64,
+    final_sent: bool,
+    /// Leg (or curve) time at the pause.
+    paused_at: f64,
 }
 
 impl MoveEngine {
@@ -229,6 +378,16 @@ impl MoveEngine {
         let approach_duration =
             (MIN_DURATION).max((live.distance(&a) / steps as f64 / 120.0 * 10.0).ceil() / 10.0);
         let needs_approach = live.distance(&a) > ARRIVE_DEG;
+        let curve = program.c.and_then(|c| {
+            Curve::new(
+                a,
+                b,
+                c,
+                program.duration_ab,
+                program.duration_bc,
+                program.smoothness,
+            )
+        });
         Ok(Self {
             phase: if needs_approach {
                 Phase::Approach
@@ -242,14 +401,71 @@ impl MoveEngine {
             approach_duration,
             pending_command: needs_approach,
             next_part_at: 0.0,
+            curve,
+            next_curve_at: 0.0,
+            final_sent: false,
+            paused_at: 0.0,
         })
     }
 
     pub fn is_running(&self) -> bool {
         matches!(
             self.phase,
-            Phase::Approach | Phase::Hold | Phase::Run | Phase::Verify
+            Phase::Approach | Phase::Hold | Phase::Run | Phase::Paused | Phase::Verify
         )
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.phase == Phase::Paused
+    }
+
+    /// Whether the take rounds B rather than touching it.
+    pub fn is_smoothed(&self) -> bool {
+        self.curve.is_some()
+    }
+
+    /// Stops the motors and freezes the remaining time. Only a running leg pauses;
+    /// the approach and the hold carry on.
+    pub fn pause(&mut self) -> Output {
+        if self.phase != Phase::Run {
+            return Output::default();
+        }
+        self.paused_at = self.elapsed;
+        self.phase = Phase::Paused;
+        Output {
+            target: None,
+            stop: true,
+            finished: false,
+        }
+    }
+
+    /// Continues from the pose the body actually stopped at, without returning to A
+    /// or counting down again. An exact leg is re-timed to its remaining tenths; a
+    /// curve is cut and joined from the stopped pose.
+    pub fn resume(&mut self, live: Waypoint) -> Output {
+        if self.phase != Phase::Paused {
+            return Output::default();
+        }
+        if !live.is_reachable() {
+            return self.stop("Move interrupted — camera feedback lost");
+        }
+        self.phase = Phase::Run;
+        self.elapsed = 0.0;
+        if let Some(curve) = &self.curve {
+            self.curve = Some(curve.remaining(self.paused_at, live));
+            self.next_curve_at = 0.0;
+            self.final_sent = false;
+            return Output::default();
+        }
+        let leg = self.legs[self.index];
+        let remaining = ((leg.duration - self.paused_at) * 10.0).ceil() / 10.0;
+        self.legs[self.index] = Leg {
+            label: leg.label,
+            from: live,
+            to: leg.to,
+            duration: remaining.max(0.1),
+        };
+        self.start_leg(&live)
     }
 
     pub fn failure(&self) -> Option<&str> {
@@ -267,15 +483,23 @@ impl MoveEngine {
                 "MOVE · HOLD {:.1} s",
                 (HOLD_SECONDS - self.elapsed).max(0.0)
             ),
-            Phase::Run => {
-                let leg = &self.legs[self.index];
-                format!(
-                    "MOVE · {} {:.1} / {:.1} s",
-                    leg.label,
-                    self.elapsed.min(leg.duration),
-                    leg.duration
-                )
-            }
+            Phase::Run => match &self.curve {
+                Some(curve) => format!(
+                    "MOVE · CURVE {:.1} / {:.1} s",
+                    self.elapsed.min(curve.duration()),
+                    curve.duration()
+                ),
+                None => {
+                    let leg = &self.legs[self.index];
+                    format!(
+                        "MOVE · {} {:.1} / {:.1} s",
+                        leg.label,
+                        self.elapsed.min(leg.duration),
+                        leg.duration
+                    )
+                }
+            },
+            Phase::Paused => "MOVE · PAUSED".to_string(),
             Phase::Verify => "MOVE · CHECKING".to_string(),
             Phase::Done => "MOVE · DONE".to_string(),
             Phase::Failed(reason) => format!("MOVE STOPPED · {reason}"),
@@ -361,8 +585,13 @@ impl MoveEngine {
                 }
                 self.phase = Phase::Run;
                 self.elapsed = 0.0;
+                if self.curve.is_some() {
+                    self.next_curve_at = 0.0;
+                    return self.tick_curve(&live);
+                }
                 self.start_leg(&live)
             }
+            Phase::Run if self.curve.is_some() => self.tick_curve(&live),
             Phase::Run => {
                 let leg = self.legs[self.index];
                 if self.elapsed + 1e-9 < leg.duration {
@@ -400,7 +629,50 @@ impl MoveEngine {
                     finished: true,
                 }
             }
-            Phase::Done | Phase::Failed(_) => Output::default(),
+            Phase::Paused | Phase::Done | Phase::Failed(_) => Output::default(),
+        }
+    }
+
+    /// A smoothed take: a 100 ms look-ahead target every 50 ms straight off the curve,
+    /// the final C 100 ms before the end, and no exact-B checkpoint because the curve
+    /// does not promise to touch B.
+    fn tick_curve(&mut self, live: &Waypoint) -> Output {
+        let Some(curve) = self.curve.clone() else {
+            return Output::default();
+        };
+        let total = curve.duration();
+        if self.elapsed >= total {
+            // The check is against C, the last leg's end, which the curve promises.
+            self.index = self.legs.len() - 1;
+            self.phase = Phase::Verify;
+            self.elapsed = 0.0;
+            return Output::default();
+        }
+        if self.elapsed + 1e-9 < self.next_curve_at {
+            return Output::default();
+        }
+        if self.elapsed - self.next_curve_at > LATE_SECONDS + 1e-9 {
+            return self.stop("Move interrupted — waypoint dispatch was late");
+        }
+        let final_due = self.elapsed >= total - CURVE_LOOK_AHEAD - 1e-9;
+        let (target, duration) = if final_due {
+            if self.final_sent {
+                self.next_curve_at = total;
+                return Output::default();
+            }
+            self.final_sent = true;
+            self.next_curve_at = total;
+            (curve.position(total), (total - self.elapsed).max(0.1))
+        } else {
+            self.next_curve_at = self.elapsed + CURVE_INTERVAL;
+            (
+                curve.position(self.elapsed + CURVE_LOOK_AHEAD),
+                CURVE_LOOK_AHEAD,
+            )
+        };
+        match self.command(live, target, duration) {
+            Ok(output) => output,
+            Err(reason) => self.stop(&reason),
         }
     }
 
@@ -478,6 +750,7 @@ mod tests {
             c,
             duration_ab: seconds,
             duration_bc: seconds,
+            smoothness: 0.0,
         }
     }
 
@@ -494,6 +767,101 @@ mod tests {
             t += 0.04;
         }
         sent
+    }
+
+    #[test]
+    fn a_smoothed_take_streams_look_ahead_targets_and_bypasses_b() {
+        let (a, b, c) = (at(10.0, 0.0), at(50.0, 10.0), at(90.0, 0.0));
+        let mut program = program(a, b, Some(c), 2.0);
+        program.smoothness = 0.5;
+        let mut engine = MoveEngine::start(&program, a).unwrap();
+        assert!(engine.is_smoothed());
+        let sent = run(&mut engine, a, 12.0);
+        assert!(!engine.is_running());
+        assert_eq!(engine.readout(), "MOVE · DONE");
+        // A target every 50 ms for a 4 s take; this driver ticks at 40 ms, so one
+        // goes out every second tick, less the final look-ahead, plus C.
+        assert!(
+            (45..=82).contains(&sent.len()),
+            "targets streamed: {}",
+            sent.len()
+        );
+        assert!(sent[..sent.len() - 1]
+            .iter()
+            .all(|(_, duration)| (duration - 0.1).abs() < 1e-9));
+        assert_eq!(sent.last().unwrap().0, c, "C is exact");
+        assert!(
+            sent.iter().all(|(target, _)| target.distance(&b) > 0.5),
+            "B is rounded, never touched"
+        );
+        // The curve's midpoint sits between the legs, not on B.
+        let curve = Curve::new(a, b, c, 2.0, 2.0, 0.5).unwrap();
+        let mid = curve.position(2.0);
+        assert!(mid.distance(&b) > 1.0 && mid.distance(&b) < 20.0);
+        assert_eq!(curve.position(0.0), a);
+        assert_eq!(curve.position(4.0), c);
+    }
+
+    #[test]
+    fn a_paused_leg_resumes_from_where_the_body_stopped_with_the_time_left() {
+        let (a, b) = (at(10.0, 0.0), at(50.0, 0.0));
+        let mut engine = MoveEngine::start(&program(a, b, None, 4.0), a).unwrap();
+        // Through the hold and into the leg.
+        let sent = run(&mut engine, a, 2.5);
+        assert_eq!(sent.last().unwrap(), &(b, 4.0));
+        assert!(engine.readout().starts_with("MOVE · A→B"));
+        // One second in, the operator pauses: the motors stop, the time freezes.
+        for _ in 0..25 {
+            engine.tick(0.04, Some(a), 0.05);
+        }
+        let paused = engine.pause();
+        assert!(paused.stop && !paused.finished);
+        assert!(engine.is_paused() && engine.is_running());
+        assert_eq!(engine.readout(), "MOVE · PAUSED");
+        assert!(
+            engine.tick(0.04, Some(a), 0.05).target.is_none(),
+            "paused sends nothing"
+        );
+        // Resume from the pose the body settled at: the rest of the leg, re-timed.
+        let stopped = at(20.0, 0.0);
+        let resumed = engine.resume(stopped);
+        let (target, duration) = resumed.target.expect("a target");
+        assert_eq!(target, b);
+        // Half a second ran before the extra second of ticks: 2.5 s of the 4 are left.
+        assert!(
+            (duration - 2.5).abs() < 0.11,
+            "the time left, in tenths: {duration}"
+        );
+        assert!(engine.pause().stop, "and it can pause again");
+        let again = engine.resume(at(30.0, 0.0)).target.expect("a target");
+        assert_eq!(again.0, b);
+        // The body lands on B as sent; the take checks and finishes.
+        let rest = run(&mut engine, b, 10.0);
+        assert!(rest.is_empty());
+        assert_eq!(engine.readout(), "MOVE · DONE");
+    }
+
+    #[test]
+    fn a_paused_curve_is_cut_and_joined_from_the_stopped_pose() {
+        let (a, b, c) = (at(10.0, 0.0), at(50.0, 10.0), at(90.0, 0.0));
+        let mut program = program(a, b, Some(c), 2.0);
+        program.smoothness = 1.0;
+        let mut engine = MoveEngine::start(&program, a).unwrap();
+        run(&mut engine, a, 2.5);
+        for _ in 0..25 {
+            engine.tick(0.04, Some(a), 0.05);
+        }
+        assert!(engine.pause().stop);
+        let stopped = at(25.0, 3.0);
+        assert!(
+            engine.resume(stopped).target.is_none(),
+            "the next tick streams"
+        );
+        let sent = run(&mut engine, stopped, 10.0);
+        assert!(!sent.is_empty());
+        assert_eq!(sent.last().unwrap().0, c);
+        assert_eq!(engine.readout(), "MOVE · DONE");
+        assert!(engine.cancel().stop);
     }
 
     #[test]

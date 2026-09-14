@@ -10,8 +10,14 @@ Saved zoom values do not cause zoom SETs during a take.
 The PC shell (`opc-monitor/moves.rs`) runs exact legs on the same native targets with
 the approach, hold, sub-move split and missing-sector guard below, and stops on stale
 attitude or a late dispatch (40 ms, from the window's draw loop rather than a
-scheduler). It does not smooth B, pause, resume, or fit a feedback delay for the B
-check. Attitude comes through the facade's status record. Unqualified on a body.
+scheduler). **Smoothness** (0 / 25 / 50 / 75 / 100 % on the moves sheet, with C set)
+rounds B with the same quadratic Bézier fillet as the phones (`GimbalProgramCurve`,
+transcribed): a 100 ms look-ahead target every 50 ms straight off the curve, the final
+C 100 ms before the end, no exact-B checkpoint. **Pause** sends the native stop and
+freezes the remaining time; **Resume** continues from the body's settled pose without
+returning to A or counting down — an exact leg re-timed to its remaining tenths, a
+curve cut and joined from the stopped pose. It does not fit a feedback delay for the
+B check. Attitude comes through the facade's status record. Unqualified on a body.
 
 ## Timing contract
 

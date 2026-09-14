@@ -204,6 +204,10 @@ pub enum Pick {
     LegDuration(Slot, f64),
     MoveStart,
     MoveStop,
+    MovePause,
+    MoveResume,
+    /// Smoothness as a percentage, 0 for the exact B.
+    Smoothness(u8),
     /// Switch an assist tool on or off, as its toolbar chip would.
     Assist(AssistTool),
     FalseColorScale(FalseColorScale),
@@ -263,6 +267,7 @@ pub struct Context<'a> {
     /// The body's live pose, if it has reported one.
     pub live_pose: Option<Waypoint>,
     pub move_running: bool,
+    pub move_paused: bool,
     pub assists: AssistOptions,
     /// Where the zebra chips land on the feed, so they can read in 0–255.
     pub zebra_steps: ZebraSteps,
@@ -727,7 +732,34 @@ fn moves(context: Context) -> Built {
                 Pick::Nothing
             },
         )
+        .option(
+            "Pause",
+            false,
+            if context.move_running && !context.move_paused {
+                Pick::MovePause
+            } else {
+                Pick::Nothing
+            },
+        )
+        .option(
+            "Resume",
+            context.move_paused,
+            if context.move_paused {
+                Pick::MoveResume
+            } else {
+                Pick::Nothing
+            },
+        )
         .option("Stop", context.move_running, Pick::MoveStop);
+    let mut smoothness =
+        RowBuilder::new("Smoothness").enabled(program.c.is_some() && !context.move_running);
+    for percent in [0u8, 25, 50, 75, 100] {
+        smoothness = smoothness.option(
+            format!("{percent}%"),
+            (program.smoothness * 100.0 - f64::from(percent)).abs() < 0.5,
+            Pick::Smoothness(percent),
+        );
+    }
     let live = RowBuilder::placeholder(
         "Live",
         &context
@@ -745,6 +777,7 @@ fn moves(context: Context) -> Built {
             leg("A → B", Slot::A, program.duration_ab),
             leg("B → C", Slot::B, program.duration_bc),
             take,
+            smoothness,
             live,
         ],
     )
@@ -1247,6 +1280,7 @@ mod tests {
                 native_pitch: -3.0,
             }),
             move_running: false,
+            move_paused: false,
             assists: AssistOptions::default(),
             zebra_steps: ZebraSteps::default(),
             scopes: ScopeOptions::default(),
@@ -1352,7 +1386,16 @@ mod tests {
         let titles: Vec<&str> = built.sheet.rows.iter().map(|r| r.title.as_str()).collect();
         assert_eq!(
             titles,
-            ["Point A", "Point B", "Point C", "A → B", "B → C", "Take", "Live"]
+            [
+                "Point A",
+                "Point B",
+                "Point C",
+                "A → B",
+                "B → C",
+                "Take",
+                "Smoothness",
+                "Live"
+            ]
         );
         assert_eq!(built.pick(0, 0), Some(&Pick::SetPoint(Slot::A)));
         assert_eq!(built.pick(2, 1), Some(&Pick::ClearPoint(Slot::C)));
@@ -1367,7 +1410,7 @@ mod tests {
             Some(&Pick::Nothing),
             "no A and B yet: Start is inert"
         );
-        assert!(built.sheet.rows[6].options[0].contains("pan +12.0°"));
+        assert!(built.sheet.rows[7].options[0].contains("pan +12.0°"));
     }
 
     #[test]
