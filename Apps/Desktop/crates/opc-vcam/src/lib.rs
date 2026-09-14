@@ -3,9 +3,11 @@
 //! The window hands the graded picture here once per presented frame; a worker thread
 //! pushes it into whichever [`Backend`] the operator chose:
 //!
-//! - [`Backend::Device`] — a `v4l2loopback` device on Linux. Every app that opens a
-//!   webcam (Chrome, Zoom, OBS, ffmpeg) sees it as a camera. Nothing to install in the
-//!   app; the operator loads the module once.
+//! - [`Backend::Device`] — the platform's own camera: a `v4l2loopback` device on Linux;
+//!   on Windows 11 a Media Foundation virtual camera whose source (`opc_vcam_win.dll`,
+//!   registered once) the Frame Server loads and this crate feeds over a named pipe; on
+//!   macOS the OpenPocketCine camera extension's sink stream, reached through the Swift
+//!   facade. Every app that opens a webcam (Chrome, Zoom, Teams, OBS, ffmpeg) sees it.
 //! - [`Backend::Stream`] — MJPEG over HTTP on the loopback interface, on every
 //!   platform. OBS reads it as a Media Source and its own Virtual Camera hands it to the
 //!   apps that need a camera on Windows and macOS, where there is no driver-free way to
@@ -20,9 +22,14 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
 mod convert;
+#[cfg(target_os = "macos")]
+pub mod mac;
 mod stream;
 #[cfg(target_os = "linux")]
 mod v4l2;
+#[cfg(windows)]
+pub mod win;
+pub mod wire;
 
 pub use convert::rgba_to_yuyv;
 pub use stream::{StreamServer, DEFAULT_PORT};
@@ -51,7 +58,8 @@ impl Frame {
 /// Where the frames go.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Backend {
-    /// A `v4l2loopback` device, found by asking every `/dev/video*` for its driver.
+    /// The platform's camera: a `v4l2loopback` device on Linux, found by asking every
+    /// `/dev/video*` for its driver; the Media Foundation virtual camera on Windows.
     Device,
     /// MJPEG over HTTP on `127.0.0.1:port`.
     Stream { port: u16 },
@@ -138,7 +146,17 @@ fn open_device() -> Result<Box<dyn Sink>, Error> {
     Ok(Box::new(v4l2::LoopbackSink::open(&path, WIDTH, HEIGHT)?))
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+fn open_device() -> Result<Box<dyn Sink>, Error> {
+    Ok(Box::new(win::WinCamSink::open(WIDTH, HEIGHT)?))
+}
+
+#[cfg(target_os = "macos")]
+fn open_device() -> Result<Box<dyn Sink>, Error> {
+    Ok(Box::new(mac::MacCamSink::open(WIDTH, HEIGHT)?))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn open_device() -> Result<Box<dyn Sink>, Error> {
     Err(Error::Unsupported)
 }

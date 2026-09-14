@@ -11,6 +11,7 @@ members = [
     "crates/opc-render",
     "crates/opc-ui",
     "crates/opc-vcam",
+    "crates/opc-vcam-win",
     "crates/opc-watcher",
 ]
 

@@ -3943,6 +3943,17 @@ version = "0.1.0"
 dependencies = [
  "jpeg-encoder",
  "libc",
+ "opc-core-sys",
+ "windows 0.62.2",
+]
+
+[[package]]
+name = "opc-vcam-win"
+version = "0.1.0"
+dependencies = [
+ "opc-vcam",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]

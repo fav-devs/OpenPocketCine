@@ -1,0 +1,58 @@
+# The OpenPocketCine Camera app: a small host that installs the camera extension, which
+# is what makes "OpenPocketCine" appear as a camera in every macOS app. The viewfinder
+# (the Rust binary) writes into the extension's sink stream through the Swift facade.
+#
+#   brew install xcodegen
+#   cd Apps/Desktop/macos && xcodegen generate
+#   xcodebuild -project OpenPocketCineCamera.xcodeproj -scheme OpenPocketCineCamera -configuration Release
+#
+# The extension needs the system-extension entitlement, so the team below must be in
+# the Apple Developer Program and the app must run from /Applications (or
+# `systemextensionsctl developer on` for a build from anywhere while developing).
+name: OpenPocketCineCamera
+options:
+  bundleIdPrefix: com.opencapture
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+targets:
+  OpenPocketCineCamera:
+    type: application
+    platform: macOS
+    sources:
+      - CameraHost
+    dependencies:
+      - target: OpenPocketCineCameraExtension
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.opencapture.openpocketcine.camera
+        PRODUCT_NAME: OpenPocketCine Camera
+        CODE_SIGN_ENTITLEMENTS: CameraHost/CameraHost.entitlements
+        DEVELOPMENT_TEAM: "4V4EGQ6LZA"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: OpenPocketCine Camera
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Apache 2.0"
+        INFOPLIST_KEY_NSSystemExtensionUsageDescription: "OpenPocketCine Camera installs the camera extension that shows the viewfinder as a camera to other apps."
+        SWIFT_VERSION: "5.0"
+
+  OpenPocketCineCameraExtension:
+    type: system-extension
+    platform: macOS
+    sources:
+      - CameraExtension
+    settings:
+      base:
+        # A system extension's bundle is named after its identifier.
+        PRODUCT_BUNDLE_IDENTIFIER: com.opencapture.openpocketcine.camera.extension
+        PRODUCT_NAME: com.opencapture.openpocketcine.camera.extension
+        INFOPLIST_FILE: CameraExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: CameraExtension/CameraExtension.entitlements
+        DEVELOPMENT_TEAM: "4V4EGQ6LZA"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        SWIFT_VERSION: "5.0"

@@ -223,18 +223,39 @@ come off) or **As shown**. The feed goes out on the viewfinder and in the player
 library sends nothing. The **Camera output** readout says where the frames are going,
 or why they are not.
 
-- **Camera device** (Linux) writes to a `v4l2loopback` device, found by asking every
-  `/dev/video*` for its driver; every app that opens a webcam sees it. Load the module
-  once:
+- **Camera device** is the platform's own camera, so every app that opens a webcam sees
+  "OpenPocketCine" without OBS in between:
+  - **Linux** writes to a `v4l2loopback` device, found by asking every `/dev/video*`
+    for its driver. Load the module once:
 
-  ```sh
-  sudo modprobe v4l2loopback exclusive_caps=1 card_label=OpenPocketCine
-  ```
+    ```sh
+    sudo modprobe v4l2loopback exclusive_caps=1 card_label=OpenPocketCine
+    ```
 
-  The device takes packed YUYV (BT.601), set with the kernel's own `VIDIOC_S_FMT`; the
-  struct layouts and ioctl numbers are pinned by tests against `<linux/videodev2.h>`.
-  On Windows and macOS this option reports that there is no driver-free way to register
-  a camera from a plain executable and points at the stream.
+    The device takes packed YUYV (BT.601), set with the kernel's own `VIDIOC_S_FMT`;
+    the struct layouts and ioctl numbers are pinned by tests against
+    `<linux/videodev2.h>`.
+  - **Windows 11 (22H2 or later)** registers a Media Foundation virtual camera for the
+    session with `MFCreateVirtualCamera`. Its media source is `opc_vcam_win.dll`
+    (`crates/opc-vcam-win`), a COM object the Windows Camera Frame Server loads into its
+    own service; the viewfinder feeds it NV12 frames over the named pipe
+    `\\.\pipe\OpenPocketCineVCam` (`opc_vcam::wire`), and the source paces them out at
+    30 frames a second, black while nothing is coming. Register the DLL once, as
+    administrator, from the build folder:
+
+    ```
+    regsvr32 opc_vcam_win.dll
+    ```
+
+    Nothing is signed and nothing runs in the kernel. Windows 10 has no such framework;
+    use the stream there.
+  - **macOS 13 or later** writes into the sink stream of the OpenPocketCine camera
+    extension, a CoreMediaIO extension installed once from the OpenPocketCine Camera app
+    (`Apps/Desktop/macos`, an XcodeGen project). The facade finds the device and its
+    sink stream by name through CoreMediaIO and enqueues NV12 sample buffers
+    (`opc_vcam_mac_*`); the extension hands the newest frame to every reader at 30
+    frames a second. The extension needs the system-extension entitlement, so the app
+    must be Developer ID signed by a team in the Apple Developer Program.
 - **Stream** serves MJPEG over HTTP on `127.0.0.1` (port 8890 in the settings file,
   `vcam_port`): `/stream` is a `multipart/x-mixed-replace` body that never ends,
   `/frame.jpg` the latest frame, `/` a page that shows it. Nothing leaves the machine.
@@ -245,6 +266,11 @@ or why they are not.
 
 Frames are handed to a worker thread through a latest-wins slot, so a slow consumer
 never holds the window back. The setting persists with the rest.
+
+None of the three camera devices has been run against its platform here: the Linux
+path is pinned to the kernel header, the Windows source is type-checked against the
+real bindings on the Windows target, and the macOS extension and facade are written to
+Apple's camera-extension pattern but not compiled. Each needs one run on its machine.
 
 ## Keys
 
@@ -369,13 +395,4 @@ other. Two channels, and nothing shared but the messages.
 
 ## What has not been run
 
-No camera, and no window. `link.rs` and `view.rs` reach the Swift core, so they compile
-only where there is one to link — `just desktop-check-gated` type-checks them anywhere by
-forcing the flag under `cargo check`, but type-checking is not running. The first things
-to try on a real machine, in order:
-
-1. `opc-monitor view` on the camera's Wi-Fi — does a picture arrive at all.
-2. `Space`, then `R` — does the body roll and stop.
-3. The arrows — does the gimbal move and, more importantly, does it **stop**.
-4. A drag — does the camera follow the thing that was drawn around, not near it.
-5. The same drag with a finger, on a touchscreen — does the event arrive at all.
+No camera, and no window. `link.rs` and `view.rs` reach the Swift core, so

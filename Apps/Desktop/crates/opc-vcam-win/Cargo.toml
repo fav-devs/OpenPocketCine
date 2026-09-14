@@ -1,0 +1,31 @@
+[package]
+name = "opc-vcam-win"
+description = "The Media Foundation virtual camera source for Windows 11: a COM DLL the Frame Server loads, fed by the viewfinder over a named pipe."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "opc_vcam_win"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+opc-vcam = { path = "../opc-vcam" }
+
+[target.'cfg(windows)'.dependencies]
+windows-core = "0.62"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media_KernelStreaming",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_Variant",
+] }
+
+[lints]
+workspace = true

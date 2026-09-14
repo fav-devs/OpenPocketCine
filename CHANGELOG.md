@@ -40,9 +40,13 @@ All notable changes to this project are documented here. The format is based on
   conform chip (the core's `ConformPreview` targets and speed) and Auto LUT
   from the original's `moov` tail through `ClipColorProfile` and
   `OfficialDJILUT.auto`. The System tab gains a virtual camera: the graded
-  picture, clean or as shown, into a `v4l2loopback` device on Linux or a
-  loopback MJPEG stream OBS's Virtual Camera carries anywhere (`opc-vcam`).
-  Unqualified on a physical body.
+  picture, clean or as shown, into the platform's own camera — a
+  `v4l2loopback` device on Linux, a Media Foundation virtual camera on
+  Windows 11 (`opc-vcam-win`, a COM source the Frame Server loads, fed
+  over a named pipe), the OpenPocketCine camera extension on macOS
+  (`Apps/Desktop/macos`, written through the facade's sink-stream writer)
+  — or a loopback MJPEG stream OBS's Virtual Camera carries anywhere
+  (`opc-vcam`). Unqualified on a physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

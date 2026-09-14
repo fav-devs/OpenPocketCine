@@ -651,6 +651,13 @@ extern "C" {
         capacity: usize,
     ) -> i64;
 
+    /// The macOS virtual camera: the camera extension's sink stream through CoreMediaIO.
+    /// `open` is 0, -1 without the extension, -2 when its stream will not start; `push`
+    /// takes one NV12 frame and is 0, or 1 when dropped. Elsewhere they report -5.
+    pub fn opc_vcam_mac_open(width: i32, height: i32) -> i32;
+    pub fn opc_vcam_mac_push(bytes: *const u8, count: usize) -> i32;
+    pub fn opc_vcam_mac_close();
+
     /// The scale's legend, one `label<TAB>r<TAB>g<TAB>b` line per zone.
     pub fn opc_false_color_legend(
         scale: i32,
