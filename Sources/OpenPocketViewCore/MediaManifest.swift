@@ -396,14 +396,14 @@ public enum MediaManifest {
     public static func decodeStores(assembler: MediaChunkAssembler) -> [MediaFile] {
         decodeStores(
             sd: assembler.assembled(counter: MediaListCommand.sdCounter),
-            internal: assembler.assembled(counter: MediaListCommand.internalCounter),
+            `internal`: assembler.assembled(counter: MediaListCommand.internalCounter),
             merged: assembler.assembledMerged())
     }
 
     /// The same split for a shell that collected the two counters itself — the desktop
     /// facade. `merged` is every chunk in counter order, used when the counters were not
     /// echoed or both stores answered with the same list.
-    public static func decodeStores(sd sdBytes: [UInt8], internal internalBytes: [UInt8], merged: [UInt8])
+    public static func decodeStores(sd sdBytes: [UInt8], `internal` internalBytes: [UInt8], merged: [UInt8])
         -> [MediaFile]
     {
         let sd = sdBytes.isEmpty ? [] : decode(sdBytes)

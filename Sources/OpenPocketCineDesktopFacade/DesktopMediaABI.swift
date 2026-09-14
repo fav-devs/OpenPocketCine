@@ -15,7 +15,7 @@ import OpenPocketViewCore
 /// same way every other emitter here does.
 @_cdecl("opc_media_decode")
 func opc_media_decode(
-    _ sd: UnsafePointer<UInt8>?, _ sdCount: Int, _ internal: UnsafePointer<UInt8>?,
+    _ sd: UnsafePointer<UInt8>?, _ sdCount: Int, _ `internal`: UnsafePointer<UInt8>?,
     _ internalCount: Int, _ merged: UnsafePointer<UInt8>?, _ mergedCount: Int,
     _ out: UnsafeMutablePointer<UInt8>?, _ capacity: Int
 ) -> Int64 {
@@ -24,7 +24,7 @@ func opc_media_decode(
         return Array(DesktopFacade.borrow(pointer, count))
     }
     let files = MediaManifest.decodeStores(
-        sd: bytes(sd, sdCount), internal: bytes(internal, internalCount),
+        sd: bytes(sd, sdCount), `internal`: bytes(`internal`, internalCount),
         merged: bytes(merged, mergedCount))
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]

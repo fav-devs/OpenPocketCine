@@ -1,0 +1,146 @@
+
+Windows IP Configuration
+
+   Host Name . . . . . . . . . . . . : Troydek
+   Primary Dns Suffix  . . . . . . . : 
+   Node Type . . . . . . . . . . . . : Hybrid
+   IP Routing Enabled. . . . . . . . : No
+   WINS Proxy Enabled. . . . . . . . : No
+
+Ethernet adapter Ethernet:
+
+   Media State . . . . . . . . . . . : Media disconnected
+   Connection-specific DNS Suffix  . : 
+   Description . . . . . . . . . . . : Realtek USB GbE Family Controller
+   Physical Address. . . . . . . . . : 14-4F-D7-CA-85-75
+   DHCP Enabled. . . . . . . . . . . : Yes
+   Autoconfiguration Enabled . . . . : Yes
+
+Ethernet adapter Ethernet 2:
+
+   Media State . . . . . . . . . . . : Media disconnected
+   Connection-specific DNS Suffix  . : 
+   Description . . . . . . . . . . . : Intel(R) Ethernet Connection (7) I219-V
+   Physical Address. . . . . . . . . : 70-85-C2-C3-17-ED
+   DHCP Enabled. . . . . . . . . . . : Yes
+   Autoconfiguration Enabled . . . . : Yes
+
+Unknown adapter Tailscale:
+
+   Connection-specific DNS Suffix  . : tail45b6be.ts.net
+   Description . . . . . . . . . . . : Tailscale Tunnel
+   Physical Address. . . . . . . . . : 
+   DHCP Enabled. . . . . . . . . . . : No
+   Autoconfiguration Enabled . . . . : Yes
+   IPv6 Address. . . . . . . . . . . : fd7a:115c:a1e0::e534:2f2a(Preferred) 
+   Link-local IPv6 Address . . . . . : fe80::d545:1a30:21ab:2826%7(Preferred) 
+   IPv4 Address. . . . . . . . . . . : 100.106.47.41(Preferred) 
+   Subnet Mask . . . . . . . . . . . : 255.255.255.255
+   Default Gateway . . . . . . . . . : 
+   NetBIOS over Tcpip. . . . . . . . : Disabled
+   Connection-specific DNS Suffix Search List :
+                                       tail45b6be.ts.net
+
+Ethernet adapter vEthernet (Default Switch):
+
+   Connection-specific DNS Suffix  . : 
+   Description . . . . . . . . . . . : Hyper-V Virtual Ethernet Adapter
+   Physical Address. . . . . . . . . : 00-15-5D-F9-5F-ED
+   DHCP Enabled. . . . . . . . . . . : No
+   Autoconfiguration Enabled . . . . : Yes
+   Link-local IPv6 Address . . . . . : fe80::54b4:47bc:cdc1:311%26(Preferred) 
+   IPv4 Address. . . . . . . . . . . : 172.23.96.1(Preferred) 
+   Subnet Mask . . . . . . . . . . . : 255.255.240.0
+   Default Gateway . . . . . . . . . : 
+   DHCPv6 IAID . . . . . . . . . . . : 436213085
+   DHCPv6 Client DUID. . . . . . . . : 00-01-00-01-31-B2-6E-11-14-4F-D7-CA-85-75
+   NetBIOS over Tcpip. . . . . . . . : Enabled
+
+Ethernet adapter Ethernet 3:
+
+   Connection-specific DNS Suffix  . : 
+   Description . . . . . . . . . . . : VirtualBox Host-Only Ethernet Adapter
+   Physical Address. . . . . . . . . : 0A-00-27-00-00-0F
+   DHCP Enabled. . . . . . . . . . . : No
+   Autoconfiguration Enabled . . . . : Yes
+   Link-local IPv6 Address . . . . . : fe80::da:8349:33e4:8715%15(Preferred) 
+   IPv4 Address. . . . . . . . . . . : 192.168.56.1(Preferred) 
+   Subnet Mask . . . . . . . . . . . : 255.255.255.0
+   Default Gateway . . . . . . . . . : 
+   DHCPv6 IAID . . . . . . . . . . . : 336199719
+   DHCPv6 Client DUID. . . . . . . . : 00-01-00-01-31-B2-6E-11-14-4F-D7-CA-85-75
+   NetBIOS over Tcpip. . . . . . . . : Enabled
+
+Ethernet adapter Ethernet 4:
+
+   Connection-specific DNS Suffix  . : 
+   Description . . . . . . . . . . . : Remote NDIS based Internet Sharing Device
+   Physical Address. . . . . . . . . : 02-E4-77-5C-94-C5
+   DHCP Enabled. . . . . . . . . . . : Yes
+   Autoconfiguration Enabled . . . . : Yes
+   Link-local IPv6 Address . . . . . : fe80::1fa4:7e0f:9e99:d42c%21(Preferred) 
+   Autoconfiguration IPv4 Address. . : 169.254.157.200(Tentative) 
+   Subnet Mask . . . . . . . . . . . : 255.255.0.0
+   Default Gateway . . . . . . . . . : 
+   DHCPv6 IAID . . . . . . . . . . . : 928409100
+   DHCPv6 Client DUID. . . . . . . . : 00-01-00-01-31-B2-6E-11-14-4F-D7-CA-85-75
+   NetBIOS over Tcpip. . . . . . . . : Enabled
+
+Wireless LAN adapter Local Area Connection* 1:
+
+   Media State . . . . . . . . . . . : Media disconnected
+   Connection-specific DNS Suffix  . : 
+   Description . . . . . . . . . . . : Microsoft Wi-Fi Direct Virtual Adapter
+   Physical Address. . . . . . . . . : 1C-1B-B5-26-8B-8B
+   DHCP Enabled. . . . . . . . . . . : Yes
+   Autoconfiguration Enabled . . . . : Yes
+
+Wireless LAN adapter Local Area Connection* 2:
+
+   Media State . . . . . . . . . . . : Media disconnected
+   Connection-specific DNS Suffix  . : 
+   Description . . . . . . . . . . . : Microsoft Wi-Fi Direct Virtual Adapter #2
+   Physical Address. . . . . . . . . : 1E-1B-B5-26-8B-8A
+   DHCP Enabled. . . . . . . . . . . : Yes
+   Autoconfiguration Enabled . . . . : Yes
+
+Wireless LAN adapter Wi-Fi:
+
+   Connection-specific DNS Suffix  . : 
+   Description . . . . . . . . . . . : Intel(R) Dual Band Wireless-AC 8260
+   Physical Address. . . . . . . . . : 1C-1B-B5-26-8B-8A
+   DHCP Enabled. . . . . . . . . . . : Yes
+   Autoconfiguration Enabled . . . . : Yes
+   IPv6 Address. . . . . . . . . . . : 2604:3d09:887c:f400::aacd(Preferred) 
+   Lease Obtained. . . . . . . . . . : Monday, September 14, 2026 8:05:43 AM
+   Lease Expires . . . . . . . . . . : Tuesday, September 15, 2026 8:26:16 AM
+   IPv6 Address. . . . . . . . . . . : 2604:3d09:887c:f400:68af:e255:7f0f:1ef1(Preferred) 
+   Temporary IPv6 Address. . . . . . : 2604:3d09:887c:f400:b8da:230:3e58:73a0(Deprecated) 
+   Temporary IPv6 Address. . . . . . : 2604:3d09:887c:f400:f8de:1ea8:7e41:61c0(Preferred) 
+   Link-local IPv6 Address . . . . . : fe80::f520:cd69:68ff:3772%18(Preferred) 
+   IPv4 Address. . . . . . . . . . . : 10.0.0.205(Preferred) 
+   Subnet Mask . . . . . . . . . . . : 255.255.255.0
+   Lease Obtained. . . . . . . . . . : Saturday, September 12, 2026 10:17:40 AM
+   Lease Expires . . . . . . . . . . : Wednesday, September 16, 2026 8:05:40 AM
+   Default Gateway . . . . . . . . . : fe80::e2db:d1ff:fef8:15ed%18
+                                       10.0.0.1
+   DHCP Server . . . . . . . . . . . : 10.0.0.1
+   DHCPv6 IAID . . . . . . . . . . . : 287054773
+   DHCPv6 Client DUID. . . . . . . . : 00-01-00-01-31-B2-6E-11-14-4F-D7-CA-85-75
+   DNS Servers . . . . . . . . . . . : 2001:4e8:0:4004::14
+                                       2001:4e8:0:4019::14
+                                       64.59.184.17
+                                       64.59.191.229
+                                       2001:4e8:0:4004::14
+                                       2001:4e8:0:4019::14
+   NetBIOS over Tcpip. . . . . . . . : Enabled
+
+Ethernet adapter Bluetooth Network Connection:
+
+   Media State . . . . . . . . . . . : Media disconnected
+   Connection-specific DNS Suffix  . : 
+   Description . . . . . . . . . . . : Bluetooth Device (Personal Area Network)
+   Physical Address. . . . . . . . . : 1C-1B-B5-26-8B-8E
+   DHCP Enabled. . . . . . . . . . . : Yes
+   Autoconfiguration Enabled . . . . : Yes
+

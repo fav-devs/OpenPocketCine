@@ -1,0 +1,20 @@
+=== Transfer Mode Network Probe ===
+when: 2026-09-14T22:00:04.9390671Z
+adapter: Ethernet 4 (Remote NDIS based Internet Sharing Device)
+pc-ip-on-rndis: 169.254.157.200/16 (APIPA — camera did not serve DHCP)
+
+=== ARP / neighbor discovery on RNDIS (index 21) ===
+Scanned 169.254.x.x range: all Unreachable (no ARP reply)
+Camera not found in link-local range
+
+=== Note on 192.168.2.x probe ===
+Cannot route to 192.168.2.1 from 169.254.157.200 without static IP/route.
+Elevation required to assign static IP — not available in this session.
+
+=== Test-NetConnection (routes via Wi-Fi, NOT RNDIS — for reference only) ===
+192.168.2.1:7001  TcpTestSucceeded=False
+192.168.2.1:80  TcpTestSucceeded=False
+192.168.2.1:8080  TcpTestSucceeded=False
+
+=== UDP probe on 169.254.255.255 (link-local broadcast, RNDIS-bound) ===
+udp 9004 no reply (timeout 3000ms)

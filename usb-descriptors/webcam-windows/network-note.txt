@@ -1,0 +1,1 @@
+Webcam mode (PID 0023) does not expose an RNDIS interface — only UVC Camera (MI_00) and UAC Audio (MI_02). No IP networking in webcam mode.
