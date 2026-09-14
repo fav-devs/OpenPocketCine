@@ -569,19 +569,22 @@ impl Shell {
                 let chip = |i: usize| chips.get(i).cloned().unwrap_or_default();
                 let link_state = self.hud.connection_chip();
                 let rec_elapsed = self.hud.status.elapsed_label();
-                let bottom_line = self.hud.bottom_line();
+                let zoom = self.controls.zoom();
+                let battery_pct = self.hud.status.battery_percent.unwrap_or(0);
+                let storage_gb = self.hud.status.storage_free_mb / 1024;
                 let state = ChromeState {
                     phase: &self.hud.phase,
                     chip1: chip(0),
                     chip2: chip(1),
                     chip3: chip(2),
                     chip4: chip(3),
-                    chip5: chip(4),
                     link_state,
                     is_recording: self.hud.status.is_recording,
                     rec_elapsed,
-                    bottom_line,
-                    zoom: self.controls.zoom() as f32,
+                    battery_text: format!("{battery_pct}%"),
+                    storage_text: format!("{storage_gb} GB"),
+                    zoom: zoom as f32,
+                    zoom_label: format!("{:.1}×", zoom),
                 };
                 let canvas = cr.render(&state, self.window.0, self.window.1);
                 // Process any intents fired by Slint callbacks during this render.
@@ -598,10 +601,20 @@ impl Shell {
                         ChromeIntent::GimbalFlip => Intent::Send(Command::GimbalFlip),
                         ChromeIntent::GimbalRecenter => Intent::Send(Command::GimbalRecenter),
                         ChromeIntent::ZoomSet(v) => {
-                            let zoom = (v as f64).clamp(ZOOM_MIN, ZOOM_MAX);
-                            self.controls.set_zoom(zoom);
+                            let z = (v as f64).clamp(ZOOM_MIN, ZOOM_MAX);
+                            self.controls.set_zoom(z);
                             self.chrome_stale = true;
-                            Intent::Send(Command::ZoomFactor(zoom))
+                            Intent::Send(Command::ZoomFactor(z))
+                        }
+                        ChromeIntent::GimbalMoved { x, y } => {
+                            let axis = |v: f32| (1024.0 + v * 400.0).round() as u16;
+                            Intent::Send(Command::GimbalStick {
+                                axis0: axis(x),
+                                axis1: axis(-y),
+                            })
+                        }
+                        ChromeIntent::GimbalReleased => {
+                            Intent::Send(Command::GimbalStick { axis0: 1024, axis1: 1024 })
                         }
                     };
                     self.chrome_pending_intents.push(shell_intent);

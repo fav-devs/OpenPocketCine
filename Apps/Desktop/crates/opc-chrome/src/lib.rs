@@ -111,7 +111,7 @@ fn ensure_platform(started: Instant) -> Rc<MinimalSoftwareWindow> {
 
 // ── Intents fired by Slint controls ─────────────────────────────────────────
 
-/// An action triggered by a Slint control (button tap, slider drag).
+/// An action triggered by a Slint control (button tap, slider drag, gimbal).
 #[derive(Debug, Clone)]
 pub enum ChromeIntent {
     RecordToggle,
@@ -120,6 +120,10 @@ pub enum ChromeIntent {
     GimbalRecenter,
     /// Slider value in the range 1.0 – 6.0.
     ZoomSet(f32),
+    /// Normalised stick deflection in -1.0 … 1.0 on each axis.
+    GimbalMoved { x: f32, y: f32 },
+    /// Stick released — camera should return to centre.
+    GimbalReleased,
 }
 
 // ── State passed by the shell each frame ─────────────────────────────────────
@@ -127,17 +131,21 @@ pub enum ChromeIntent {
 /// Everything the chrome needs to know for one frame.
 pub struct ChromeState<'a> {
     pub phase: &'a Phase,
+    /// Exposure chips shown in the left column (shutter, ISO, EV, WB).
     pub chip1: String,
     pub chip2: String,
     pub chip3: String,
     pub chip4: String,
-    pub chip5: String,
     pub link_state: &'a str,
     pub is_recording: bool,
     pub rec_elapsed: String,
-    pub bottom_line: String,
-    /// Current zoom (1.0 – 6.0) so the slider thumb tracks camera state.
+    /// Right-column status labels.
+    pub battery_text: String,
+    pub storage_text: String,
+    /// Current zoom (1.0 – 6.0) — drives slider thumb position.
     pub zoom: f32,
+    /// Formatted zoom label, e.g. "1.0×".
+    pub zoom_label: String,
 }
 
 // ── Chrome ───────────────────────────────────────────────────────────────────
@@ -195,6 +203,18 @@ impl Chrome {
                 q.borrow_mut().push(ChromeIntent::ZoomSet(v));
             });
         }
+        {
+            let q = intents.clone();
+            component.on_gimbal_moved(move |x, y| {
+                q.borrow_mut().push(ChromeIntent::GimbalMoved { x, y });
+            });
+        }
+        {
+            let q = intents.clone();
+            component.on_gimbal_released(move || {
+                q.borrow_mut().push(ChromeIntent::GimbalReleased);
+            });
+        }
 
         Ok(Chrome {
             window,
@@ -243,17 +263,18 @@ impl Chrome {
     /// Whether (x, y) in physical pixels falls inside one of the Slint control
     /// zones.  Used by the shell to decide if a pointer down goes to Slint
     /// rather than starting a tracking-box drag.
-    pub fn is_over_control(&self, x: f64, y: f64, w: u32, h: u32) -> bool {
-        let (w, h) = (w as f64, h as f64);
-        // Right panel: rightmost 120 px
-        if x >= w - 120.0 {
+    pub fn is_over_control(&self, x: f64, y: f64, _w: u32, h: u32) -> bool {
+        let h = h as f64;
+        // Bottom bar (80 px): all interactive controls live here
+        if y >= h - 80.0 {
             return true;
         }
-        // Zoom strip: centre 460 px wide, 60–116 px above bottom
-        let zoom_bottom = h - 44.0 - 8.0;
-        let zoom_top = zoom_bottom - 52.0;
-        let cx = w / 2.0;
-        if y >= zoom_top && y <= zoom_bottom && x >= cx - 230.0 && x <= cx + 230.0 {
+        // Zoom strip (44 px, starting at y=48)
+        if y >= 48.0 && y <= 92.0 {
+            return true;
+        }
+        // Left exposure column (60 px wide) — read-only, but don't start tracking boxes there
+        if x <= 60.0 {
             return true;
         }
         false
@@ -291,12 +312,13 @@ impl Chrome {
         c.set_chip2(state.chip2.clone().into());
         c.set_chip3(state.chip3.clone().into());
         c.set_chip4(state.chip4.clone().into());
-        c.set_chip5(state.chip5.clone().into());
         c.set_link_state(state.link_state.into());
         c.set_is_recording(state.is_recording);
         c.set_rec_elapsed(state.rec_elapsed.clone().into());
-        c.set_bottom_line(state.bottom_line.clone().into());
+        c.set_battery_text(state.battery_text.clone().into());
+        c.set_storage_text(state.storage_text.clone().into());
         c.set_zoom_value(state.zoom);
+        c.set_zoom_label(state.zoom_label.clone().into());
 
         let (msg, failed) = match state.phase {
             Phase::Live => (String::new(), false),
