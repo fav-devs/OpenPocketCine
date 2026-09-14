@@ -182,11 +182,21 @@ pub enum ChromeIntent {
     LibraryDownload,
     LibraryFavorite,
     LibraryDelete,
+    /// Device (false) or Local (true): the card, or what is on this machine.
+    LibrarySource(bool),
     // The player.
     PlayerBack,
     PlayerToggle,
     /// Where on the clip to go, 0…1.
     PlayerSeek(f32),
+    PlayerInfo,
+    PlayerDownload,
+    PlayerScreenshot,
+    PlayerLut,
+    PlayerZebra,
+    PlayerPeaking,
+    PlayerFavorite,
+    PlayerDelete,
 }
 
 /// Which screen the chrome draws.
@@ -212,12 +222,17 @@ impl Screen {
 
 /// One tile of the library grid. The thumbnail itself is looked up by path in the
 /// chrome's own cache, filled by [`Chrome::set_thumb`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CellState {
     pub path: String,
+    /// A day header row rather than a tile; `title` is the day.
+    pub header: bool,
     pub title: String,
     /// The duration badge for a clip, or the kind for a still.
     pub meta: String,
+    /// Where the shell laid the tile, in pixels from the grid's origin.
+    pub x: f32,
+    pub y: f32,
     pub is_video: bool,
     pub starred: bool,
     pub cached: bool,
@@ -242,21 +257,37 @@ pub struct SelectionState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LibraryState {
     pub tab: usize,
+    /// Local: only what is on this machine.
+    pub local: bool,
     pub sort_label: String,
     pub status: String,
     pub cells: Vec<CellState>,
+    /// The grid's total height, so the page scrolls to the last row.
+    pub content_height: f32,
+    pub cell_width: f32,
+    pub cell_height: f32,
     pub selection: Option<SelectionState>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerState {
+    /// The camera path, which finds the filmstrip in the chrome's cache.
+    pub path: String,
     pub title: String,
     pub tag: String,
+    pub info: String,
+    pub show_info: bool,
     pub position_label: String,
     pub duration_label: String,
     pub progress: f32,
     pub playing: bool,
-    pub assists: String,
+    pub starred: bool,
+    pub cached: bool,
+    pub deletable: bool,
+    pub delete_armed: bool,
+    pub lut_on: bool,
+    pub zebra_on: bool,
+    pub peaking_on: bool,
     pub is_photo: bool,
 }
 
@@ -361,6 +392,8 @@ pub struct Chrome {
     intents: Rc<RefCell<Vec<ChromeIntent>>>,
     /// Thumbnails by camera path, built once and reused across redraws.
     thumbs: HashMap<String, Image>,
+    /// Filmstrip frames by camera path.
+    strips: HashMap<String, Vec<Image>>,
 }
 
 impl std::fmt::Debug for Chrome {
@@ -474,6 +507,20 @@ impl Chrome {
         simple!(on_library_delete, ChromeIntent::LibraryDelete);
         simple!(on_player_back, ChromeIntent::PlayerBack);
         simple!(on_player_toggle, ChromeIntent::PlayerToggle);
+        simple!(on_player_info, ChromeIntent::PlayerInfo);
+        simple!(on_player_download, ChromeIntent::PlayerDownload);
+        simple!(on_player_screenshot, ChromeIntent::PlayerScreenshot);
+        simple!(on_player_lut, ChromeIntent::PlayerLut);
+        simple!(on_player_zebra, ChromeIntent::PlayerZebra);
+        simple!(on_player_peaking, ChromeIntent::PlayerPeaking);
+        simple!(on_player_favorite, ChromeIntent::PlayerFavorite);
+        simple!(on_player_delete, ChromeIntent::PlayerDelete);
+        {
+            let q = intents.clone();
+            component.on_library_source_tapped(move |local| {
+                q.borrow_mut().push(ChromeIntent::LibrarySource(local));
+            });
+        }
         {
             let q = intents.clone();
             component.on_library_tab_picked(move |i| {
@@ -504,6 +551,7 @@ impl Chrome {
             size: (0, 0),
             intents,
             thumbs: HashMap::new(),
+            strips: HashMap::new(),
         })
     }
 
@@ -558,6 +606,22 @@ impl Chrome {
 
     pub fn has_thumb(&self, path: &str) -> bool {
         self.thumbs.contains_key(path)
+    }
+
+    /// The filmstrip for a clip: frames across it, each tightly packed RGBA.
+    pub fn set_strip(&mut self, path: &str, frames: &[(u32, u32, Vec<u8>)]) {
+        let images = frames
+            .iter()
+            .filter(|(w, h, rgba)| *w > 0 && *h > 0 && rgba.len() >= (w * h * 4) as usize)
+            .map(|(w, h, rgba)| {
+                Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                    &rgba[..(w * h * 4) as usize],
+                    *w,
+                    *h,
+                ))
+            })
+            .collect();
+        self.strips.insert(path.to_string(), images);
     }
 
     /// Drain all ChromeIntents fired since the last call.
@@ -673,8 +737,11 @@ impl Chrome {
                     let thumb = self.thumbs.get(&cell.path).cloned();
                     MediaCell {
                         path: cell.path.clone().into(),
+                        header: cell.header,
                         title: cell.title.clone().into(),
                         meta: cell.meta.clone().into(),
+                        x: cell.x,
+                        y: cell.y,
                         has_thumb: thumb.is_some(),
                         thumb: thumb.unwrap_or_default(),
                         is_video: cell.is_video,
@@ -686,6 +753,10 @@ impl Chrome {
                 .collect();
             c.set_library_cells(ModelRc::new(VecModel::from(cells)));
             c.set_library_tab(library.tab as i32);
+            c.set_library_local(library.local);
+            c.set_library_content_height(library.content_height);
+            c.set_library_cell_w(library.cell_width);
+            c.set_library_cell_h(library.cell_height);
             c.set_library_sort(library.sort_label.clone().into());
             c.set_library_status(library.status.clone().into());
             c.set_library_has_selection(library.selection.is_some());
@@ -711,13 +782,23 @@ impl Chrome {
             c.set_player(SlintPlayerView {
                 title: player.title.clone().into(),
                 tag: player.tag.clone().into(),
+                info: player.info.clone().into(),
+                show_info: player.show_info,
                 position_label: player.position_label.clone().into(),
                 duration_label: player.duration_label.clone().into(),
                 progress: player.progress,
                 playing: player.playing,
-                assists: player.assists.clone().into(),
+                starred: player.starred,
+                cached: player.cached,
+                deletable: player.deletable,
+                delete_armed: player.delete_armed,
+                lut_on: player.lut_on,
+                zebra_on: player.zebra_on,
+                peaking_on: player.peaking_on,
                 is_photo: player.is_photo,
             });
+            let strip = self.strips.get(&player.path).cloned().unwrap_or_default();
+            c.set_player_strip(ModelRc::new(VecModel::from(strip)));
         }
 
         let strings = |items: &[String]| -> ModelRc<SharedString> {

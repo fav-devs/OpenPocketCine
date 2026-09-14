@@ -14,14 +14,14 @@ pub enum LibraryTab {
 }
 
 impl LibraryTab {
-    pub const ALL: [LibraryTab; 4] = [Self::All, Self::Videos, Self::Photos, Self::Favorites];
+    pub const ALL: [LibraryTab; 4] = [Self::All, Self::Photos, Self::Videos, Self::Favorites];
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::All => "ALL",
-            Self::Videos => "VIDEOS",
-            Self::Photos => "PHOTOS",
-            Self::Favorites => "FAVORITES",
+            Self::All => "All",
+            Self::Videos => "Videos",
+            Self::Photos => "Photos",
+            Self::Favorites => "Favorites",
         }
     }
 }

@@ -785,7 +785,8 @@ fn a_listed_clip_can_be_selected_played_and_starred() {
     assert_eq!(asked, [Intent::Media(MediaAction::Thumb(clip.clone()))]);
     assert!(shell.tick(0.2).is_empty(), "a thumbnail is asked for once");
 
-    shell.library_mut().select_index(0);
+    // Slot 0 is the day header; the tile is the slot after it.
+    shell.library_mut().select_index(1);
     assert_eq!(
         shell.library().selected_file().map(|f| f.path.clone()),
         Some(clip.path.clone())

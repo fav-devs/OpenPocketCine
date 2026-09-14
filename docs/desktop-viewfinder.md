@@ -81,10 +81,13 @@ accuracy are unqualified on a body; see `docs/programmed-moves.md`.
 
 ## The library
 
-The gallery button, or `G`, opens the camera's card over the picture: a grid of
-thumbnails with `ALL · VIDEOS · PHOTOS · FAVORITES` tabs, a sort chip
-(`Newest · Oldest · Name · Rating`) and Refresh. Tapping a clip fills the bar along the
-bottom with its name, duration, size and resolution, and the actions:
+The gallery button, or `G`, opens Mimo's album over the picture: **Device** (the card)
+or **Local** (only what is on this machine), `All · Photos · Videos · Favorites` pills,
+a sort chip (`Newest · Oldest · Name · Rating`) and Refresh. Tiles are grouped under
+day headers (`Today`, then the date), carry Mimo's download mark until the original is
+on disk, the clip length, and a star for favourites; there are no file names on the
+grid. Tapping a tile fills the bar along the bottom with its name, duration, size and
+resolution, and the actions:
 
 - **PLAY** fetches the 720p `.LRF` proxy to the cache and opens the player on it; the
   original is the fallback when there is no proxy. **VIEW** does the same for a still.
@@ -111,8 +114,13 @@ for live view again, the same loop the phones run.
 ## The player
 
 The proxy plays through the feed pipeline, so the LUT, zebra, peaking and mirror keys
-work on it exactly as on live view and the chrome says which are on. `Space` pauses,
-the bar scrubs, `Esc` goes back to the library. A still is converted to the same 4:2:0
+work on it exactly as on live view. The page is Mimo's: back, an info button that
+shows the clip's name and figures, the rendition as the title (`Low-Res` for the
+proxy), a download button for the original; below, the time pill, a filmstrip scrubber
+of eight frames decoded from the clip with the playhead over it, the tools
+(Screenshot writes the graded frame with `S`; LUT, Zebra and Peaking toggle), and
+heart · pause · trash. `Space` pauses, `Esc` goes back to the library; trash arms on
+the first tap and deletes on the second. A still is converted to the same 4:2:0
 path, so it is graded too. Playback is from the file on disk, never streamed from
 `/v2`: the camera parks `moov` at the end and serves no extension, which no player
 copes with.

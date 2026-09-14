@@ -258,6 +258,8 @@ impl MediaDriver {
         match FileReader::open(&local) {
             Ok(mut reader) => {
                 let info = reader.info();
+                shell.player_strip(&file.path, &filmstrip(&mut reader, info.duration_ms));
+                let _ = reader.seek(0);
                 let first = reader.next_picture().ok().flatten();
                 if let Some((picture, pts)) = first {
                     self.picture = Some(picture);
@@ -426,4 +428,53 @@ impl MediaDriver {
 
         commands
     }
+}
+
+/// Eight frames across the clip, small, for the scrubber. Leaves the reader wherever
+/// the last seek put it; the caller seeks back to the start.
+fn filmstrip(reader: &mut FileReader, duration_ms: i64) -> Vec<(u32, u32, Vec<u8>)> {
+    const FRAMES: i64 = 8;
+    let mut frames = Vec::new();
+    if duration_ms <= 0 {
+        return frames;
+    }
+    for index in 0..FRAMES {
+        let at = duration_ms * index / FRAMES;
+        if reader.seek(at).is_err() {
+            break;
+        }
+        match reader.next_picture() {
+            Ok(Some((picture, _))) => frames.push(strip_frame(&picture)),
+            _ => break,
+        }
+    }
+    frames
+}
+
+/// A decoded picture to a 160-wide RGBA frame, nearest sampled, BT.709 limited range.
+fn strip_frame(picture: &OwnedPicture) -> (u32, u32, Vec<u8>) {
+    let source = picture.picture();
+    let width = 160u32;
+    let height = ((u64::from(source.height) * 160 / u64::from(source.width.max(1))).max(1)) as u32;
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    for y in 0..height {
+        let sy = (y * source.height / height).min(source.height - 1) as usize;
+        for x in 0..width {
+            let sx = (x * source.width / width).min(source.width - 1) as usize;
+            let luma = f32::from(source.luma[sy * source.luma_stride + sx]);
+            let cb =
+                f32::from(source.chroma_blue[(sy / 2) * source.chroma_stride + sx / 2]) - 128.0;
+            let cr = f32::from(source.chroma_red[(sy / 2) * source.chroma_stride + sx / 2]) - 128.0;
+            let yy = (luma - 16.0) * 1.1644;
+            let r = yy + 1.7927 * cr;
+            let g = yy - 0.2132 * cb - 0.5329 * cr;
+            let b = yy + 2.1124 * cb;
+            let i = ((y * width + x) * 4) as usize;
+            rgba[i] = r.clamp(0.0, 255.0) as u8;
+            rgba[i + 1] = g.clamp(0.0, 255.0) as u8;
+            rgba[i + 2] = b.clamp(0.0, 255.0) as u8;
+            rgba[i + 3] = 255;
+        }
+    }
+    (width, height, rgba)
 }

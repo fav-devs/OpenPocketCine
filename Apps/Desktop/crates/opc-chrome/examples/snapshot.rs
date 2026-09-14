@@ -40,6 +40,16 @@ fn main() {
             &thumb,
         );
     }
+    let frames: Vec<(u32, u32, Vec<u8>)> = (0..8)
+        .map(|i| {
+            let mut frame = thumb.clone();
+            for px in frame.chunks_mut(4) {
+                px[0] = px[0].saturating_sub(i * 12);
+            }
+            (tw, th, frame)
+        })
+        .collect();
+    chrome.set_strip("DCIM/DJI_001/DJI_20260814125252_0032_D.MP4", &frames);
 
     // Name, phase, recording, window size. The last one is wider than 16:9 so the
     // side chrome parks in the gutters.
@@ -101,48 +111,90 @@ fn main() {
                 "player" => Screen::Player,
                 _ => Screen::Viewfinder,
             },
-            library: (name == "library").then(|| LibraryState {
-                tab: 0,
-                sort_label: "Newest".into(),
-                status: "11 files · 4.2 GB free".into(),
-                cells: (0..11)
-                    .map(|n| CellState {
-                        path: format!("DCIM/DJI_001/DJI_2026081412525{n}_003{n}_D.MP4"),
-                        title: format!(
-                            "DJI_2026081412525{n}_003{n}_D.{}",
-                            if n == 3 { "JPG" } else { "MP4" }
-                        ),
-                        meta: if n == 3 {
-                            "JPG".into()
-                        } else {
-                            format!("0:{:02}", 12 + n * 7)
-                        },
-                        is_video: n != 3,
-                        starred: n == 1 || n == 6,
-                        cached: n == 2,
-                        selected: n == 2,
-                    })
-                    .collect(),
-                selection: Some(SelectionState {
-                    title: "DJI_20260814125252_0032_D.MP4".into(),
-                    meta: "0:26 · 3840x2160 · 30 fps · 412.5 MB".into(),
-                    is_video: true,
-                    starred: false,
-                    cached: true,
-                    deletable: true,
-                    delete_armed: false,
-                    progress: Some(0.62),
-                    note: "Proxy on disk".into(),
-                }),
+            library: (name == "library").then(|| {
+                // Three days of takes, laid out the way the shell does at 1280 px.
+                let (cell_w, cell_h, gap): (f32, f32, f32) = (220.0, 124.0, 10.0);
+                let columns = ((1280.0 - 48.0 + gap) / (cell_w + gap)).floor() as usize;
+                let mut cells = Vec::new();
+                let mut y = 0.0;
+                for (day, count) in [("Today", 1usize), ("2026-09-04", 3), ("2026-08-23", 7)] {
+                    cells.push(CellState {
+                        path: String::new(),
+                        header: true,
+                        title: day.into(),
+                        meta: String::new(),
+                        x: 0.0,
+                        y,
+                        is_video: false,
+                        starred: false,
+                        cached: false,
+                        selected: false,
+                    });
+                    y += 44.0 + gap;
+                    for n in 0..count {
+                        let index = cells.len();
+                        cells.push(CellState {
+                            path: format!(
+                                "DCIM/DJI_001/DJI_2026081412525{}_003{}_D.MP4",
+                                index % 5,
+                                index % 5
+                            ),
+                            header: false,
+                            title: String::new(),
+                            meta: if n == 2 {
+                                "JPG".into()
+                            } else {
+                                format!("0:{:02}", 12 + index * 7 % 50)
+                            },
+                            x: (n % columns) as f32 * (cell_w + gap),
+                            y: y + (n / columns) as f32 * (cell_h + gap),
+                            is_video: n != 2,
+                            starred: index == 3,
+                            cached: index == 2,
+                            selected: index == 2,
+                        });
+                    }
+                    y += count.div_ceil(columns) as f32 * (cell_h + gap);
+                }
+                LibraryState {
+                    tab: 0,
+                    local: false,
+                    sort_label: "Newest".into(),
+                    status: "11 files · 4.2 GB free".into(),
+                    cells,
+                    content_height: y,
+                    cell_width: cell_w,
+                    cell_height: cell_h,
+                    selection: Some(SelectionState {
+                        title: "DJI_20260814125252_0032_D.MP4".into(),
+                        meta: "0:26 · 3840x2160 · 30 fps · 412.5 MB".into(),
+                        is_video: true,
+                        starred: false,
+                        cached: true,
+                        deletable: true,
+                        delete_armed: false,
+                        progress: Some(0.62),
+                        note: "Proxy on disk".into(),
+                    }),
+                }
             }),
             player: (name == "player").then(|| PlayerState {
+                path: "DCIM/DJI_001/DJI_20260814125252_0032_D.MP4".into(),
                 title: "DJI_20260814125252_0032_D.MP4".into(),
-                tag: "PROXY 720P".into(),
-                position_label: "0:09".into(),
-                duration_label: "0:26".into(),
+                tag: "Low-Res".into(),
+                info: "0:26 · 3840x2160 · 30 fps · 412.5 MB".into(),
+                show_info: true,
+                position_label: "00:09".into(),
+                duration_label: "00:26".into(),
                 progress: 0.35,
                 playing: true,
-                assists: "LUT  ZEB".into(),
+                starred: true,
+                cached: false,
+                deletable: true,
+                delete_armed: false,
+                lut_on: true,
+                zebra_on: false,
+                peaking_on: false,
                 is_photo: false,
             }),
             sheet: (name == "sheet" || name == "settings").then(|| {

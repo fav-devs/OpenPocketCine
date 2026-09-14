@@ -968,13 +968,17 @@ component SheetPanel {
 }
 
 // ── Library ───────────────────────────────────────────────────────────────────
-// The camera's card as a grid of thumbnails, with the selected clip's actions in a
-// bar along the bottom. Mimo's album, laid out for a laptop.
+// Mimo's album for a laptop: Device / Local, pill filters, thumbnails grouped by
+// day with a download mark and the clip length, and the selection's actions below.
 
 export struct MediaCell {
     path: string,
+    /// A day header row rather than a tile; `title` is the day.
+    header: bool,
     title: string,
     meta: string,
+    x: length,
+    y: length,
     thumb: image,
     has-thumb: bool,
     is-video: bool,
@@ -996,6 +1000,28 @@ export struct MediaSelection {
     note: string,
 }
 
+component Pill {
+    in property <string> text;
+    in property <bool> selected;
+    callback tapped();
+    width: t.preferred-width + 40px;
+    height: 40px;
+    Rectangle {
+        border-radius: 20px;
+        background: root.selected ? #e6e6e6 : (ta.has-hover ? #2c2c2c : #1e1e1e);
+    }
+    t := Text {
+        text: root.text;
+        color: root.selected ? #000000 : #d0d0d0;
+        font-family: Pal.font;
+        font-size: 14px;
+        font-weight: 600;
+        x: (parent.width - self.preferred-width) / 2;
+        y: (parent.height - self.preferred-height) / 2;
+    }
+    ta := TouchArea { clicked => { root.tapped(); } }
+}
+
 component TextButton {
     in property <string> text;
     in property <image> icon;
@@ -1009,10 +1035,8 @@ component TextButton {
     opacity: root.enabled ? 1.0 : 0.35;
 
     Rectangle {
-        border-radius: 8px;
-        background: root.accent ? Pal.accent : (root.danger ? #f5222d33 : (ta.has-hover ? #ffffff24 : #ffffff14));
-        border-width: 1px;
-        border-color: root.accent ? Pal.accent : (root.danger ? Pal.rec : #ffffff2e);
+        border-radius: 20px;
+        background: root.accent ? #e6e6e6 : (root.danger ? #f5222d33 : (ta.has-hover ? #2c2c2c : #1e1e1e));
     }
     HorizontalLayout {
         padding-left: 14px;
@@ -1029,9 +1053,8 @@ component TextButton {
             text: root.text;
             color: root.accent ? #000000 : (root.danger ? Pal.rec : Pal.ink);
             font-family: Pal.font;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 0.8px;
+            font-size: 13px;
+            font-weight: 600;
             vertical-alignment: center;
         }
     }
@@ -1044,13 +1067,18 @@ component TextButton {
 component LibraryPage {
     in property <[string]> tabs;
     in property <int> tab;
+    in property <bool> local;
     in property <string> sort-label;
     in property <string> status;
     in property <[MediaCell]> cells;
+    in property <length> content-height;
+    in property <length> cell-w;
+    in property <length> cell-h;
     in property <MediaSelection> selection;
     in property <bool> has-selection;
 
     callback back();
+    callback source-tapped(bool);
     callback tab-picked(int);
     callback sort-tapped();
     callback refresh();
@@ -1060,71 +1088,62 @@ component LibraryPage {
     callback favorite();
     callback delete();
 
-    property <length> head-h: 64px;
-    property <length> foot-h: 96px;
-    property <length> cell-w: 220px;
-    property <length> cell-h: 124px + 44px;
-    property <length> gap: 10px;
+    property <length> head-h: 128px;
+    property <length> foot-h: 88px;
     property <length> inset: 24px;
-    property <int> columns: max(1, floor((root.width - 2 * root.inset + root.gap) / (root.cell-w + root.gap)));
 
-    Rectangle { x: 0; y: 0; width: parent.width; height: parent.height; background: #0a0a0a; }
+    Rectangle { x: 0; y: 0; width: parent.width; height: parent.height; background: #000000; }
 
-    // Header.
+    // Header: back, Device / Local, the filters, and the tools on the right.
     Rectangle {
-        x: 0; y: 0; width: parent.width;
-        height: root.head-h;
-        background: Pal.bar;
+        x: 0; y: 0; width: parent.width; height: root.head-h;
         IconButton {
-            x: 8px; y: (parent.height - self.height) / 2;
+            x: 8px; y: 8px;
             icon: @image-url("../assets/icons/arrow-left.svg");
             key: "ESC";
             tapped => { root.back(); }
         }
         Text {
-            text: "LIBRARY";
-            color: Pal.ink;
-            font-family: Pal.font; font-size: 16px; font-weight: 700; letter-spacing: 1.5px;
-            x: 72px; y: (parent.height - self.preferred-height) / 2;
+            text: "Device";
+            color: root.local ? #8a8a8a : Pal.ink;
+            font-family: Pal.font; font-size: 30px; font-weight: 700;
+            x: 72px; y: 14px;
+            TouchArea { clicked => { root.source-tapped(false); } }
+        }
+        Text {
+            text: "Local";
+            color: root.local ? Pal.ink : #8a8a8a;
+            font-family: Pal.font; font-size: 30px; font-weight: 700;
+            x: 200px; y: 14px;
+            TouchArea { clicked => { root.source-tapped(true); } }
         }
         Rectangle {
             width: tab-row.preferred-width;
-            height: parent.height;
-            x: (parent.width - self.width) / 2;
+            height: 40px;
+            x: 72px; y: 72px;
             tab-row := HorizontalLayout {
-                spacing: 4px;
-                alignment: center;
-                for name[i] in root.tabs: Rectangle {
-                    width: tt.preferred-width + 28px;
-                    height: 32px;
-                    y: (root.head-h - self.height) / 2;
-                    border-radius: 8px;
-                    background: i == root.tab ? #ffffff1f : transparent;
-                    tt := Text {
-                        text: name;
-                        color: i == root.tab ? Pal.ink : Pal.ink-dim;
-                        font-family: Pal.font; font-size: 12px; font-weight: 700; letter-spacing: 1px;
-                        x: (parent.width - self.preferred-width) / 2;
-                        y: (parent.height - self.preferred-height) / 2;
-                    }
-                    TouchArea { clicked => { root.tab-picked(i); } }
+                spacing: 10px;
+                alignment: start;
+                for name[i] in root.tabs: Pill {
+                    text: name;
+                    selected: i == root.tab;
+                    tapped => { root.tab-picked(i); }
                 }
             }
         }
         Rectangle {
             width: right-row.preferred-width;
-            height: parent.height;
-            x: parent.width - self.width - 12px;
+            height: 56px;
+            x: parent.width - self.width - 12px; y: 8px;
             right-row := HorizontalLayout {
                 spacing: 6px;
                 alignment: center;
                 TextButton {
-                    y: (root.head-h - self.height) / 2;
+                    y: 8px;
                     text: root.sort-label;
                     tapped => { root.sort-tapped(); }
                 }
                 IconButton {
-                    y: (root.head-h - self.height) / 2;
                     icon: @image-url("../assets/icons/refresh.svg");
                     key: "R";
                     tapped => { root.refresh(); }
@@ -1133,72 +1152,71 @@ component LibraryPage {
         }
     }
 
-    // Grid.
+    // Grid, grouped by day. The shell lays the tiles out; this only draws them.
     Flickable {
         x: root.inset;
-        y: root.head-h + 12px;
+        y: root.head-h;
         width: parent.width - 2 * root.inset;
-        height: parent.height - root.head-h - root.foot-h - 24px;
-        viewport-height: max(self.height, ceil(root.cells.length / root.columns) * (root.cell-h + root.gap));
+        height: parent.height - root.head-h - root.foot-h;
+        viewport-height: max(self.height, root.content-height);
         for cell[i] in root.cells: Rectangle {
-            x: mod(i, root.columns) * (root.cell-w + root.gap);
-            y: floor(i / root.columns) * (root.cell-h + root.gap);
-            width: root.cell-w;
-            height: root.cell-h;
-            border-radius: 10px;
-            background: cell.selected ? #ffffff1f : (cta.has-hover ? #ffffff14 : #ffffff0a);
-            border-width: cell.selected ? 2px : 1px;
-            border-color: cell.selected ? Pal.accent : #ffffff14;
+            x: cell.x;
+            y: cell.y;
+            width: cell.header ? parent.width : root.cell-w;
+            height: cell.header ? 44px : root.cell-h;
+            border-radius: cell.header ? 0 : 6px;
+            background: cell.header ? transparent : #111111;
+            border-width: cell.selected ? 3px : 0;
+            border-color: Pal.accent;
             clip: true;
 
-            Rectangle {
-                x: 0; y: 0; width: parent.width; height: 124px;
-                background: #000000;
-                if cell.has-thumb: Image {
-                    source: cell.thumb;
-                    width: parent.width; height: parent.height;
-                    image-fit: contain;
-                }
-                if !cell.has-thumb: Image {
-                    source: cell.is-video ? @image-url("../assets/icons/video.svg") : @image-url("../assets/icons/photo.svg");
-                    colorize: Pal.ink-faint;
-                    width: 32px; height: 32px;
-                    x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
-                }
-                // Duration / kind badge.
-                Rectangle {
-                    x: parent.width - self.width - 8px; y: parent.height - self.height - 8px;
-                    width: bt.preferred-width + 14px; height: 22px;
-                    border-radius: 5px;
-                    background: #000000b3;
-                    bt := Text {
-                        text: cell.meta;
-                        color: Pal.ink;
-                        font-family: Pal.font; font-size: 11px; font-weight: 700;
-                        x: (parent.width - self.preferred-width) / 2;
-                        y: (parent.height - self.preferred-height) / 2;
-                    }
-                }
-                if cell.starred: Image {
-                    source: @image-url("../assets/icons/star-filled.svg");
-                    colorize: Pal.accent;
-                    width: 18px; height: 18px; x: 8px; y: 8px;
-                }
-                if cell.cached: Image {
-                    source: @image-url("../assets/icons/photo-check.svg");
-                    colorize: Pal.online;
-                    width: 18px; height: 18px; x: cell.starred ? 32px : 8px; y: 8px;
-                }
-            }
-            Text {
+            if cell.header: Text {
                 text: cell.title;
-                color: Pal.ink-dim;
-                font-family: Pal.font; font-size: 12px; font-weight: 600;
-                x: 10px; y: 124px + 12px;
-                width: parent.width - 20px;
-                overflow: elide;
+                color: Pal.ink;
+                font-family: Pal.font; font-size: 18px; font-weight: 700;
+                x: 0; y: parent.height - self.preferred-height - 6px;
             }
-            cta := TouchArea { clicked => { root.cell-tapped(i); } }
+
+            if !cell.header && cell.has-thumb: Image {
+                source: cell.thumb;
+                width: parent.width; height: parent.height;
+                image-fit: cover;
+            }
+            if !cell.header && !cell.has-thumb: Image {
+                source: cell.is-video ? @image-url("../assets/icons/video.svg") : @image-url("../assets/icons/photo.svg");
+                colorize: Pal.ink-faint;
+                width: 28px; height: 28px;
+                x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            }
+            // Not on this machine yet: Mimo's download mark.
+            if !cell.header && !cell.cached: Image {
+                source: @image-url("../assets/icons/download.svg");
+                colorize: Pal.ink;
+                width: 20px; height: 20px; x: 10px; y: 10px;
+            }
+            if !cell.header && cell.starred: Image {
+                source: @image-url("../assets/icons/star-filled.svg");
+                colorize: Pal.accent;
+                width: 18px; height: 18px; x: parent.width - self.width - 10px; y: 10px;
+            }
+            if !cell.header && cell.is-video: HorizontalLayout {
+                x: 10px; y: parent.height - 30px; height: 20px;
+                spacing: 6px;
+                alignment: start;
+                Image {
+                    source: @image-url("../assets/icons/video.svg");
+                    colorize: Pal.ink;
+                    width: 18px; height: 18px;
+                    y: (parent.height - self.height) / 2;
+                }
+                Text {
+                    text: cell.meta;
+                    color: Pal.ink;
+                    font-family: Pal.font; font-size: 13px; font-weight: 600;
+                    vertical-alignment: center;
+                }
+            }
+            if !cell.header: TouchArea { clicked => { root.cell-tapped(i); } }
         }
     }
 
@@ -1206,12 +1224,12 @@ component LibraryPage {
     Rectangle {
         x: 0; y: parent.height - root.foot-h; width: parent.width;
         height: root.foot-h;
-        background: Pal.bar;
+        background: #0a0a0a;
 
         if !root.has-selection: Text {
             text: root.status;
-            color: Pal.ink-dim;
-            font-family: Pal.font; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;
+            color: #8a8a8a;
+            font-family: Pal.font; font-size: 13px; font-weight: 600;
             x: root.inset; y: (parent.height - self.preferred-height) / 2;
         }
 
@@ -1228,7 +1246,7 @@ component LibraryPage {
             }
             Text {
                 text: root.selection.meta + (root.selection.note != "" ? "  ·  " + root.selection.note : "");
-                color: Pal.ink-dim;
+                color: #8a8a8a;
                 font-family: Pal.font; font-size: 12px; font-weight: 600;
                 overflow: elide;
             }
@@ -1250,27 +1268,27 @@ component LibraryPage {
                 alignment: center;
                 TextButton {
                     y: (root.foot-h - self.height) / 2;
-                    text: root.selection.is-video ? "PLAY" : "VIEW";
+                    text: root.selection.is-video ? "Play" : "View";
                     icon: @image-url("../assets/icons/player-play.svg");
                     accent: true;
                     tapped => { root.play(); }
                 }
                 TextButton {
                     y: (root.foot-h - self.height) / 2;
-                    text: root.selection.cached ? "SAVED" : "DOWNLOAD";
+                    text: root.selection.cached ? "Saved" : "Download";
                     icon: @image-url("../assets/icons/download.svg");
                     enabled: !root.selection.cached;
                     tapped => { root.download(); }
                 }
-                TextButton {
+                IconButton {
                     y: (root.foot-h - self.height) / 2;
-                    text: root.selection.starred ? "STARRED" : "STAR";
-                    icon: root.selection.starred ? @image-url("../assets/icons/star-filled.svg") : @image-url("../assets/icons/star.svg");
+                    icon: root.selection.starred ? @image-url("../assets/icons/heart-filled.svg") : @image-url("../assets/icons/heart.svg");
+                    tint: root.selection.starred ? Pal.rec : Pal.ink;
                     tapped => { root.favorite(); }
                 }
                 TextButton {
                     y: (root.foot-h - self.height) / 2;
-                    text: root.selection.delete-armed ? "CONFIRM DELETE" : "DELETE";
+                    text: root.selection.delete-armed ? "Confirm delete" : "";
                     icon: @image-url("../assets/icons/trash.svg");
                     danger: true;
                     enabled: root.selection.deletable;
@@ -1282,123 +1300,243 @@ component LibraryPage {
 }
 
 // ── Player ────────────────────────────────────────────────────────────────────
-// Transport over the 720p proxy the feed pipeline is presenting. The assists and the
-// LUT keys work here exactly as on live view.
+// Mimo's player: back, info, the rendition as the title, download; a time pill, a
+// filmstrip scrubber, the tools, then heart · pause · trash.
 
 export struct PlayerView {
     title: string,
     tag: string,
+    info: string,
+    show-info: bool,
     position-label: string,
     duration-label: string,
     progress: float,
     playing: bool,
-    assists: string,
+    starred: bool,
+    cached: bool,
+    deletable: bool,
+    delete-armed: bool,
+    lut-on: bool,
+    zebra-on: bool,
+    peaking-on: bool,
     /// A still: no transport, the picture is the whole screen.
     is-photo: bool,
 }
 
+component Tool {
+    in property <image> icon;
+    in property <string> text;
+    in property <bool> on;
+    callback tapped();
+    width: 96px;
+    height: 72px;
+    Rectangle {
+        width: 44px; height: 44px; border-radius: 22px;
+        x: (parent.width - self.width) / 2; y: 0;
+        background: root.on ? Pal.accent : (ta.has-hover ? #ffffff1f : transparent);
+        Image {
+            source: root.icon;
+            colorize: root.on ? #000000 : Pal.ink;
+            width: 26px; height: 26px;
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        }
+    }
+    Text {
+        text: root.text;
+        color: #d0d0d0;
+        font-family: Pal.font; font-size: 13px; font-weight: 600;
+        x: (parent.width - self.preferred-width) / 2; y: 50px;
+    }
+    ta := TouchArea { clicked => { root.tapped(); } }
+}
+
 component PlayerPage {
     in property <PlayerView> view;
+    in property <[image]> strip;
     callback back();
+    callback info();
+    callback download();
     callback toggle();
     callback seek(float);
+    callback screenshot();
+    callback lut();
+    callback zebra();
+    callback peaking();
+    callback favorite();
+    callback delete();
 
     property <length> bar-h: 64px;
-    property <length> foot-h: 88px;
+    property <length> foot-h: 262px;
+    property <length> strip-h: 64px;
 
     // Header.
     Rectangle {
         x: 0; y: 0; width: parent.width;
         height: root.bar-h;
-        background: Pal.bar;
+        background: #000000b3;
         IconButton {
             x: 8px; y: (parent.height - self.height) / 2;
             icon: @image-url("../assets/icons/arrow-left.svg");
             key: "ESC";
             tapped => { root.back(); }
         }
-        Text {
-            text: root.view.title;
-            color: Pal.ink;
-            font-family: Pal.font; font-size: 15px; font-weight: 700;
-            x: 72px; y: (parent.height - self.preferred-height) / 2;
-            width: parent.width - 300px;
-            overflow: elide;
+        IconButton {
+            x: 64px; y: (parent.height - self.height) / 2;
+            icon: @image-url("../assets/icons/info-circle.svg");
+            tint: root.view.show-info ? Pal.accent : Pal.ink;
+            tapped => { root.info(); }
         }
-        if root.view.tag != "": Rectangle {
-            x: parent.width - self.width - 16px; y: (parent.height - self.height) / 2;
-            width: tag.preferred-width + 18px; height: 26px;
-            border-radius: 6px;
-            background: #ffffff1f;
-            tag := Text {
-                text: root.view.tag;
-                color: Pal.ink-dim;
-                font-family: Pal.font; font-size: 11px; font-weight: 700; letter-spacing: 1px;
-                x: (parent.width - self.preferred-width) / 2;
-                y: (parent.height - self.preferred-height) / 2;
-            }
+        Text {
+            text: root.view.tag;
+            color: #d0d0d0;
+            font-family: Pal.font; font-size: 17px; font-weight: 600;
+            x: (parent.width - self.preferred-width) / 2;
+            y: (parent.height - self.preferred-height) / 2;
+        }
+        IconButton {
+            x: parent.width - self.width - 8px; y: (parent.height - self.height) / 2;
+            icon: @image-url("../assets/icons/download.svg");
+            tint: root.view.cached ? Pal.online : Pal.ink;
+            enabled: !root.view.cached;
+            tapped => { root.download(); }
         }
     }
 
-    // Transport.
+    if root.view.show-info: Rectangle {
+        x: 16px; y: root.bar-h + 12px;
+        width: it.preferred-width + 28px; height: it.preferred-height + 20px;
+        border-radius: 10px;
+        background: #000000b3;
+        it := Text {
+            text: root.view.title + "\n" + root.view.info;
+            color: Pal.ink;
+            font-family: Pal.font; font-size: 13px; font-weight: 600;
+            x: 14px; y: 10px;
+        }
+    }
+
+    // Transport and tools.
     if !root.view.is-photo: Rectangle {
         x: 0; y: parent.height - root.foot-h; width: parent.width;
         height: root.foot-h;
-        background: Pal.bar;
+        background: #000000b3;
 
-        IconButton {
-            x: 16px; y: (parent.height - self.height) / 2;
-            icon: root.view.playing ? @image-url("../assets/icons/player-pause.svg") : @image-url("../assets/icons/player-play.svg");
-            key: "SPACE";
-            tapped => { root.toggle(); }
-        }
-        Text {
-            text: root.view.position-label;
-            color: Pal.ink;
-            font-family: Pal.font; font-size: 13px; font-weight: 700;
-            x: 84px; y: (parent.height - self.preferred-height) / 2;
-        }
-        track := Rectangle {
-            x: 160px; y: (parent.height - self.height) / 2;
-            width: parent.width - 160px - 200px; height: 24px;
-            Rectangle {
-                y: (parent.height - self.height) / 2; height: 4px; width: parent.width;
-                border-radius: 2px; background: #ffffff33;
-                Rectangle {
-                    width: parent.width * root.view.progress; height: parent.height;
-                    border-radius: 2px; background: Pal.accent;
+        // Time pill.
+        Rectangle {
+            width: tp.preferred-width + 28px; height: 32px;
+            x: (parent.width - self.width) / 2; y: 6px;
+            border-radius: 16px;
+            background: #000000b3;
+            tp := HorizontalLayout {
+                alignment: center;
+                spacing: 6px;
+                Text {
+                    text: root.view.position-label;
+                    color: Pal.ink;
+                    font-family: Pal.font; font-size: 15px; font-weight: 700;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: "/  " + root.view.duration-label;
+                    color: #9a9a9a;
+                    font-family: Pal.font; font-size: 15px; font-weight: 600;
+                    vertical-alignment: center;
                 }
             }
+        }
+
+        // Filmstrip: frames across the clip, the playhead over them.
+        film := Rectangle {
+            x: 24px; y: 46px;
+            width: parent.width - 48px; height: root.strip-h;
+            background: #111111;
+            border-radius: 4px;
+            clip: true;
+            for frame[i] in root.strip: Image {
+                source: frame;
+                x: i * film.width / max(1, root.strip.length);
+                y: 0;
+                width: film.width / max(1, root.strip.length);
+                height: parent.height;
+                image-fit: cover;
+            }
             Rectangle {
-                width: 14px; height: 14px; border-radius: 7px;
-                x: parent.width * root.view.progress - self.width / 2;
-                y: (parent.height - self.height) / 2;
+                x: parent.width * root.view.progress - 2px;
+                y: 0; width: 4px; height: parent.height;
                 background: Pal.ink;
             }
             TouchArea {
                 pointer-event(e) => {
                     if e.kind == PointerEventKind.down {
-                        root.seek((self.mouse-x / track.width).clamp(0, 1));
+                        root.seek((self.mouse-x / film.width).clamp(0, 1));
                     }
                 }
                 moved => {
                     if self.pressed {
-                        root.seek((self.mouse-x / track.width).clamp(0, 1));
+                        root.seek((self.mouse-x / film.width).clamp(0, 1));
                     }
                 }
             }
         }
-        Text {
-            text: root.view.duration-label;
-            color: Pal.ink-dim;
-            font-family: Pal.font; font-size: 13px; font-weight: 700;
-            x: parent.width - 190px; y: (parent.height - self.preferred-height) / 2;
+
+        // Tools.
+        Rectangle {
+            width: tools.preferred-width; height: 72px;
+            x: (parent.width - self.width) / 2; y: 122px;
+            tools := HorizontalLayout {
+                spacing: 8px;
+                Tool { icon: @image-url("../assets/icons/camera.svg"); text: "Screenshot"; tapped => { root.screenshot(); } }
+                Tool { icon: @image-url("../assets/icons/contrast-2.svg"); text: "LUT"; on: root.view.lut-on; tapped => { root.lut(); } }
+                Tool { icon: @image-url("../assets/icons/wave-sine.svg"); text: "Zebra"; on: root.view.zebra-on; tapped => { root.zebra(); } }
+                Tool { icon: @image-url("../assets/icons/aperture.svg"); text: "Peaking"; on: root.view.peaking-on; tapped => { root.peaking(); } }
+            }
         }
-        Text {
-            text: root.view.assists;
-            color: Pal.ink-faint;
-            font-family: Pal.font; font-size: 11px; font-weight: 700; letter-spacing: 1px;
-            x: parent.width - self.preferred-width - 16px; y: (parent.height - self.preferred-height) / 2;
+
+        // Heart · pause · trash.
+        IconButton {
+            x: 24px; y: parent.height - self.height - 4px;
+            icon: root.view.starred ? @image-url("../assets/icons/heart-filled.svg") : @image-url("../assets/icons/heart.svg");
+            tint: root.view.starred ? Pal.rec : Pal.ink;
+            icon-size: 28px;
+            tapped => { root.favorite(); }
+        }
+        IconButton {
+            x: (parent.width - self.width) / 2; y: parent.height - self.height - 4px;
+            icon: root.view.playing ? @image-url("../assets/icons/player-pause.svg") : @image-url("../assets/icons/player-play.svg");
+            icon-size: 32px;
+            key: "SPACE";
+            tapped => { root.toggle(); }
+        }
+        IconButton {
+            x: parent.width - self.width - 24px; y: parent.height - self.height - 4px;
+            icon: @image-url("../assets/icons/trash.svg");
+            tint: root.view.delete-armed ? Pal.rec : Pal.ink;
+            label: root.view.delete-armed ? "CONFIRM" : "";
+            icon-size: 28px;
+            enabled: root.view.deletable;
+            tapped => { root.delete(); }
+        }
+    }
+
+    // A still keeps the heart and the trash under the picture.
+    if root.view.is-photo: Rectangle {
+        x: 0; y: parent.height - 72px; width: parent.width; height: 72px;
+        background: #000000b3;
+        IconButton {
+            x: 24px; y: (parent.height - self.height) / 2;
+            icon: root.view.starred ? @image-url("../assets/icons/heart-filled.svg") : @image-url("../assets/icons/heart.svg");
+            tint: root.view.starred ? Pal.rec : Pal.ink;
+            icon-size: 28px;
+            tapped => { root.favorite(); }
+        }
+        IconButton {
+            x: parent.width - self.width - 24px; y: (parent.height - self.height) / 2;
+            icon: @image-url("../assets/icons/trash.svg");
+            tint: root.view.delete-armed ? Pal.rec : Pal.ink;
+            label: root.view.delete-armed ? "CONFIRM" : "";
+            icon-size: 28px;
+            enabled: root.view.deletable;
+            tapped => { root.delete(); }
         }
     }
 }
@@ -1441,14 +1579,19 @@ export component HudOverlay inherits Window {
 
     // Which screen is up: 0 viewfinder, 1 library, 2 player, 3 photo.
     in property <int> screen: 0;
-    in property <[string]> library-tabs: ["ALL", "VIDEOS", "PHOTOS", "FAVORITES"];
+    in property <[string]> library-tabs: ["All", "Photos", "Videos", "Favorites"];
     in property <int> library-tab: 0;
+    in property <bool> library-local: false;
     in property <string> library-sort: "Newest";
     in property <string> library-status: "";
     in property <[MediaCell]> library-cells: [];
+    in property <length> library-content-height: 0;
+    in property <length> library-cell-w: 220px;
+    in property <length> library-cell-h: 124px;
     in property <MediaSelection> library-selection;
     in property <bool> library-has-selection: false;
     in property <PlayerView> player;
+    in property <[image]> player-strip: [];
 
     // The open sheet, if any: its title, tabs and rows come from the shell.
     in property <bool> sheet-open: false;
@@ -1503,9 +1646,18 @@ export component HudOverlay inherits Window {
     callback library-download();
     callback library-favorite();
     callback library-delete();
+    callback library-source-tapped(bool);
     callback player-back();
     callback player-toggle();
     callback player-seek(float);
+    callback player-info();
+    callback player-download();
+    callback player-screenshot();
+    callback player-lut();
+    callback player-zebra();
+    callback player-peaking();
+    callback player-favorite();
+    callback player-delete();
 
     background: transparent;
 
@@ -1630,12 +1782,17 @@ export component HudOverlay inherits Window {
         width: parent.width; height: parent.height;
         tabs: root.library-tabs;
         tab: root.library-tab;
+        local: root.library-local;
         sort-label: root.library-sort;
         status: root.library-status;
         cells: root.library-cells;
+        content-height: root.library-content-height;
+        cell-w: root.library-cell-w;
+        cell-h: root.library-cell-h;
         selection: root.library-selection;
         has-selection: root.library-has-selection;
         back => { root.library-back(); }
+        source-tapped(local) => { root.library-source-tapped(local); }
         tab-picked(i) => { root.library-tab-picked(i); }
         sort-tapped => { root.library-sort-tapped(); }
         refresh => { root.library-refresh(); }
@@ -1649,8 +1806,17 @@ export component HudOverlay inherits Window {
     if root.screen == 2 || root.screen == 3: PlayerPage {
         width: parent.width; height: parent.height;
         view: root.player;
+        strip: root.player-strip;
         back => { root.player-back(); }
+        info => { root.player-info(); }
+        download => { root.player-download(); }
         toggle => { root.player-toggle(); }
         seek(p) => { root.player-seek(p); }
+        screenshot => { root.player-screenshot(); }
+        lut => { root.player-lut(); }
+        zebra => { root.player-zebra(); }
+        peaking => { root.player-peaking(); }
+        favorite => { root.player-favorite(); }
+        delete => { root.player-delete(); }
     }
 }

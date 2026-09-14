@@ -1078,8 +1078,51 @@ impl Shell {
                     }
                     self.chrome_stale = true;
                 }
+                ChromeIntent::LibrarySource(local) => {
+                    self.library.local = local;
+                    self.library.selected = None;
+                    self.chrome_stale = true;
+                }
                 ChromeIntent::PlayerBack => fired.extend(self.close_player()),
                 ChromeIntent::PlayerToggle => fired.extend(self.player_toggle()),
+                ChromeIntent::PlayerInfo => {
+                    if let Some(player) = self.player.as_mut() {
+                        player.show_info = !player.show_info;
+                        self.chrome_stale = true;
+                    }
+                }
+                ChromeIntent::PlayerDownload => {
+                    if let Some(file) = self.player.as_ref().map(|p| p.file.clone()) {
+                        self.library.progress.insert(file.path.clone(), (0, None));
+                        fired.push(Intent::Media(MediaAction::Download(file)));
+                    }
+                }
+                ChromeIntent::PlayerScreenshot => fired.push(Intent::Still),
+                ChromeIntent::PlayerLut => fired.extend(self.act(Action::ToggleGrade, 0.0)),
+                ChromeIntent::PlayerZebra => fired.extend(self.act(Action::ToggleZebra, 0.0)),
+                ChromeIntent::PlayerPeaking => {
+                    fired.extend(self.act(Action::TogglePeaking, 0.0));
+                }
+                ChromeIntent::PlayerFavorite => {
+                    if self.player_select() {
+                        let counter = self.next_media_counter();
+                        if let Some(command) = self.library.toggle_favorite(counter) {
+                            fired.push(Intent::Send(command));
+                        }
+                        self.chrome_stale = true;
+                    }
+                }
+                ChromeIntent::PlayerDelete => {
+                    if self.player_select() {
+                        let counter = self.next_media_counter();
+                        if let Some(command) = self.library.delete_tapped(counter) {
+                            fired.push(Intent::Send(command));
+                            // The clip is gone: back to the grid.
+                            fired.extend(self.close_player());
+                        }
+                        self.chrome_stale = true;
+                    }
+                }
                 ChromeIntent::PlayerSeek(fraction) => {
                     if let Some(player) = self.player.as_mut() {
                         let position = (f64::from(fraction).clamp(0.0, 1.0)
@@ -1213,6 +1256,7 @@ impl Shell {
         } else {
             Screen::Player
         };
+        self.library.delete_armed = None;
         self.player = Some(Player {
             file,
             playing: !is_photo,
@@ -1220,8 +1264,27 @@ impl Shell {
             duration_ms,
             proxy,
             is_photo,
+            show_info: false,
         });
         self.chrome_stale = true;
+    }
+
+    /// Frames across the clip for the filmstrip scrubber.
+    pub fn player_strip(&mut self, path: &str, frames: &[(u32, u32, Vec<u8>)]) {
+        if let Some(cr) = self.chrome_renderer.as_mut() {
+            cr.set_strip(path, frames);
+        }
+        self.chrome_stale = true;
+    }
+
+    /// The player's heart or trash: the clip on screen becomes the selection, so the
+    /// library's own rules apply.
+    fn player_select(&mut self) -> bool {
+        let Some(path) = self.player.as_ref().map(|player| player.file.path.clone()) else {
+            return false;
+        };
+        self.library.selected = Some(path);
+        true
     }
 
     pub fn player_position(&mut self, position_ms: i64) {
@@ -1463,15 +1526,18 @@ impl Shell {
             let grid_on = self.prefs.grid;
             let move_text = self.move_text(now);
             let screen = self.screen;
-            let library = (screen == Screen::Library).then(|| self.library.state());
+            let grid_width = self.window.0 as f32;
+            let library = (screen == Screen::Library).then(|| self.library.state(grid_width));
             if screen == Screen::Library {
                 for file in self.library.thumbs_wanted() {
                     self.chrome_pending_intents
                         .push(Intent::Media(MediaAction::Thumb(file)));
                 }
             }
-            let assists = self.toggles.names();
-            let player = self.player.as_ref().map(|player| player.state(&assists));
+            let player = self
+                .player
+                .as_ref()
+                .map(|player| player.state(&self.library, self.toggles));
             let mut canvas = if let Some(cr) = self.chrome_renderer.as_mut() {
                 let status = &self.hud.status;
                 let link_state = self.hud.connection_chip();
