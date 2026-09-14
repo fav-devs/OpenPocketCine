@@ -657,6 +657,8 @@ extern "C" {
     pub fn opc_vcam_mac_open(width: i32, height: i32) -> i32;
     pub fn opc_vcam_mac_push(bytes: *const u8, count: usize) -> i32;
     pub fn opc_vcam_mac_close();
+    /// 1 when the camera extension is present on this Mac.
+    pub fn opc_vcam_mac_present() -> i32;
 
     /// The scale's legend, one `label<TAB>r<TAB>g<TAB>b` line per zone.
     pub fn opc_false_color_legend(

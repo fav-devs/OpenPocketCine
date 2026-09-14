@@ -1138,8 +1138,9 @@ component SheetPanel {
         border-color: #ffffff1f;
     }
 
-    // Header: title, tabs, close.
-    Text {
+    // Header: title, tabs, close. The tabs sit centred until there are enough of them
+    // to reach the title, then they start after it.
+    sheet-title := Text {
         text: root.title;
         color: Pal.ink;
         font-family: Pal.font;
@@ -1152,16 +1153,16 @@ component SheetPanel {
     Rectangle {
         width: tab-row.preferred-width;
         height: root.head-h;
-        x: (parent.width - self.width) / 2;
+        x: max((parent.width - self.width) / 2, sheet-title.x + sheet-title.preferred-width + 20px);
         y: 0;
         tab-row := HorizontalLayout {
             x: 0;
             y: 0;
             height: root.head-h;
-            spacing: 4px;
+            spacing: 2px;
             alignment: center;
             for name[i] in root.tabs: Rectangle {
-                width: tt.preferred-width + 28px;
+                width: tt.preferred-width + 22px;
                 height: 32px;
                 y: (root.head-h - self.height) / 2;
                 border-radius: 8px;

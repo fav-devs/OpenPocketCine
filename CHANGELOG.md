@@ -46,7 +46,9 @@ All notable changes to this project are documented here. The format is based on
   over a named pipe), the OpenPocketCine camera extension on macOS
   (`Apps/Desktop/macos`, written through the facade's sink-stream writer)
   — or a loopback MJPEG stream OBS's Virtual Camera carries anywhere
-  (`opc-vcam`). Unqualified on a physical body.
+  (`opc-vcam`). Settings gains an Output tab that checks for the platform
+  component, installs or removes it the platform's own way, and hosts the
+  camera controls. Unqualified on a physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

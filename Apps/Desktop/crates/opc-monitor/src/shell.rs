@@ -75,6 +75,11 @@ pub enum Intent {
     Reconnect,
     /// Write a diagnostics report to the cache folder.
     Diagnostics,
+    /// Put the platform camera component in, or take it out; the window runs it.
+    ComponentInstall,
+    ComponentRemove,
+    /// Show a page in the operator's browser.
+    OpenUrl(String),
 }
 
 /// The gimbal's live mode, as commanded. The body's GET cannot tell FPV from Tilt
@@ -1001,7 +1006,15 @@ impl Shell {
         self.setup.renderer = name.to_string();
     }
 
-    /// What the virtual camera is doing, from the window, for the System tab.
+    /// What the window found out about the platform camera component.
+    pub fn set_component(&mut self, report: opc_vcam::ComponentReport) {
+        if self.setup.component != report {
+            self.setup.component = report;
+            self.chrome_stale = true;
+        }
+    }
+
+    /// What the virtual camera is doing, from the window, for the Output tab.
     pub fn set_vcam_status(&mut self, line: &str) {
         if self.setup.vcam != line {
             self.setup.vcam = line.to_string();
@@ -1058,7 +1071,7 @@ impl Shell {
         let status = &self.hud.status;
         let toggles = self.toggles;
         format!(
-            "OpenPocketCine desktop {}\nuptime {now:.1} s\n{link}\nphase {phase}\nbody {model} (id {id})\nfirmware {fw}\nrenderer {renderer}\nrecovery {recovery}\nwindow {w}x{h}\nsource {src:?}\nformat {format}\ncolour mode {color:?} iso {iso:?}\nzoom {zoom:?} stops {stops:?}\nrecording {rec}\ntoggles {toggles:?}\nprefs {prefs:?}\nassists {assists:?}\nscopes {scopes:?}\n",
+            "OpenPocketCine desktop {}\nuptime {now:.1} s\n{link}\nphase {phase}\nbody {model} (id {id})\nfirmware {fw}\nrenderer {renderer}\nrecovery {recovery}\nwindow {w}x{h}\nsource {src:?}\nformat {format}\ncolour mode {color:?} iso {iso:?}\nzoom {zoom:?} stops {stops:?}\nrecording {rec}\ntoggles {toggles:?}\nprefs {prefs:?}\nassists {assists:?}\nscopes {scopes:?}\ncamera component {component:?}\nvirtual camera {vcam}\n",
             env!("CARGO_PKG_VERSION"),
             link = self.setup.link,
             phase = self.setup.phase,
@@ -1079,6 +1092,8 @@ impl Shell {
             prefs = self.prefs,
             assists = self.assists,
             scopes = self.scope_options,
+            component = self.setup.component,
+            vcam = self.setup.vcam,
         )
     }
 
@@ -1659,8 +1674,25 @@ impl Shell {
             Pick::Diagnostics => vec![Intent::Diagnostics],
             Pick::Vcam(mode) => {
                 self.prefs.vcam = mode.min(2);
+                if self.prefs.vcam == 1
+                    && self.setup.component.state != opc_vcam::ComponentState::Installed
+                {
+                    self.set_notice("CAMERA COMPONENT NOT INSTALLED · SETTINGS › OUTPUT");
+                }
                 Vec::new()
             }
+            Pick::ComponentInstall => {
+                self.setup.component = self.setup.component.busy("Installing…");
+                vec![Intent::ComponentInstall]
+            }
+            Pick::ComponentRemove => {
+                self.setup.component = self.setup.component.busy("Removing…");
+                vec![Intent::ComponentRemove]
+            }
+            Pick::OpenStream => vec![Intent::OpenUrl(format!(
+                "http://127.0.0.1:{}/",
+                self.prefs.vcam_port
+            ))],
             Pick::VcamClean(clean) => {
                 self.prefs.vcam_clean = clean;
                 Vec::new()

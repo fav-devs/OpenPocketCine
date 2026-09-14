@@ -14,7 +14,7 @@ xcodebuild -project OpenPocketCineCamera.xcodeproj -scheme OpenPocketCineCamera 
 
 Copy the built `OpenPocketCine Camera.app` to `/Applications`, open it, press
 **Install**, approve the extension in System Settings → Privacy & Security. Then in the
-viewfinder's System tab set **Virtual camera** to **Camera device**.
+viewfinder's Output tab set **Virtual camera** to **Camera device**.
 
 What it needs, and why:
 

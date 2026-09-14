@@ -11,7 +11,7 @@ use opc_camera::Recovery;
 use opc_chrome::Screen;
 use opc_decode::{Codec, Decoder, OwnedPicture};
 use opc_render::{write_png, FeedRenderer, Lut, Presented};
-use opc_vcam::VirtualCamera;
+use opc_vcam::{ComponentReport, VirtualCamera};
 
 use crate::media::MediaDriver;
 use opc_monitor::luts;
@@ -81,6 +81,9 @@ struct View {
     /// When the camera last took a frame, and when its readout was last refreshed.
     last_vcam_at: f64,
     last_vcam_status_at: f64,
+    /// A probe, install or remove of the platform camera component, running on its
+    /// own thread; the answer lands in the Output tab.
+    component_job: Option<std::sync::mpsc::Receiver<ComponentReport>>,
 }
 
 impl View {
@@ -109,6 +112,9 @@ impl View {
                 }
                 Intent::Reconnect => self.reconnect(),
                 Intent::Diagnostics => self.write_diagnostics(),
+                Intent::ComponentInstall => self.start_component_job(opc_vcam::install::install),
+                Intent::ComponentRemove => self.start_component_job(opc_vcam::install::remove),
+                Intent::OpenUrl(url) => self.open_url(&url),
             }
         }
         while let Some(request) = self.shell.take_lut_change() {
@@ -230,8 +236,53 @@ impl View {
                 }
                 Intent::Reconnect => self.reconnect(),
                 Intent::Diagnostics => self.write_diagnostics(),
+                Intent::ComponentInstall => self.start_component_job(opc_vcam::install::install),
+                Intent::ComponentRemove => self.start_component_job(opc_vcam::install::remove),
+                Intent::OpenUrl(url) => self.open_url(&url),
                 Intent::Still | Intent::Quit | Intent::ToggleFullscreen => {}
             }
+        }
+    }
+
+    /// Runs a component action off the window thread; one at a time.
+    fn start_component_job(&mut self, job: fn() -> ComponentReport) {
+        if self.component_job.is_some() {
+            return;
+        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("opc-component".to_string())
+            .spawn(move || {
+                let _ = sender.send(job());
+            })
+            .ok();
+        self.component_job = Some(receiver);
+    }
+
+    /// Takes a finished component job's answer to the Output tab, and restarts the
+    /// camera so it sees what changed.
+    fn poll_component_job(&mut self) {
+        let Some(receiver) = self.component_job.as_ref() else {
+            return;
+        };
+        let Ok(report) = receiver.try_recv() else {
+            return;
+        };
+        self.component_job = None;
+        let installed = report.state == opc_vcam::ComponentState::Installed;
+        self.shell.set_component(report);
+        if let Some(camera) = self.vcam.take() {
+            camera.stop();
+        }
+        if installed && self.shell.vcam_backend() == Some(opc_vcam::Backend::Device) {
+            self.shell.say("CAMERA COMPONENT INSTALLED · CAMERA ON");
+        }
+    }
+
+    fn open_url(&mut self, url: &str) {
+        if let Err(error) = opc_vcam::install::open_url(url) {
+            eprintln!("{error}");
+            self.shell.say("COULD NOT OPEN THE BROWSER");
         }
     }
 
@@ -475,6 +526,7 @@ impl View {
         self.decode();
         let now = self.now();
         self.poll_pad(now);
+        self.poll_component_job();
         self.reconcile_vcam(now);
         let intents = self.shell.tick(now);
         self.carry_out_quietly(intents, now);
@@ -812,7 +864,9 @@ pub fn run(options: Options) -> Result<(), String> {
         vcam: None,
         last_vcam_at: f64::NEG_INFINITY,
         last_vcam_status_at: f64::NEG_INFINITY,
+        component_job: None,
     };
+    view.start_component_job(opc_vcam::install::probe);
     view.shell.set_link_info(&format!(
         "Wi-Fi datalink · {}",
         options

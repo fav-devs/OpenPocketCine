@@ -215,18 +215,31 @@ writes PNGs of the finding, live, recording, failed and wide-window states.
 
 ## The viewfinder as a camera
 
-The System tab's **Virtual camera** row hands the graded picture to other apps, so a
-call, a stream or a recorder can take the Pocket as its webcam. It is 1280 × 720,
-letterboxed as the window is, without the chrome, at up to 30 frames a second; the
-**Camera picture** row sends it **Clean** (the LUT stays, zebra / peaking / false colour
-come off) or **As shown**. The feed goes out on the viewfinder and in the player; the
+The **Output** tab in Settings hands the graded picture to other apps, so a call, a
+stream or a recorder can take the Pocket as its webcam. It is 1280 × 720, letterboxed
+as the window is, without the chrome, at up to 30 frames a second; the **Camera
+picture** row sends it **Clean** (the LUT stays, zebra / peaking / false colour come
+off) or **As shown**. The feed goes out on the viewfinder and in the player; the
 library sends nothing. The **Camera output** readout says where the frames are going,
 or why they are not.
+
+The tab opens with the platform's **camera component**: what it is here, whether it is
+installed, and an **Install** / **Remove** row that does the platform's own thing and
+asks the platform's own way — a password prompt through `pkexec` on Linux, the
+administrator prompt for `regsvr32` on Windows, the OpenPocketCine Camera app on macOS.
+The check runs when the viewfinder starts and again after every action, off the window
+thread; the **Detail** readout says where the component is, what installing would do,
+or why it could not. Picking **Camera device** before the component is in puts a notice
+on the top bar pointing here. Once an install lands, the camera restarts on its own.
+With the **Stream** on, **Open in the browser** shows the page any browser renders it
+on.
 
 - **Camera device** is the platform's own camera, so every app that opens a webcam sees
   "OpenPocketCine" without OBS in between:
   - **Linux** writes to a `v4l2loopback` device, found by asking every `/dev/video*`
-    for its driver. Load the module once:
+    for its driver. **Install** loads the module with `exclusive_caps=1` and the
+    OpenPocketCine label and keeps it across reboots (`/etc/modules-load.d` and
+    `/etc/modprobe.d`); without `pkexec` the tab shows the one line to run instead:
 
     ```sh
     sudo modprobe v4l2loopback exclusive_caps=1 card_label=OpenPocketCine
@@ -240,21 +253,20 @@ or why they are not.
     (`crates/opc-vcam-win`), a COM object the Windows Camera Frame Server loads into its
     own service; the viewfinder feeds it NV12 frames over the named pipe
     `\\.\pipe\OpenPocketCineVCam` (`opc_vcam::wire`), and the source paces them out at
-    30 frames a second, black while nothing is coming. Register the DLL once, as
-    administrator, from the build folder:
-
-    ```
-    regsvr32 opc_vcam_win.dll
-    ```
-
-    Nothing is signed and nothing runs in the kernel. Windows 10 has no such framework;
-    use the stream there.
+    30 frames a second, black while nothing is coming. **Install** registers the DLL
+    that sits beside the viewfinder through an elevated `regsvr32` (the administrator
+    prompt is the consent); the tab reads the registration back from the machine hive
+    and says when the DLL is missing beside the executable. Nothing is signed and
+    nothing runs in the kernel. On Windows 10 the tab reports the component as not
+    available; use the stream there.
   - **macOS 13 or later** writes into the sink stream of the OpenPocketCine camera
     extension, a CoreMediaIO extension installed once from the OpenPocketCine Camera app
     (`Apps/Desktop/macos`, an XcodeGen project). The facade finds the device and its
     sink stream by name through CoreMediaIO and enqueues NV12 sample buffers
     (`opc_vcam_mac_*`); the extension hands the newest frame to every reader at 30
-    frames a second. The extension needs the system-extension entitlement, so the app
+    frames a second. **Install** opens the OpenPocketCine Camera app from
+    `/Applications`, where one button activates the extension; the tab says when the
+    app is not there. The extension needs the system-extension entitlement, so the app
     must be Developer ID signed by a team in the Apple Developer Program.
 - **Stream** serves MJPEG over HTTP on `127.0.0.1` (port 8890 in the settings file,
   `vcam_port`): `/stream` is a `multipart/x-mixed-replace` body that never ends,

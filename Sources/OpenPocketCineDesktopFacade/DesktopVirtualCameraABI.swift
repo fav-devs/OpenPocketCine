@@ -215,6 +215,12 @@ import OpenPocketViewCore
         store.replace(nil)
     }
 
+    /// 1 when the camera extension's device and sink stream are there, else 0.
+    @_cdecl("opc_vcam_mac_present")
+    func opc_vcam_mac_present() -> Int32 {
+        findSink() == nil ? 0 : 1
+    }
+
 #else
 
     @_cdecl("opc_vcam_mac_open")
@@ -225,5 +231,8 @@ import OpenPocketViewCore
 
     @_cdecl("opc_vcam_mac_close")
     func opc_vcam_mac_close() {}
+
+    @_cdecl("opc_vcam_mac_present")
+    func opc_vcam_mac_present() -> Int32 { 0 }
 
 #endif

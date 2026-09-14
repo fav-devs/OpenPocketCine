@@ -14,8 +14,8 @@ cd /d "C:\Users\itztr\OneDrive\Pictures\git\OpenPocketCine\Apps\Desktop"
 cargo clean -p opc-monitor -p opc-core-sys
 if errorlevel 1 exit /b 1
 
-echo Building opc-monitor...
-cargo build --bin opc-monitor
+echo Building opc-monitor and the virtual camera source...
+cargo build -p opc-monitor -p opc-vcam-win
 if errorlevel 1 exit /b 1
 
 echo Staging DLLs next to exe...
@@ -28,3 +28,4 @@ copy /Y "%SWIFT_RT%\*.dll" "%EXE_DIR%\"
 copy /Y "%SWIFT_TC%\mimalloc.dll" "%EXE_DIR%\"
 copy /Y "%SWIFT_TC%\mimalloc-redirect.dll" "%EXE_DIR%\"
 echo Done. Run: Apps\Desktop\target\debug\opc-monitor.exe
+echo The camera source opc_vcam_win.dll is beside it; Settings ^> Output ^> Install registers it.

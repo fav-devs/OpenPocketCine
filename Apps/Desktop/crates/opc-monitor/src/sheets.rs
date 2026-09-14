@@ -39,12 +39,14 @@ pub enum Slot {
 }
 
 /// The settings tabs, in order: the camera's own, then the operator's setup.
-pub const SETTINGS_TABS: [&str; 8] = [
-    "CAMERA", "AUDIO", "ASSIST", "LINK", "CONTROLS", "DISPLAY", "STORAGE", "SYSTEM",
+pub const SETTINGS_TABS: [&str; 9] = [
+    "CAMERA", "AUDIO", "ASSIST", "LINK", "CONTROLS", "DISPLAY", "STORAGE", "OUTPUT", "SYSTEM",
 ];
 /// Which tab is which, for the shell.
 pub const TAB_AUDIO: usize = 1;
 pub const TAB_STORAGE: usize = 6;
+pub const TAB_OUTPUT: usize = 7;
+pub const TAB_SYSTEM: usize = 8;
 
 /// Settings the body does not report back, kept as last commanded, plus the desktop's
 /// own overlays.
@@ -152,6 +154,8 @@ pub struct SetupInfo {
     pub chrome_visible: bool,
     /// What the virtual camera is doing: "Off", where it writes, or why it cannot.
     pub vcam: String,
+    /// The platform camera component: installed, not, or being worked on.
+    pub component: opc_vcam::ComponentReport,
 }
 
 impl Prefs {
@@ -264,6 +268,11 @@ pub enum Pick {
     Vcam(u8),
     /// The camera carries the clean picture (true) or the assists too.
     VcamClean(bool),
+    /// Put the platform camera component in, or take it out.
+    ComponentInstall,
+    ComponentRemove,
+    /// Show the stream's page in the browser.
+    OpenStream,
     /// A chip that is shown but does nothing here yet.
     Nothing,
 }
@@ -952,6 +961,7 @@ fn settings(tab: usize, context: Context) -> Built {
         4 => controls_rows(context),
         5 => display_rows(context),
         6 => storage_rows(context),
+        7 => output_rows(context),
         _ => system_rows(context),
     };
     assemble("SETTINGS", &SETTINGS_TABS, tab, rows)
@@ -1195,16 +1205,25 @@ fn storage_rows(context: Context) -> Vec<RowBuilder> {
     ]
 }
 
-fn system_rows(context: Context) -> Vec<RowBuilder> {
+/// The viewfinder as a camera: the platform component and the camera on it.
+fn output_rows(context: Context) -> Vec<RowBuilder> {
+    use opc_vcam::ComponentState;
     let prefs = context.prefs;
-    let stream = format!(
-        "http://127.0.0.1:{}/stream · OBS: Media Source, Local File off, format mjpeg, then Start Virtual Camera",
-        prefs.vcam_port
-    );
+    let component = &context.setup.component;
+    let stream = format!("http://127.0.0.1:{}/stream", prefs.vcam_port);
+    let actions = RowBuilder::new("Component")
+        .option("Install", false, Pick::ComponentInstall)
+        .option("Remove", false, Pick::ComponentRemove)
+        .enabled(
+            component.state != ComponentState::Busy
+                && component.state != ComponentState::Unsupported
+                && (component.can_install || component.can_remove),
+        );
     vec![
-        readout("App version", env!("CARGO_PKG_VERSION")),
-        readout("Protocol", "OpenPocketViewCore through the desktop facade"),
-        readout("Renderer", &context.setup.renderer),
+        readout("Platform", &component.platform),
+        readout("Camera component", component.state.label()),
+        readout("Detail", &component.detail),
+        actions,
         RowBuilder::new("Virtual camera")
             .option("Off", prefs.vcam == 0, Pick::Vcam(0))
             .option("Camera device", prefs.vcam == 1, Pick::Vcam(1))
@@ -1220,7 +1239,22 @@ fn system_rows(context: Context) -> Vec<RowBuilder> {
                 &context.setup.vcam
             },
         ),
-        RowBuilder::placeholder("Stream", &stream),
+        RowBuilder::new("Stream")
+            .option("Open in the browser", false, Pick::OpenStream)
+            .enabled(prefs.vcam == 2),
+        RowBuilder::placeholder("Stream address", &stream),
+        RowBuilder::placeholder(
+            "OBS",
+            "Media Source · Local File off · format mjpeg · then Start Virtual Camera",
+        ),
+    ]
+}
+
+fn system_rows(context: Context) -> Vec<RowBuilder> {
+    vec![
+        readout("App version", env!("CARGO_PKG_VERSION")),
+        readout("Protocol", "OpenPocketViewCore through the desktop facade"),
+        readout("Renderer", &context.setup.renderer),
         RowBuilder::new("Diagnostics").option("Write a report", false, Pick::Diagnostics),
         RowBuilder::placeholder("Source", "github.com/fav-devs/OpenPocketCine"),
         RowBuilder::placeholder("Licenses", "Apache 2.0 · THIRD-PARTY-NOTICES.md"),
@@ -1338,7 +1372,7 @@ mod tests {
                 .map(|r| r.title.clone())
                 .collect()
         };
-        assert_eq!(SETTINGS_TABS.len(), 8);
+        assert_eq!(SETTINGS_TABS.len(), 9);
         assert_eq!(
             titles(3),
             [
@@ -1365,16 +1399,47 @@ mod tests {
         );
         let storage = build(SheetKind::Settings, 6, context(&status));
         assert_eq!(storage.pick(1, 0), Some(&Pick::ClearCache));
-        let system = build(SheetKind::Settings, 7, context(&status));
-        assert_eq!(system.pick(3, 2), Some(&Pick::Vcam(2)));
-        assert_eq!(system.pick(4, 0), Some(&Pick::VcamClean(false)));
+        let output = build(SheetKind::Settings, TAB_OUTPUT, context(&status));
         assert_eq!(
-            system.sheet.rows[3].selected,
+            titles(TAB_OUTPUT),
+            [
+                "Platform",
+                "Camera component",
+                "Detail",
+                "Component",
+                "Virtual camera",
+                "Camera picture",
+                "Camera output",
+                "Stream",
+                "Stream address",
+                "OBS",
+            ]
+        );
+        assert_eq!(
+            output.sheet.rows[1].options[0], "Checking…",
+            "nothing probed yet"
+        );
+        assert!(
+            !output.sheet.rows[3].enabled,
+            "no action before the probe answers"
+        );
+        assert_eq!(output.pick(3, 0), Some(&Pick::ComponentInstall));
+        assert_eq!(output.pick(3, 1), Some(&Pick::ComponentRemove));
+        assert_eq!(output.pick(4, 2), Some(&Pick::Vcam(2)));
+        assert_eq!(output.pick(5, 0), Some(&Pick::VcamClean(false)));
+        assert_eq!(
+            output.sheet.rows[4].selected,
             Some(0),
             "the camera is off by default"
         );
-        assert_eq!(system.sheet.rows[4].selected, Some(1), "and clean when on");
-        assert_eq!(system.pick(7, 0), Some(&Pick::Diagnostics));
+        assert_eq!(output.sheet.rows[5].selected, Some(1), "and clean when on");
+        assert!(
+            !output.sheet.rows[7].enabled,
+            "the browser link needs the stream on"
+        );
+        assert_eq!(output.pick(7, 0), Some(&Pick::OpenStream));
+        let system = build(SheetKind::Settings, TAB_SYSTEM, context(&status));
+        assert_eq!(system.pick(3, 0), Some(&Pick::Diagnostics));
     }
 
     static PROGRAM: std::sync::OnceLock<Program> = std::sync::OnceLock::new();

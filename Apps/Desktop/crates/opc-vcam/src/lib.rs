@@ -22,16 +22,18 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
 mod convert;
+pub mod install;
 #[cfg(target_os = "macos")]
 pub mod mac;
 mod stream;
 #[cfg(target_os = "linux")]
-mod v4l2;
+pub(crate) mod v4l2;
 #[cfg(windows)]
 pub mod win;
 pub mod wire;
 
 pub use convert::rgba_to_yuyv;
+pub use install::{ComponentReport, ComponentState};
 pub use stream::{StreamServer, DEFAULT_PORT};
 
 /// The picture the camera carries: 1280 × 720, whatever the window is.

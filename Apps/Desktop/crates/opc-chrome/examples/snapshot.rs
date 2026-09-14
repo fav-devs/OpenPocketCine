@@ -80,6 +80,7 @@ fn main() {
         ("wide", Phase::Live, false, (1600, 720)),
         ("sheet", Phase::Live, false, (1280, 720)),
         ("settings", Phase::Live, false, (1280, 720)),
+        ("output", Phase::Live, false, (1280, 720)),
         ("assists", Phase::Live, false, (1280, 720)),
         ("library", Phase::Live, false, (1280, 720)),
         ("player", Phase::Live, false, (1280, 720)),
@@ -341,7 +342,7 @@ fn main() {
                 conform_on: true,
                 conform_available: true,
             }),
-            sheet: (name == "sheet" || name == "settings").then(|| {
+            sheet: (name == "sheet" || name == "settings" || name == "output").then(|| {
                 let row = |title: &str, options: &[&str], selected: Option<usize>, enabled| {
                     SheetRowState {
                         title: title.into(),
@@ -351,16 +352,58 @@ fn main() {
                         lit: Vec::new(),
                     }
                 };
+                let tabs = || {
+                    [
+                        "CAMERA", "AUDIO", "ASSIST", "LINK", "CONTROLS", "DISPLAY", "STORAGE",
+                        "OUTPUT", "SYSTEM",
+                    ]
+                    .into_iter()
+                    .map(String::from)
+                    .collect()
+                };
+                if name == "output" {
+                    return SheetState {
+                        title: "SETTINGS".into(),
+                        tabs: tabs(),
+                        tab: 7,
+                        rows: vec![
+                            row("Platform", &["Linux · v4l2loopback"], None, true),
+                            row("Camera component", &["Installed"], None, true),
+                            row("Detail", &["/dev/video10 · module loaded"], None, true),
+                            row("Component", &["Install", "Remove"], None, true),
+                            row(
+                                "Virtual camera",
+                                &["Off", "Camera device", "Stream"],
+                                Some(1),
+                                true,
+                            ),
+                            row("Camera picture", &["As shown", "Clean"], Some(1), true),
+                            row(
+                                "Camera output",
+                                &["Camera · /dev/video10 · 1280×720 · 412 frames"],
+                                None,
+                                true,
+                            ),
+                            row("Stream", &["Open in the browser"], None, false),
+                            row(
+                                "Stream address",
+                                &["http://127.0.0.1:8890/stream"],
+                                None,
+                                false,
+                            ),
+                            row(
+                                "OBS",
+                                &["Media Source · Local File off · format mjpeg · then Start Virtual Camera"],
+                                None,
+                                false,
+                            ),
+                        ],
+                    };
+                }
                 if name == "settings" {
                     return SheetState {
                         title: "SETTINGS".into(),
-                        tabs: [
-                            "CAMERA", "AUDIO", "ASSIST", "LINK", "CONTROLS", "DISPLAY", "STORAGE",
-                            "SYSTEM",
-                        ]
-                        .into_iter()
-                        .map(String::from)
-                        .collect(),
+                        tabs: tabs(),
                         tab: 0,
                         rows: vec![
                             row("Focus", &["Single", "Continuous"], Some(1), true),

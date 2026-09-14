@@ -1569,3 +1569,53 @@ fn the_system_tab_picks_the_virtual_camera_and_what_it_carries() {
         "an unknown mode clamps to the stream, never off by surprise"
     );
 }
+
+#[test]
+fn the_output_tab_installs_the_component_and_says_when_the_camera_needs_it() {
+    use opc_monitor::sheets::Pick;
+    use opc_vcam::{ComponentReport, ComponentState};
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    // Before the window has looked, nothing is known.
+    assert_eq!(shell.setup().component.state, ComponentState::Unknown);
+    shell.set_component(ComponentReport {
+        platform: "Linux · v4l2loopback".into(),
+        state: ComponentState::NotInstalled,
+        detail: "Install loads the module".into(),
+        can_install: true,
+        can_remove: false,
+    });
+    // Asking for the camera device without the component says where to go.
+    shell.pick_for_test(Pick::Vcam(1));
+    assert!(shell.notice(0.0).contains("NOT INSTALLED"));
+    // Install goes to the window and the tab shows it working meanwhile.
+    assert_eq!(
+        shell.pick_for_test(Pick::ComponentInstall),
+        [Intent::ComponentInstall]
+    );
+    assert_eq!(shell.setup().component.state, ComponentState::Busy);
+    assert_eq!(shell.setup().component.detail, "Installing…");
+    // The window's answer replaces it.
+    shell.set_component(ComponentReport {
+        platform: "Linux · v4l2loopback".into(),
+        state: ComponentState::Installed,
+        detail: "/dev/video10 · module loaded".into(),
+        can_install: false,
+        can_remove: true,
+    });
+    assert_eq!(shell.setup().component.state, ComponentState::Installed);
+    assert_eq!(
+        shell.pick_for_test(Pick::ComponentRemove),
+        [Intent::ComponentRemove]
+    );
+    // The stream's page opens on the port the settings carry.
+    shell.pick_for_test(Pick::Vcam(2));
+    assert_eq!(
+        shell.pick_for_test(Pick::OpenStream),
+        [Intent::OpenUrl(format!(
+            "http://127.0.0.1:{}/",
+            opc_vcam::DEFAULT_PORT
+        ))]
+    );
+    assert!(shell.diagnostics_text(1.0).contains("camera component"));
+}

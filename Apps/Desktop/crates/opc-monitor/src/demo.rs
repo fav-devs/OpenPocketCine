@@ -179,7 +179,10 @@ impl Demo {
                 | Intent::Still
                 | Intent::Media(_)
                 | Intent::Reconnect
-                | Intent::Diagnostics => {}
+                | Intent::Diagnostics
+                | Intent::ComponentInstall
+                | Intent::ComponentRemove
+                | Intent::OpenUrl(_) => {}
             }
         }
     }
