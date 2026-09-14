@@ -15,6 +15,7 @@ use crate::assists::{
 };
 use crate::luts::{self, LutChoice, LutMenu};
 use crate::moves::{Program, Waypoint};
+use crate::scopes::{NdNotation, ParadeMode, ScopeOptions, WaveMode, LIGHTS_COMPENSATION};
 use crate::shell::{GimbalMode, Toggles};
 
 /// Which sheet is open.
@@ -132,6 +133,15 @@ pub enum Pick {
     /// Wind noise reduction and directional audio: the body's DSP blob, patched.
     Wind(bool),
     Directional(u8),
+    /// The scopes' options.
+    WaveMode(WaveMode),
+    /// Which waveform guide (0 clip, 1 crush, 2 middle) and whether it shows.
+    WaveGuide(usize, bool),
+    ParadeMode(ParadeMode),
+    VectorGain(u32),
+    Brightness(u32),
+    LightsCompensation(u32),
+    NdNotation(NdNotation),
     /// A chip that is shown but does nothing here yet.
     Nothing,
 }
@@ -154,6 +164,7 @@ pub struct Context<'a> {
     pub assists: AssistOptions,
     /// Where the zebra chips land on the feed, so they can read in 0–255.
     pub zebra_steps: ZebraSteps,
+    pub scopes: ScopeOptions,
 }
 
 /// A built sheet: what to draw, and what each chip means.
@@ -294,6 +305,19 @@ pub fn build(kind: SheetKind, tab: usize, context: Context) -> Built {
     }
 }
 
+/// The trace brightness chips the scopes share.
+fn brightness_row(current: u32) -> RowBuilder {
+    let mut row = RowBuilder::new("Brightness");
+    for level in [50, 100, 150, 200] {
+        row = row.option(
+            format!("{level}%"),
+            current == level,
+            Pick::Brightness(level),
+        );
+    }
+    row
+}
+
 /// Whether a tool is on, as its chip and its sheet's first row show it.
 pub fn tool_on(tool: AssistTool, toggles: Toggles) -> bool {
     match tool {
@@ -305,13 +329,13 @@ pub fn tool_on(tool: AssistTool, toggles: Toggles) -> bool {
         AssistTool::Grid => toggles.grid,
         AssistTool::Cross => toggles.cross,
         AssistTool::Mirror => toggles.mirror,
-        AssistTool::Wave
-        | AssistTool::Parade
-        | AssistTool::Histo
-        | AssistTool::Vector
-        | AssistTool::Lights
-        | AssistTool::Nd
-        | AssistTool::Audio => false,
+        AssistTool::Wave => toggles.wave,
+        AssistTool::Parade => toggles.parade,
+        AssistTool::Histo => toggles.histo,
+        AssistTool::Vector => toggles.vector,
+        AssistTool::Lights => toggles.lights,
+        AssistTool::Nd => toggles.nd,
+        AssistTool::Audio => toggles.audio,
     }
 }
 
@@ -472,13 +496,91 @@ fn assist(tool: AssistTool, context: Context) -> Built {
         AssistTool::Cross | AssistTool::Mirror | AssistTool::Audio => {
             rows.push(RowBuilder::placeholder("Help", tool.help()));
         }
-        AssistTool::Wave
-        | AssistTool::Parade
-        | AssistTool::Histo
-        | AssistTool::Vector
-        | AssistTool::Lights
-        | AssistTool::Nd => {
-            rows.push(RowBuilder::placeholder("Scope", "Not on the desktop yet"));
+        AssistTool::Wave => {
+            let scopes = context.scopes;
+            rows.push(
+                RowBuilder::new("Mode")
+                    .option(
+                        "Luma",
+                        scopes.wave == WaveMode::Luma,
+                        Pick::WaveMode(WaveMode::Luma),
+                    )
+                    .option(
+                        "RGB",
+                        scopes.wave == WaveMode::Rgb,
+                        Pick::WaveMode(WaveMode::Rgb),
+                    ),
+            );
+            let (clip, crush, middle) = scopes.wave_guides;
+            rows.push(
+                RowBuilder::new("Guides")
+                    .option_lit("Clip", clip, Pick::WaveGuide(0, !clip))
+                    .option_lit("Crush", crush, Pick::WaveGuide(1, !crush))
+                    .option_lit("Middle grey", middle, Pick::WaveGuide(2, !middle)),
+            );
+            rows.push(brightness_row(scopes.brightness));
+        }
+        AssistTool::Parade => {
+            let scopes = context.scopes;
+            rows.push(
+                RowBuilder::new("Mode")
+                    .option(
+                        "RGB",
+                        scopes.parade == ParadeMode::Rgb,
+                        Pick::ParadeMode(ParadeMode::Rgb),
+                    )
+                    .option(
+                        "YRGB",
+                        scopes.parade == ParadeMode::Yrgb,
+                        Pick::ParadeMode(ParadeMode::Yrgb),
+                    ),
+            );
+            rows.push(brightness_row(scopes.brightness));
+        }
+        AssistTool::Vector => {
+            let scopes = context.scopes;
+            let mut zoom = RowBuilder::new("Trace zoom");
+            for gain in [1, 2, 4] {
+                zoom = zoom.option(
+                    format!("{gain}x"),
+                    (scopes.vector_gain - gain as f32).abs() < 0.01,
+                    Pick::VectorGain(gain),
+                );
+            }
+            rows.push(zoom);
+            rows.push(brightness_row(scopes.brightness));
+        }
+        AssistTool::Histo => {
+            rows.push(RowBuilder::placeholder(
+                "Help",
+                "RGB fills and the luma line on the waveform's axis; the clip zone at 95",
+            ));
+        }
+        AssistTool::Lights => {
+            let mut compensation = RowBuilder::new("Crush/Clip compensation");
+            for (index, (stops, label)) in LIGHTS_COMPENSATION.iter().enumerate() {
+                compensation = compensation.option(
+                    *label,
+                    (context.scopes.lights_compensation - stops).abs() < 1e-9,
+                    Pick::LightsCompensation(index as u32),
+                );
+            }
+            rows.push(compensation);
+        }
+        AssistTool::Nd => {
+            let mut units = RowBuilder::new("Units");
+            for notation in NdNotation::ALL {
+                units = units.option(
+                    notation.label(),
+                    context.scopes.nd_notation == notation,
+                    Pick::NdNotation(notation),
+                );
+            }
+            rows.push(units);
+            rows.push(RowBuilder::placeholder(
+                "Help",
+                "Meters the picture against middle grey and suggests a screw-on ND",
+            ));
         }
     }
     assemble(&tool.title().to_uppercase(), &[], 0, rows)
@@ -948,10 +1050,28 @@ mod tests {
             move_running: false,
             assists: AssistOptions::default(),
             zebra_steps: ZebraSteps::default(),
+            scopes: ScopeOptions::default(),
         }
     }
 
     static PROGRAM: std::sync::OnceLock<Program> = std::sync::OnceLock::new();
+
+    #[test]
+    fn the_waveform_sheet_offers_the_phones_options() {
+        let status = Status::default();
+        let built = build(SheetKind::Assist(AssistTool::Wave), 0, context(&status));
+        let titles: Vec<&str> = built.sheet.rows.iter().map(|r| r.title.as_str()).collect();
+        assert_eq!(titles, ["Waveform", "Mode", "Guides", "Brightness"]);
+        assert_eq!(built.pick(1, 0), Some(&Pick::WaveMode(WaveMode::Luma)));
+        assert_eq!(built.sheet.rows[2].lit, vec![true, true, true]);
+        assert_eq!(built.pick(2, 1), Some(&Pick::WaveGuide(1, false)));
+        assert_eq!(built.pick(3, 1), Some(&Pick::Brightness(100)));
+        let built = build(SheetKind::Assist(AssistTool::Nd), 0, context(&status));
+        assert_eq!(
+            built.pick(1, 2),
+            Some(&Pick::NdNotation(NdNotation::Density))
+        );
+    }
 
     #[test]
     fn wind_and_directional_wait_for_the_dsp_blob_and_then_patch_it() {

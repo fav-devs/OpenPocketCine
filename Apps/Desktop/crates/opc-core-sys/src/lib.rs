@@ -346,6 +346,11 @@ pub struct OpcCameraStatus {
     pub directional_audio: i32,
     pub audio_dsp_blob_count: i32,
     pub audio_dsp_blob: [i32; OPC_STATUS_LIST_CAP],
+    pub audio_meters_count: i32,
+    pub audio_left_tenth_db: i32,
+    pub audio_right_tenth_db: i32,
+    pub audio_left_peak_tenth_db: i32,
+    pub audio_right_peak_tenth_db: i32,
 }
 
 impl Default for OpcCameraStatus {
@@ -598,6 +603,29 @@ extern "C" {
     pub fn opc_tracking_poll(payload: *const u8, count: usize, out_box: *mut f32) -> i32;
     pub fn opc_model_supports_tap_focus(model_id: i32) -> i32;
 
+    /// The scopes' display scale and readings, from the core's colour science.
+    pub fn opc_scope_level_table(color_mode: i32, iso: i32, out: *mut f32, capacity: usize) -> i32;
+    pub fn opc_scope_grey_ire(color_mode: i32, iso: i32) -> f64;
+    pub fn opc_scope_traffic_lights(
+        red: *const i32,
+        green: *const i32,
+        blue: *const i32,
+        luma: *const i32,
+        color_mode: i32,
+        iso: i32,
+        threshold: f64,
+        previous: *const f32,
+        out: *mut f32,
+    ) -> i32;
+    pub fn opc_scope_nd(
+        color_mode: i32,
+        iso: i32,
+        luma: *const i32,
+        out: *mut u8,
+        capacity: usize,
+    ) -> i64;
+    pub fn opc_audio_meter_floor_db() -> f64;
+
     /// The scale's legend, one `label<TAB>r<TAB>g<TAB>b` line per zone.
     pub fn opc_false_color_legend(
         scale: i32,
@@ -838,7 +866,8 @@ mod layout {
     #[test]
     fn the_status_record_matches_the_header_file() {
         assert_eq!(OPC_STATUS_LIST_CAP, 32);
-        assert_eq!(size_of::<OpcCameraStatus>(), 924);
+        assert_eq!(size_of::<OpcCameraStatus>(), 944);
+        assert_eq!(offset_of!(OpcCameraStatus, audio_meters_count), 924);
         assert_eq!(offset_of!(OpcCameraStatus, wind_nr), 784);
         assert_eq!(offset_of!(OpcCameraStatus, gimbal_yaw_tenth), 128);
         assert_eq!(offset_of!(OpcCameraStatus, available_shutter), 144);

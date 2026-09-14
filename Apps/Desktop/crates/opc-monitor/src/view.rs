@@ -64,6 +64,8 @@ struct View {
     pointer: (f64, f64),
     pointer_control: bool,
     started: Instant,
+    /// When the plates last read the picture.
+    last_scope_at: f64,
     media: MediaDriver,
     /// A name for the cache folder: the body's model id, or "camera".
     camera_id: String,
@@ -277,6 +279,23 @@ impl View {
             while let Ok(Some(picture)) = decoder.receive() {
                 self.latest = Some(OwnedPicture::copy_from(&picture));
             }
+        }
+        self.sample_scopes();
+    }
+
+    /// Reads the picture for the plates at about 15 Hz while any scope is on.
+    fn sample_scopes(&mut self) {
+        if !self.shell.scopes_wanted() {
+            return;
+        }
+        let now = self.now();
+        if now - self.last_scope_at < 1.0 / 15.0 {
+            return;
+        }
+        if let Some(latest) = self.latest.as_ref() {
+            self.shell
+                .set_scope_samples(opc_monitor::scopes::ScopeSamples::read(latest));
+            self.last_scope_at = now;
         }
     }
 
@@ -590,6 +609,7 @@ pub fn run(options: Options) -> Result<(), String> {
             media.set_body(options.model_id);
             media
         },
+        last_scope_at: f64::NEG_INFINITY,
         camera_id: options
             .model_id
             .map(|id| format!("model-{id:04x}"))

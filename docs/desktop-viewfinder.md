@@ -77,9 +77,18 @@ Three sheets open over the picture and close on `Esc`, the `×`, or a tap outsid
   thresholds land on the feed's own axis per colour mode. **Grid** draws thirds, the
   phi grid and dotted diagonals in any mix; **Guides** draws the Film or Social
   aspect frames (several at once) with an optional mask outside them; **Cross** is
-  the centre crosshair. The scopes (waveform, parade, histogram, vectorscope,
-  traffic lights, ND, audio) are drawn greyed until the desktop reads the picture
-  for them.
+  the centre crosshair. The **scopes** are movable plates over the picture, sized as
+  on the phones, read from the decoded picture on the CPU at about 15 Hz: **WAVE**
+  (luma or RGB overlay, with the clip / crush / middle-grey guides), **PARADE** (RGB
+  or YRGB lanes), **HISTO** (RGB fills and the luma line on the waveform's axis,
+  the clip zone at 95), **VECTOR** (chroma trace on the 75% graticule with the 123°
+  skin line; trace zoom 1× / 2× / 4×), **LIGHTS** (three lamps, clip and crush per
+  channel, with the crush / clip compensation), **ND** (the suggested screw-on
+  filter in stops, factor or density) and **AUDIO** (the body's own meters with
+  peak hold). The axis each plate plots on — where 0, 100 and 18% grey fall for the
+  body's colour mode and ISO — is the core's `ScopeDisplayScale`, and the lights and
+  the ND reading are the core's from the histograms; the desktop only samples and
+  draws. Drag a plate anywhere to park it somewhere else.
 
 A chip lights up when the camera confirms the value, not when it is tapped; a setting
 the body never reports (audio channel, field of view, gimbal speed) is kept as last

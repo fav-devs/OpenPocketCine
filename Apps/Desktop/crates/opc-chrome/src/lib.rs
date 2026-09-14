@@ -31,7 +31,7 @@ mod generated {
 }
 use generated::{
     AssistChipView, GuideRect, HudOverlay, LegendChip as SlintLegendChip, MediaCell,
-    MediaSelection, PlayerView as SlintPlayerView, SheetRow,
+    MediaSelection, PlateView, PlayerView as SlintPlayerView, SheetRow,
 };
 use slint::ComponentHandle;
 
@@ -180,6 +180,13 @@ pub enum ChromeIntent {
     AssistTap(usize),
     /// A toolbar chip long-pressed or right-clicked: open its options.
     AssistConfigure(usize),
+    /// A scope plate dragged to a new top-left, in window pixels; `tool` indexes the
+    /// toolbar.
+    PlateMoved {
+        tool: usize,
+        x: f32,
+        y: f32,
+    },
     // The library.
     LibraryBack,
     LibraryTab(usize),
@@ -325,6 +332,37 @@ pub struct AssistChip {
     pub group: usize,
 }
 
+/// What a scope plate shows.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlateKind {
+    /// A rasterised plate the shell handed over under the plate's name.
+    Image,
+    /// The ND chip: one line of text.
+    Text(String),
+    /// The audio meters: bar and peak per channel, 0…1 of the scale.
+    Audio {
+        left: f32,
+        right: f32,
+        left_peak: f32,
+        right_peak: f32,
+    },
+}
+
+/// A movable plate over the picture.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlateState {
+    /// Index into the assist toolbar, so a drag names its tool.
+    pub tool_index: usize,
+    /// The key the image was handed over under.
+    pub name: String,
+    pub title: String,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub kind: PlateKind,
+}
+
 /// One zone of the false-colour key.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LegendBand {
@@ -440,6 +478,8 @@ pub struct ChromeState<'a> {
     pub overlays: Overlays,
     /// The assist toolbar's chips while it is open; `None` keeps it hidden.
     pub assist_bar: Option<Vec<AssistChip>>,
+    /// The scope plates over the picture.
+    pub plates: Vec<PlateState>,
     /// A programmed move's readout for the top bar, or empty.
     pub move_text: String,
     /// The open sheet, if any.
@@ -467,6 +507,10 @@ pub struct Chrome {
     intents: Rc<RefCell<Vec<ChromeIntent>>>,
     /// Thumbnails by camera path, built once and reused across redraws.
     thumbs: HashMap<String, Image>,
+    /// Rasterised scope plates, by the name their state carries.
+    plates: HashMap<String, Image>,
+    /// Where the plates were last drawn, so a press on one is a drag, not a box.
+    plate_rects: RefCell<Vec<(f64, f64, f64, f64)>>,
     /// Filmstrip frames by camera path.
     strips: HashMap<String, Vec<Image>>,
 }
@@ -593,6 +637,18 @@ impl Chrome {
         simple!(on_assist_bar_tapped, ChromeIntent::AssistBarToggle);
         {
             let q = intents.clone();
+            component.on_plate_moved(move |tool, x, y| {
+                if tool >= 0 {
+                    q.borrow_mut().push(ChromeIntent::PlateMoved {
+                        tool: tool as usize,
+                        x,
+                        y,
+                    });
+                }
+            });
+        }
+        {
+            let q = intents.clone();
             component.on_assist_tapped(move |i| {
                 if i >= 0 {
                     q.borrow_mut().push(ChromeIntent::AssistTap(i as usize));
@@ -644,6 +700,8 @@ impl Chrome {
             size: (0, 0),
             intents,
             thumbs: HashMap::new(),
+            plates: HashMap::new(),
+            plate_rects: RefCell::new(Vec::new()),
             strips: HashMap::new(),
         })
     }
@@ -701,6 +759,20 @@ impl Chrome {
         self.thumbs.contains_key(path)
     }
 
+    /// A rasterised scope plate, under the name its [`PlateState`] carries.
+    pub fn set_plate(&mut self, name: &str, width: u32, height: u32, rgba: &[u8]) {
+        if width == 0 || height == 0 || rgba.len() < (width * height * 4) as usize {
+            return;
+        }
+        let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+            &rgba[..(width * height * 4) as usize],
+            width,
+            height,
+        );
+        self.plates
+            .insert(name.to_string(), Image::from_rgba8(buffer));
+    }
+
     /// The filmstrip for a clip: frames across it, each tightly packed RGBA.
     pub fn set_strip(&mut self, path: &str, frames: &[(u32, u32, Vec<u8>)]) {
         let images = frames
@@ -748,6 +820,15 @@ impl Chrome {
         let fit_w = f64::from(c.get_fit_width());
         let dial_x = fit_x + (fit_w - ZOOM_DIAL_W) / 2.0;
         if y <= TOP_BAR_H + bar + ZOOM_DIAL_H && (dial_x..=dial_x + ZOOM_DIAL_W).contains(&x) {
+            return true;
+        }
+        // A plate is dragged, never drawn on.
+        if self
+            .plate_rects
+            .borrow()
+            .iter()
+            .any(|(px, py, pw, ph)| x >= *px && x <= px + pw && y >= *py && y <= py + ph)
+        {
             return true;
         }
         // Side columns are read-only, but a press there must not start a tracking box.
@@ -882,6 +963,52 @@ impl Chrome {
             }
         }
         c.set_move_text(state.move_text.clone().into());
+        let plates: Vec<PlateView> = state
+            .plates
+            .iter()
+            .map(|plate| {
+                let (kind, text, meters) = match &plate.kind {
+                    PlateKind::Image => (0, String::new(), [0.0; 4]),
+                    PlateKind::Text(text) => (1, text.clone(), [0.0; 4]),
+                    PlateKind::Audio {
+                        left,
+                        right,
+                        left_peak,
+                        right_peak,
+                    } => (2, String::new(), [*left, *right, *left_peak, *right_peak]),
+                };
+                let image = self.plates.get(&plate.name).cloned();
+                PlateView {
+                    tool: plate.tool_index as i32,
+                    title: plate.title.clone().into(),
+                    x: plate.x,
+                    y: plate.y,
+                    w: plate.width,
+                    h: plate.height,
+                    has_image: image.is_some(),
+                    image: image.unwrap_or_default(),
+                    kind,
+                    text: text.into(),
+                    left: meters[0],
+                    right: meters[1],
+                    left_peak: meters[2],
+                    right_peak: meters[3],
+                }
+            })
+            .collect();
+        *self.plate_rects.borrow_mut() = state
+            .plates
+            .iter()
+            .map(|plate| {
+                (
+                    f64::from(plate.x),
+                    f64::from(plate.y),
+                    f64::from(plate.width),
+                    f64::from(plate.height),
+                )
+            })
+            .collect();
+        c.set_plates(ModelRc::new(VecModel::from(plates)));
         c.set_screen(state.screen.index());
 
         if let Some(library) = &state.library {

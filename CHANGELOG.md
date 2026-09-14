@@ -26,7 +26,10 @@ All notable changes to this project are documented here. The format is based on
   click on the picture is Mimo's tap-to-focus burst, a drag is a tracking
   box polled until the body locks or lets go, and the Camera tab has the
   focus-track mode. Wind noise reduction and directional audio read the
-  body's DSP blob and send it back patched. Unqualified on a physical body.
+  body's DSP blob and send it back patched. The scopes — waveform, parade,
+  histogram, vectorscope, traffic lights, the ND chip and the audio meters —
+  are movable plates sampled from the picture on the CPU and plotted on the
+  core's axis. Unqualified on a physical body.
 
 - Experimental AirPods head tracking now maps shared-forward head direction to
   native gimbal angles with a 100 ms command horizon. Stale measurements,

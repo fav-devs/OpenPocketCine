@@ -394,6 +394,14 @@ typedef struct {
     int32_t directional_audio;
     int32_t audio_dsp_blob_count;
     int32_t audio_dsp_blob[OPC_STATUS_LIST_CAP];
+    /// `cam_audio_status_v2` as the core meters it: level and peak per channel in
+    /// tenths of a dBFS (negative; the floor is `opc_audio_meter_floor_db`).
+    /// `audio_meters_count` is 0 until the body has pushed one.
+    int32_t audio_meters_count;
+    int32_t audio_left_tenth_db;
+    int32_t audio_right_tenth_db;
+    int32_t audio_left_peak_tenth_db;
+    int32_t audio_right_peak_tenth_db;
 } OpcCameraStatus;
 
 #endif

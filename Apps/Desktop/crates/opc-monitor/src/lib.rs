@@ -9,6 +9,7 @@ pub mod assists;
 pub mod library;
 pub mod luts;
 pub mod moves;
+pub mod scopes;
 pub mod sheets;
 pub mod shell;
 pub mod zoom;

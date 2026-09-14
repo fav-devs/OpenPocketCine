@@ -235,6 +235,51 @@ fn opening_the_audio_tab_reads_the_dsp_blob_once() {
 }
 
 #[test]
+fn a_scope_chip_puts_a_movable_plate_on_the_picture() {
+    use opc_monitor::scopes::ScopeSamples;
+    use opc_monitor::AssistTool;
+    let mut shell = framed();
+    shell.set_phase(opc_ui::Phase::Live);
+    assert!(!shell.scopes_wanted());
+    shell.press(Key::Char('a'), 0.0);
+    shell.chrome(0.0);
+    // WAVE is the fifth chip, in the second group.
+    let (x, y) = chip_centre(4, 1);
+    shell.control_down(x, y, 0.0);
+    shell.control_up(x, y, 0.0);
+    assert!(shell.tool_on(AssistTool::Wave));
+    assert!(shell.scopes_wanted(), "the window should start sampling");
+    shell.set_scope_samples(ScopeSamples::default());
+    shell.chrome(0.1);
+    let (px, py, pw, ph) = shell.plate_rect(AssistTool::Wave).expect("a plate");
+    assert_eq!((pw, ph), (250.0, 153.0), "the phones' waveform plate");
+    // Its default place is the bottom-left of the picture, above the bottom bar.
+    assert!(px >= 0.0 && py + ph <= 720.0 - 152.0);
+    // A press on the plate is a drag of the plate, not a tracking box.
+    assert!(shell.is_control(f64::from(px + pw / 2.0), f64::from(py + ph / 2.0)));
+    shell.control_down(f64::from(px + pw / 2.0), f64::from(py + ph / 2.0), 0.2);
+    shell.control_moved(
+        f64::from(px + pw / 2.0 + 90.0),
+        f64::from(py + ph / 2.0 - 60.0),
+    );
+    shell.control_up(
+        f64::from(px + pw / 2.0 + 90.0),
+        f64::from(py + ph / 2.0 - 60.0),
+        0.3,
+    );
+    let (nx, ny, _, _) = shell.plate_rect(AssistTool::Wave).expect("still there");
+    assert!(
+        (nx - (px + 90.0)).abs() < 2.0 && (ny - (py - 60.0)).abs() < 2.0,
+        "moved to ({nx}, {ny})"
+    );
+    // Off again: no plate, no sampling.
+    shell.control_down(x, y, 0.4);
+    shell.control_up(x, y, 0.4);
+    assert!(!shell.scopes_wanted());
+    assert_eq!(shell.plate_rect(AssistTool::Wave), None);
+}
+
+#[test]
 fn a_click_on_a_mirrored_picture_focuses_on_the_same_thing() {
     let mut shell = framed();
     shell.press(Key::Char('m'), 0.0);
@@ -1175,11 +1220,11 @@ fn a_shows_the_toolbar_and_a_chip_flips_its_tool() {
     assert!(shell.toggles().zebra);
     // The zoom dial moved down under the strip, and still counts as a control.
     assert!(shell.is_control(640.0, 56.0 + 44.0 + 30.0));
-    // A greyed scope chip does nothing.
+    // A scope chip flips its plate on, and sends nothing either.
     let (x, y) = chip_centre(4, 1);
     shell.control_down(x, y, 0.0);
-    shell.control_up(x, y, 0.0);
-    assert!(!shell.tool_on(AssistTool::Wave));
+    assert!(shell.control_up(x, y, 0.0).is_empty());
+    assert!(shell.tool_on(AssistTool::Wave));
     shell.press(Key::Char('a'), 0.0);
     assert!(!shell.assist_bar_open());
 }

@@ -22,6 +22,7 @@ bottom says what the body is set to, and the keyboard drives it.
 | Tracking | Mouse or one-finger drag, polled at 0.5 s until lock or idle, `X` to clear; a click is tap-to-focus (Mimo's four-write burst) | `opc-ui/tracking.rs`, `Shell::touch`, `opc-camera/tracking.rs` |
 | Frame rate, resolution | `[` `]` | `opc-ui/format.rs` |
 | Assists | `A` opens the phones' toolbar (long press for options); `Z` `P` `L` `M`, `H` hides the chrome | `opc-monitor/assists.rs`, `shell.rs`, `Toggles` |
+| Scopes | WAVE / PARADE / HISTO / VECTOR / LIGHTS / ND / AUDIO as movable plates, sampled on the CPU at 15 Hz | `opc-monitor/scopes.rs`, the core's `ScopeDisplayScale` through `opc_scope_*` |
 | Sheets | `Tab` settings, `E` exposure, the format chip | `opc-monitor/sheets.rs` |
 | SET mailbox | Latest-wins per opcode, 300 ms retransmit, 2 s settle, FORMAT pin | `opc-camera/mailbox.rs`, the core's `CameraSetMailbox` |
 | Library | `G`, then the grid; `Space` and `Esc` in the player | `opc-monitor/library.rs`, `media.rs`, `opc-media` |
@@ -179,10 +180,8 @@ thing that was drawn around rather than near it.
    its layout and would need to hand back the rectangles it drew so `Shell` can hit-test
    a tap before falling through to a tracking drag. Deliberately left until someone has
    held the laptop, because where the controls should sit is not guessable.
-3. **The scopes** (milestone 2d). False colour is in: the core bakes the paint and
-   weight lattices (`FalseColorCube`) and the facade hands them over as cube handles.
-   The scopes need the decoded picture read back on the CPU each frame and a place to
-   draw the plates.
+3. **Operator setup** (link, controls, display, storage, system tabs), then motion
+   control smoothing and pause / resume, and the playback extras.
 
 ## Building it
 

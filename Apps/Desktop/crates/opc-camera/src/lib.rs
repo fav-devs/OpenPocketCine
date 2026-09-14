@@ -32,7 +32,9 @@ pub use packed::DumlFrame;
 pub use pairing::{PairState, PairStep, Pairing, Reply, PAIR_DEADLINE, STEP_RETRY};
 pub use sequence::{Outgoing, Phase, Sequencer, ACK_INTERVAL, HANDSHAKE_DEADLINE, HANDSHAKE_RETRY};
 pub use session::{CameraSession, SessionError, SessionEvent};
-pub use status::{frame_rate_fps, resolution_name, Status, StatusDecoder, AUDIO_DSP_BLOB};
+pub use status::{
+    frame_rate_fps, resolution_name, AudioMeters, Status, StatusDecoder, AUDIO_DSP_BLOB,
+};
 pub use tracking::{supports_tap_focus, tracking_poll, TrackingPoll};
 pub use transport::{
     encode_frame, handshake, is_handshake, pair_approval_ack, pair_set_pin, pair_wake_access_point,

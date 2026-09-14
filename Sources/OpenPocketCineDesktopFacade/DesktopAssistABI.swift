@@ -7,7 +7,7 @@ import OpenPocketViewCore
 ///
 /// The Rust side owns no colour science. It passes the body's colour mode and ISO
 /// through and gets back what the phones would paint.
-private func assistTransfer(colorMode: Int32, iso: Int32) -> MonitorTransfer {
+func assistTransfer(colorMode: Int32, iso: Int32) -> MonitorTransfer {
     if (50...102_400).contains(Int(iso)) {
         ScopeExposureCeiling.setISO(Int(iso))
     }

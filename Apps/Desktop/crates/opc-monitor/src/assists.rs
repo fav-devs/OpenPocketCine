@@ -108,18 +108,16 @@ impl AssistTool {
         !matches!(self, Self::Audio | Self::Mirror)
     }
 
-    /// The scopes read the picture on the CPU and are not on the desktop yet. Their
-    /// chips are drawn greyed so the toolbar keeps the phones' shape.
+    /// Every tool is on the desktop. Kept so a chip can still be greyed by policy.
     pub fn available(self) -> bool {
-        !matches!(
+        true
+    }
+
+    /// The scopes: tools that read the picture rather than paint on it.
+    pub fn is_scope(self) -> bool {
+        matches!(
             self,
-            Self::Wave
-                | Self::Parade
-                | Self::Histo
-                | Self::Vector
-                | Self::Lights
-                | Self::Nd
-                | Self::Audio
+            Self::Wave | Self::Parade | Self::Histo | Self::Vector | Self::Lights | Self::Nd
         )
     }
 

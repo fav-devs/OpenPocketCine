@@ -9,7 +9,9 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use opc_camera::{Command, Status, TrackingPoll};
-use opc_chrome::{AssistChip, Chrome, ChromeIntent, ChromeState, Overlays, Screen};
+use opc_chrome::{
+    AssistChip, Chrome, ChromeIntent, ChromeState, Overlays, PlateKind, PlateState, Screen,
+};
 use opc_media::MediaFile;
 
 use crate::assists::{
@@ -18,6 +20,10 @@ use crate::assists::{
 use crate::library::{Library, MediaAction, Player};
 use crate::luts::{LutChoice, LutMenu};
 use crate::moves::{MoveEngine, Program, Waypoint};
+use crate::scopes::{
+    self, LightsReading, NdReading, Plate, ScopeOptions, ScopeSamples, ScopeScale,
+    LIGHTS_COMPENSATION,
+};
 use crate::sheets::{self, Pick, Prefs, SheetKind, Slot};
 use crate::zoom::{self, ZoomHop, ZoomNote, ZoomPolicy, ZoomRules, ZoomWrite};
 use opc_camera::SetOutcome;
@@ -139,6 +145,21 @@ pub struct Toggles {
     pub grid: bool,
     pub guides: bool,
     pub cross: bool,
+    /// The scopes.
+    pub wave: bool,
+    pub parade: bool,
+    pub histo: bool,
+    pub vector: bool,
+    pub lights: bool,
+    pub nd: bool,
+    pub audio: bool,
+}
+
+impl Toggles {
+    /// Whether any plate reads the picture, so the window samples it.
+    pub fn any_scope(self) -> bool {
+        self.wave || self.parade || self.histo || self.vector || self.lights || self.nd
+    }
 }
 
 impl Toggles {
@@ -228,6 +249,15 @@ pub struct Shell {
     notice: Option<(String, f64)>,
     /// Where the operator tapped to focus, as seen, and when the reticle goes away.
     focus_marker: Option<((f64, f64), f64)>,
+    /// The scopes: options, the last sample of the picture, the axis for the body's
+    /// colour mode, the readings, and where the operator parked each plate.
+    scope_options: ScopeOptions,
+    scope_samples: Option<ScopeSamples>,
+    scope_scale: Option<((i32, i32), ScopeScale)>,
+    lights: LightsReading,
+    nd: Option<NdReading>,
+    /// Plates dragged away from their default place, as window pixels.
+    plate_positions: Vec<(AssistTool, f32, f32)>,
     /// A box sent to the body and the polling that follows it.
     tracking: Option<TrackingState>,
     stick_sent_at: f64,
@@ -326,6 +356,12 @@ impl Shell {
             notice: None,
             focus_marker: None,
             tracking: None,
+            scope_options: ScopeOptions::default(),
+            scope_samples: None,
+            scope_scale: None,
+            lights: LightsReading::default(),
+            nd: None,
+            plate_positions: Vec::new(),
             stick_sent_at: f64::NEG_INFINITY,
             presented: VecDeque::new(),
             chrome: None,
@@ -496,7 +532,7 @@ impl Shell {
             | AssistTool::Vector
             | AssistTool::Lights
             | AssistTool::Nd
-            | AssistTool::Audio => {}
+            | AssistTool::Audio => self.flip_scope(tool),
         }
         self.refresh_assists();
         Vec::new()
@@ -903,7 +939,234 @@ impl Shell {
             move_running: self.move_running(),
             assists: self.assists,
             zebra_steps: self.zebra_steps(),
+            scopes: self.scope_options,
         }
+    }
+
+    /// A scope chip tapped.
+    fn flip_scope(&mut self, tool: AssistTool) {
+        match tool {
+            AssistTool::Wave => self.toggles.wave = !self.toggles.wave,
+            AssistTool::Parade => self.toggles.parade = !self.toggles.parade,
+            AssistTool::Histo => self.toggles.histo = !self.toggles.histo,
+            AssistTool::Vector => self.toggles.vector = !self.toggles.vector,
+            AssistTool::Lights => self.toggles.lights = !self.toggles.lights,
+            AssistTool::Nd => self.toggles.nd = !self.toggles.nd,
+            AssistTool::Audio => self.toggles.audio = !self.toggles.audio,
+            _ => {}
+        }
+    }
+
+    /// Whether the window should sample the picture for the plates.
+    pub fn scopes_wanted(&self) -> bool {
+        self.screen == Screen::Viewfinder && self.toggles.any_scope()
+    }
+
+    /// The scope options, as the sheets set them.
+    pub fn scope_options(&self) -> ScopeOptions {
+        self.scope_options
+    }
+
+    /// A fresh read of the picture. The lights and the ND chip are read from it by
+    /// the core here, once per sample rather than once per frame.
+    pub fn set_scope_samples(&mut self, samples: ScopeSamples) {
+        let (color_mode, iso) = self.color_axis();
+        if self.toggles.lights {
+            self.lights = LightsReading::from_core(
+                &samples,
+                color_mode,
+                iso,
+                self.scope_options.lights_compensation / 10.0,
+                Some(&self.lights),
+            );
+        }
+        if self.toggles.nd {
+            self.nd = NdReading::from_core(&samples, color_mode, iso);
+        }
+        self.scope_samples = Some(samples);
+        self.chrome_stale = true;
+    }
+
+    /// The axis for the body's colour mode and ISO, asked of the core once per change.
+    fn scope_scale(&mut self) -> ScopeScale {
+        let key = self.color_axis();
+        match &self.scope_scale {
+            Some((cached, scale)) if *cached == key => scale.clone(),
+            _ => {
+                let scale = ScopeScale::from_core(key.0, key.1);
+                self.scope_scale = Some((key, scale.clone()));
+                scale
+            }
+        }
+    }
+
+    /// Where a plate sits: where the operator dragged it, else its default place.
+    fn plate_origin(&self, tool: AssistTool, default: (f32, f32)) -> (f32, f32) {
+        self.plate_positions
+            .iter()
+            .find(|(parked, _, _)| *parked == tool)
+            .map_or(default, |(_, x, y)| (*x, *y))
+    }
+
+    fn fit_now(&self) -> opc_ui::Fit {
+        self.hud.fit.unwrap_or(opc_ui::Fit {
+            x: 0.0,
+            y: 0.0,
+            width: f64::from(self.window.0),
+            height: f64::from(self.window.1),
+        })
+    }
+
+    /// The plates to draw this frame, with their images rasterised.
+    fn plates(&mut self) -> (Vec<PlateState>, Vec<(String, Plate)>) {
+        let mut plates = Vec::new();
+        let mut images = Vec::new();
+        let toggles = self.toggles;
+        if self.screen != Screen::Viewfinder || !(toggles.any_scope() || toggles.audio) {
+            return (plates, images);
+        }
+        let fit = self.fit_now();
+        let scale = self.scope_scale();
+        let options = self.scope_options;
+        let (fx, fy, fw, fh) = (
+            fit.x as f32,
+            fit.y as f32,
+            fit.width as f32,
+            fit.height as f32,
+        );
+        let top = fy.max(56.0) + 92.0;
+        let bottom = (fy + fh).min(self.window.1 as f32 - 152.0);
+        let gap = 12.0;
+        let index_of = |tool: AssistTool| {
+            AssistTool::TOOLBAR
+                .iter()
+                .position(|t| *t == tool)
+                .unwrap_or(0)
+        };
+        let samples = self.scope_samples.clone().unwrap_or_default();
+        let mut image_plates: Vec<(AssistTool, (f32, f32), Plate)> = Vec::new();
+        let mut column_x = fx + gap;
+        if toggles.wave {
+            let plate = scopes::waveform(&samples, &scale, &options);
+            let default = (column_x, bottom - plate.height as f32 - gap);
+            column_x += plate.width as f32 + gap;
+            image_plates.push((AssistTool::Wave, default, plate));
+        }
+        if toggles.parade {
+            let plate = scopes::parade(&samples, &scale, &options);
+            let default = (column_x, bottom - plate.height as f32 - gap);
+            column_x += plate.width as f32 + gap;
+            image_plates.push((AssistTool::Parade, default, plate));
+        }
+        if toggles.vector {
+            let plate = scopes::vectorscope(&samples, &options);
+            let default = (column_x, bottom - plate.height as f32 - gap);
+            image_plates.push((AssistTool::Vector, default, plate));
+        }
+        let mut right_x = fx + fw - gap;
+        if toggles.histo {
+            let plate = scopes::histogram(&samples, &scale);
+            right_x -= plate.width as f32;
+            let default = (right_x, top);
+            right_x -= gap;
+            image_plates.push((AssistTool::Histo, default, plate));
+        }
+        if toggles.lights {
+            let plate = scopes::traffic_lights(&self.lights);
+            right_x -= plate.width as f32;
+            let default = (right_x, top);
+            image_plates.push((AssistTool::Lights, default, plate));
+        }
+        for (tool, default, plate) in image_plates {
+            let (x, y) = self.plate_origin(tool, default);
+            let name = tool.label().to_lowercase();
+            plates.push(PlateState {
+                tool_index: index_of(tool),
+                name: name.clone(),
+                title: tool.label().to_string(),
+                x,
+                y,
+                width: plate.width as f32,
+                height: plate.height as f32,
+                kind: PlateKind::Image,
+            });
+            images.push((name, plate));
+        }
+        if toggles.nd {
+            let text = self
+                .nd
+                .as_ref()
+                .map_or_else(|| "—".to_string(), |nd| nd.text(options.nd_notation));
+            let (x, y) = self.plate_origin(AssistTool::Nd, (fx + gap, top));
+            plates.push(PlateState {
+                tool_index: index_of(AssistTool::Nd),
+                name: "nd".to_string(),
+                title: "ND".to_string(),
+                x,
+                y,
+                width: 84.0,
+                height: 30.0,
+                kind: PlateKind::Text(text),
+            });
+        }
+        if toggles.audio {
+            let floor = scopes::audio_floor_db();
+            let norm = |db: f32| ((db - floor) / -floor).clamp(0.0, 1.0);
+            let meters = self
+                .hud
+                .status
+                .audio_meters
+                .map_or([floor; 4], |meters| meters.decibels());
+            let above_wave = if toggles.wave {
+                scopes::WAVEFORM_SIZE.1 as f32 + gap
+            } else {
+                0.0
+            };
+            let default = (fx + gap, bottom - 168.0 - gap - above_wave);
+            let (x, y) = self.plate_origin(AssistTool::Audio, default);
+            plates.push(PlateState {
+                tool_index: index_of(AssistTool::Audio),
+                name: "audio".to_string(),
+                title: "AUDIO".to_string(),
+                x,
+                y,
+                width: 28.0,
+                height: 168.0,
+                kind: PlateKind::Audio {
+                    left: norm(meters[0]),
+                    right: norm(meters[1]),
+                    left_peak: norm(meters[2]),
+                    right_peak: norm(meters[3]),
+                },
+            });
+        }
+        (plates, images)
+    }
+
+    /// A plate dragged to a new top-left, in window pixels.
+    fn park_plate(&mut self, tool: AssistTool, x: f32, y: f32) {
+        let x = x.clamp(0.0, (self.window.0 as f32 - 40.0).max(0.0));
+        let y = y.clamp(0.0, (self.window.1 as f32 - 40.0).max(0.0));
+        if let Some(slot) = self
+            .plate_positions
+            .iter_mut()
+            .find(|(parked, _, _)| *parked == tool)
+        {
+            slot.1 = x;
+            slot.2 = y;
+        } else {
+            self.plate_positions.push((tool, x, y));
+        }
+        self.chrome_stale = true;
+    }
+
+    /// Where a plate sits right now, for tests: `(x, y, width, height)`.
+    pub fn plate_rect(&mut self, tool: AssistTool) -> Option<(f32, f32, f32, f32)> {
+        let (plates, _) = self.plates();
+        plates
+            .into_iter()
+            .find(|plate| AssistTool::TOOLBAR[plate.tool_index] == tool)
+            .map(|plate| (plate.x, plate.y, plate.width, plate.height))
     }
 
     /// Carries out a chip tap on the open sheet.
@@ -985,6 +1248,40 @@ impl Shell {
             }
             Pick::GuideMask(on) => {
                 self.assists.guides.mask = on;
+                Vec::new()
+            }
+            Pick::WaveMode(mode) => {
+                self.scope_options.wave = mode;
+                Vec::new()
+            }
+            Pick::WaveGuide(which, on) => {
+                match which {
+                    0 => self.scope_options.wave_guides.0 = on,
+                    1 => self.scope_options.wave_guides.1 = on,
+                    _ => self.scope_options.wave_guides.2 = on,
+                }
+                Vec::new()
+            }
+            Pick::ParadeMode(mode) => {
+                self.scope_options.parade = mode;
+                Vec::new()
+            }
+            Pick::VectorGain(gain) => {
+                self.scope_options.vector_gain = gain as f32;
+                Vec::new()
+            }
+            Pick::Brightness(level) => {
+                self.scope_options.brightness = level;
+                Vec::new()
+            }
+            Pick::LightsCompensation(index) => {
+                if let Some((stops, _)) = LIGHTS_COMPENSATION.get(index as usize) {
+                    self.scope_options.lights_compensation = *stops;
+                }
+                Vec::new()
+            }
+            Pick::NdNotation(notation) => {
+                self.scope_options.nd_notation = notation;
                 Vec::new()
             }
             Pick::Wind(on) => self.audio_dsp_write(|blob| Command::AudioWind { on, blob }),
@@ -1593,6 +1890,11 @@ impl Shell {
                         self.toggle_sheet(SheetKind::Assist(*tool));
                     }
                 }
+                ChromeIntent::PlateMoved { tool, x, y } => {
+                    if let Some(tool) = AssistTool::TOOLBAR.get(tool) {
+                        self.park_plate(*tool, x, y);
+                    }
+                }
                 ChromeIntent::SheetClose => self.close_sheet(),
                 ChromeIntent::SheetTab(tab) => {
                     self.sheet_tab = tab;
@@ -2113,6 +2415,7 @@ impl Shell {
             let assist_bar = self.assist_bar.then(|| self.assist_chips());
             let format_label = self.format_label(now);
             let notice = self.notice(now);
+            let (plates, plate_images) = self.plates();
             let zoom_max = self.zoom_rules.max() as f32;
             let zoom_stops: Vec<f32> = self.zoom_rules.stops().iter().map(|s| *s as f32).collect();
             let move_text = self.move_text(now);
@@ -2130,6 +2433,9 @@ impl Shell {
                 .as_ref()
                 .map(|player| player.state(&self.library, self.toggles));
             let mut canvas = if let Some(cr) = self.chrome_renderer.as_mut() {
+                for (name, plate) in &plate_images {
+                    cr.set_plate(name, plate.width, plate.height, &plate.rgba);
+                }
                 let status = &self.hud.status;
                 let link_state = self.hud.connection_chip();
                 let zoom = self.controls.zoom();
@@ -2182,6 +2488,7 @@ impl Shell {
                     timecode,
                     overlays,
                     assist_bar,
+                    plates,
                     move_text,
                     sheet,
                     screen,

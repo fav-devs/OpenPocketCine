@@ -939,6 +939,126 @@ component AssistChipButton {
     }
 }
 
+// ── Scope plates ──────────────────────────────────────────────────────────────
+// Movable plates over the picture: a rasterised scope, the ND chip, or the audio
+// meters. A drag anywhere on the plate moves it; the shell keeps where it went.
+
+export struct PlateView {
+    tool: int,
+    title: string,
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    image: image,
+    has-image: bool,
+    /// 0 image, 1 text chip, 2 audio meters.
+    kind: int,
+    text: string,
+    left: float,
+    right: float,
+    left-peak: float,
+    right-peak: float,
+}
+
+component ScopePlate {
+    in property <PlateView> plate;
+    callback moved(length, length);
+
+    x: root.plate.x;
+    y: root.plate.y;
+    width: root.plate.w;
+    height: root.plate.h;
+
+    if root.plate.kind == 0: Rectangle {
+        border-radius: 8px;
+        clip: true;
+        background: #06090899;
+        Image {
+            x: 0; y: 0;
+            width: parent.width; height: parent.height;
+            source: root.plate.image;
+            image-rendering: pixelated;
+            visible: root.plate.has-image;
+        }
+        Text {
+            text: root.plate.title;
+            color: Pal.ink-dim;
+            font-family: Pal.font;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            x: 8px;
+            y: 7px;
+        }
+    }
+    if root.plate.kind == 1: Rectangle {
+        border-radius: 8px;
+        background: #000000b3;
+        border-width: 1px;
+        border-color: #ffffff1f;
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 6px;
+            alignment: center;
+            Text {
+                text: root.plate.title;
+                color: Pal.ink-dim;
+                font-family: Pal.font;
+                font-size: 10px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.plate.text;
+                color: Pal.ink;
+                font-family: Pal.font;
+                font-size: 13px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+        }
+    }
+    if root.plate.kind == 2: Rectangle {
+        border-radius: 6px;
+        background: #000000b3;
+        border-width: 1px;
+        border-color: #ffffff1f;
+        // Two bars, green to yellow at -18 dBFS to red at -6, with the peak tick.
+        for channel[i] in [root.plate.left, root.plate.right]: Rectangle {
+            x: 5px + i * 10px;
+            y: 6px;
+            width: 8px;
+            height: parent.height - 12px;
+            background: #ffffff14;
+            border-radius: 2px;
+            Rectangle {
+                x: 0;
+                y: parent.height * (1 - channel);
+                width: parent.width;
+                height: parent.height * channel;
+                border-radius: 2px;
+                background: channel > 0.9 ? Pal.rec : (channel > 0.7 ? Pal.warn : Pal.online);
+            }
+        }
+        for peak[i] in [root.plate.left-peak, root.plate.right-peak]: Rectangle {
+            x: 5px + i * 10px;
+            y: 6px + (parent.height - 12px) * (1 - peak) - 1px;
+            width: 8px;
+            height: 2px;
+            background: Pal.ink;
+        }
+    }
+    ta := TouchArea {
+        moved => {
+            if self.pressed {
+                root.moved(root.x + self.mouse-x - self.pressed-x, root.y + self.mouse-y - self.pressed-y);
+            }
+        }
+    }
+}
+
 component AssistBar {
     in property <[AssistChipView]> chips;
     callback tapped(int);
@@ -1724,6 +1844,7 @@ export component HudOverlay inherits Window {
     /// The assist toolbar under the top bar.
     in property <bool> assist-open: false;
     in property <[AssistChipView]> assist-chips: [];
+    in property <[PlateView]> plates: [];
     /// A programmed move's readout, shown in the top bar while a take runs.
     in property <string> move-text: "";
 
@@ -1815,6 +1936,7 @@ export component HudOverlay inherits Window {
     callback assist-bar-tapped();
     callback assist-tapped(int);
     callback assist-configure(int);
+    callback plate-moved(int, length, length);
 
     background: transparent;
 
@@ -1996,6 +2118,14 @@ export component HudOverlay inherits Window {
         mode-selected-changed(i) => { root.mode-selected-changed(i); }
         gimbal-moved(x, y) => { root.gimbal-moved(x, y); }
         gimbal-released => { root.gimbal-released(); }
+    }
+
+    if root.screen == 0: Rectangle {
+        x: 0; y: 0; width: parent.width; height: parent.height;
+        for plate in root.plates: ScopePlate {
+            plate: plate;
+            moved(nx, ny) => { root.plate-moved(plate.tool, nx, ny); }
+        }
     }
 
     if root.screen == 0 && root.countdown != "": CountdownPanel {
